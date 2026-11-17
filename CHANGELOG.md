@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 (preview)
+
+- Monthly trial-balance CSV import, account mappings, generated P&L, live reconciliation/review queue, period rollforward and JSON review packs.
+- Full retained review inputs and precise before/after comparison; embedded hashed support with immutable replacement versions.
+- Conservative cached source-row drilldown for direct keyed SQL projections.
+- Atomic range edits/copy/paste/fill, persisted formatting, bounded worksheet undo/redo, multi-sheet/cross-sheet formulas.
+- Real Chromium workflow acceptance, Linux server/desktop packaging scripts and native window-open smoke tooling.
+- Loopback-host/origin boundary; no claim of trusted reviewer authentication, locked ledger close or audit assurance.
+
+
 ## 0.2.0 (preview)
 
 - Explain a selected number through transitive worksheet references, spill anchors, structured tables and cached SQL query/result boundaries.

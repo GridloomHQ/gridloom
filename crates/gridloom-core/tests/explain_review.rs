@@ -176,10 +176,10 @@ fn range_spill_and_error_review_boundaries() {
     assert!(!wb.explain_cell("Sheet1", coord("F1")).unwrap().can_review);
     assert!(wb.record_review(request(&wb, "Sheet1", "F1")).is_err());
     assert!(!wb.explain_cell("Sheet1", coord("G1")).unwrap().can_review);
-    set(&mut wb, "H1", "=SUM(A1:A300)");
+    set(&mut wb, "H1", "=SUM(A1:A9000)");
     let partial = wb.explain_cell("Sheet1", coord("H1")).unwrap();
     assert!(!partial.can_review);
-    assert!(partial.nodes.len() <= 256);
+    assert!(partial.nodes.len() <= 8192);
     assert!(partial.warnings.iter().any(|w| w.contains("partial")));
 }
 
@@ -395,4 +395,169 @@ fn duplicate_source_cannot_relabel_existing_tables_or_bypass_refresh_guards() {
         .create_named_source("amounts", "db", "SELECT amount, id FROM amounts")
         .is_err());
     assert!(!wb.explain_cell("Sheet1", coord("E1")).unwrap().can_review);
+}
+
+#[test]
+fn retained_inputs_compare_exact_changes_and_survive_serialization() {
+    let mut wb = model();
+    let first = wb.record_review(request(&wb, "Sheet1", "C1")).unwrap();
+    assert_eq!(
+        first.input_snapshot.as_ref().unwrap().inputs["cell:A1"]["raw_input"],
+        "100"
+    );
+    set(&mut wb, "A1", "120");
+    let comparison = wb.compare_review(first.id).unwrap();
+    assert!(comparison
+        .changes
+        .iter()
+        .any(|c| c.path == "/inputs/cell:A1/raw_input"
+            && c.before == Some(serde_json::json!("100"))
+            && c.after == Some(serde_json::json!("120"))));
+    let second = wb.record_review(request(&wb, "Sheet1", "C1")).unwrap();
+    assert_eq!(
+        wb.compare_review_versions(first.id, second.id)
+            .unwrap()
+            .changes
+            .len(),
+        comparison.changes.len()
+    );
+    let encoded = serde_json::to_value(&first).unwrap();
+    let restored: gridloom_core::review::ReviewRecord =
+        serde_json::from_value(encoded.clone()).unwrap();
+    assert_eq!(
+        restored.input_snapshot.unwrap().inputs["cell:A1"]["raw_input"],
+        "100"
+    );
+    let mut legacy = encoded;
+    legacy.as_object_mut().unwrap().remove("input_snapshot");
+    legacy.as_object_mut().unwrap().remove("attachments");
+    let old: gridloom_core::review::ReviewRecord = serde_json::from_value(legacy).unwrap();
+    assert!(old.input_snapshot.is_none());
+}
+
+#[test]
+fn evidence_versions_embed_exact_bytes_and_validate_before_writing() {
+    use gridloom_core::review::EvidenceUpload;
+    let mut wb = model();
+    let upload = |bytes: &[u8], replaces| EvidenceUpload {
+        filename: "support.csv".into(),
+        media_type: "text/csv".into(),
+        bytes: bytes.into(),
+        replaces,
+    };
+    let first = wb
+        .record_review_with_attachments(
+            request(&wb, "Sheet1", "C1"),
+            vec![upload(b"amount\n100", None)],
+        )
+        .unwrap();
+    let prior = &first.attachments[0];
+    let second = wb
+        .record_review_with_attachments(
+            request(&wb, "Sheet1", "C1"),
+            vec![upload(b"amount\n120", Some(prior.id))],
+        )
+        .unwrap();
+    assert_eq!(second.attachments[0].version, 2);
+    assert_ne!(second.attachments[0].sha256, prior.sha256);
+    assert_eq!(wb.reviews[0].attachments[0].bytes, b"amount\n100");
+    assert!(wb
+        .compare_review_versions(first.id, second.id)
+        .unwrap()
+        .changes
+        .iter()
+        .any(|c| c.path.starts_with("/attachments/")));
+    let count = wb.reviews.len();
+    assert!(wb
+        .record_review_with_attachments(
+            request(&wb, "Sheet1", "C1"),
+            vec![upload(b"bad", Some(uuid::Uuid::new_v4()))]
+        )
+        .is_err());
+    assert_eq!(wb.reviews.len(), count);
+    let mut unsafe_upload = upload(b"bad", None);
+    unsafe_upload.filename = "../bad".into();
+    assert!(wb
+        .record_review_with_attachments(request(&wb, "Sheet1", "C1"), vec![unsafe_upload])
+        .is_err());
+    assert_eq!(wb.reviews.len(), count);
+}
+
+#[test]
+fn source_drilldown_requires_safe_primary_keys_and_retains_full_source_rows() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let db = rusqlite::Connection::open(file.path()).unwrap();
+    db.execute_batch("CREATE TABLE amounts(id INTEGER PRIMARY KEY, amount INTEGER); INSERT INTO amounts VALUES(1,10),(2,20)").unwrap();
+    let mut wb = Workbook::new();
+    wb.add_sqlite_connection("db", file.path()).unwrap();
+    wb.create_named_source("direct", "db", "SELECT id, amount FROM amounts")
+        .unwrap();
+    wb.insert_table("Sheet1", "Amounts", "direct", coord("A1"))
+        .unwrap();
+    set(&mut wb, "D1", "=SUM(Amounts[amount])");
+    let first = wb.record_review(request(&wb, "Sheet1", "D1")).unwrap();
+    let rows = wb.source_drilldown("direct", 0, 1).unwrap();
+    assert_eq!(rows.total_rows, 2);
+    assert_eq!(rows.rows.len(), 1);
+    assert_eq!(rows.rows[0].primary_key["id"], Value::Integer(1));
+    db.execute("UPDATE amounts SET amount=15 WHERE id=1", [])
+        .unwrap();
+    wb.refresh_source("direct").unwrap();
+    let comparison = wb.compare_review(first.id).unwrap();
+    assert!(comparison.changes.iter().any(|c| c
+        .path
+        .contains("/inputs/source:direct/last_result/rows/0/1")));
+    assert_eq!(
+        first.input_snapshot.unwrap().inputs["source:direct"]["last_result"]["rows"][0][1]["value"],
+        10
+    );
+    wb.create_named_source(
+        "aggregate",
+        "db",
+        "SELECT SUM(amount) AS amount FROM amounts",
+    )
+    .unwrap();
+    assert!(wb.source_drilldown("aggregate", 0, 100).is_err());
+}
+
+#[test]
+fn cross_sheet_review_captures_correct_inputs_and_stays_bound_after_save() {
+    use gridloom_core::review::EvidenceUpload;
+    let mut wb = Workbook::new();
+    wb.sheets
+        .insert("Prior Month".into(), Sheet::new("Prior Month".into()));
+    wb.set_cell("Prior Month", coord("A1"), "100".into())
+        .unwrap();
+    set(&mut wb, "A1", "200");
+    set(&mut wb, "B1", "=A1-'Prior Month'!A1");
+    let first = wb
+        .record_review_with_attachments(
+            request(&wb, "Sheet1", "B1"),
+            vec![EvidenceUpload {
+                filename: "evidence.txt".into(),
+                media_type: "text/plain".into(),
+                bytes: b"checked".to_vec(),
+                replaces: None,
+            }],
+        )
+        .unwrap();
+    let captured = first.input_snapshot.as_ref().unwrap();
+    assert_eq!(captured.inputs["cell:Prior Month!A1"]["raw_input"], "100");
+    assert!(captured
+        .nodes
+        .iter()
+        .any(|n| n.id == "cell:Prior Month!A1" && n.sheet_name.as_deref() == Some("Prior Month")));
+    let path = tempfile::NamedTempFile::new().unwrap();
+    wb.save_to_file(path.path()).unwrap();
+    let mut wb = Workbook::open_from_file(path.path()).unwrap();
+    assert_eq!(wb.reviews[0].attachments[0].bytes, b"checked");
+    wb.set_cell("Prior Month", coord("A1"), "120".into())
+        .unwrap();
+    assert!(wb.review_history()[0].invalidated);
+    assert!(wb
+        .compare_review(first.id)
+        .unwrap()
+        .changes
+        .iter()
+        .any(|c| c.path == "/inputs/cell:Prior Month!A1/raw_input"));
 }

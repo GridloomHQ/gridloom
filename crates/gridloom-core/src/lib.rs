@@ -1,5 +1,6 @@
 pub mod ast;
 pub mod chart;
+pub mod close;
 pub mod db;
 pub mod depgraph;
 pub mod error;
@@ -10,6 +11,7 @@ pub mod parser;
 pub mod pivot;
 pub mod review;
 pub mod spill;
+pub mod spreadsheet;
 pub mod table;
 pub mod value;
 pub mod virtual_view;

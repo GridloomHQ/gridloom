@@ -10,6 +10,13 @@ use crate::error::CellError;
 use crate::value::Value;
 
 pub trait EvaluationContext {
+    fn evaluate_on_sheet(
+        &self,
+        _sheet: &str,
+        _expr: &crate::ast::Expr,
+    ) -> Result<Value, CellError> {
+        Err(CellError::Ref)
+    }
     fn get_cell_value(&self, coord: crate::value::CellCoord) -> Result<Value, CellError>;
     fn get_spill_values(&self, coord: crate::value::CellCoord) -> Result<Value, CellError> {
         self.get_cell_value(coord)

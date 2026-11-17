@@ -28,6 +28,8 @@ pub struct CellData {
     pub evaluated_value: Value,
     pub number_format: Option<String>,
     pub is_dirty: bool,
+    #[serde(default)]
+    pub style: crate::spreadsheet::CellStyle,
 }
 
 impl CellData {
@@ -50,6 +52,7 @@ impl CellData {
             evaluated_value,
             number_format: None,
             is_dirty: is_formula,
+            style: Default::default(),
         }
     }
 }
@@ -143,15 +146,19 @@ pub struct Workbook {
     pub charts: HashMap<String, ChartDefinition>,
     pub dep_graph: DependencyGraph,
     pub reviews: Vec<ReviewRecord>,
+    pub close_periods: Vec<crate::close::ClosePeriod>,
     pub stale_sources: BTreeSet<String>,
     pub stale_calculation_sheets: BTreeSet<String>,
     pub file_path: Option<PathBuf>,
+    pub edit_history: crate::spreadsheet::EditHistory,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SerializedWorkbook {
     #[serde(default)]
     pub reviews: Vec<ReviewRecord>,
+    #[serde(default)]
+    pub close_periods: Vec<crate::close::ClosePeriod>,
     #[serde(default)]
     pub stale_sources: BTreeSet<String>,
     #[serde(default)]
@@ -182,9 +189,11 @@ impl Workbook {
             charts: HashMap::new(),
             dep_graph: DependencyGraph::new(),
             reviews: Vec::new(),
+            close_periods: Vec::new(),
             stale_sources: BTreeSet::new(),
             stale_calculation_sheets: BTreeSet::new(),
             file_path: None,
+            edit_history: Default::default(),
         }
     }
 
@@ -260,6 +269,7 @@ impl Workbook {
         conn_name: &str,
         sql: &str,
     ) -> Result<NamedSource, CellError> {
+        self.clear_edit_history();
         // Replacing a source would require atomic schema/range/collision migration for every table.
         // Keep source creation distinct from refresh so changed column order cannot silently relabel data.
         if self.named_sources.contains_key(name) {
@@ -304,6 +314,7 @@ impl Workbook {
     }
 
     pub fn refresh_source(&mut self, name: &str) -> Result<(), CellError> {
+        self.edit_history = Default::default();
         let source = self.named_sources.get(name).ok_or(CellError::Name)?;
         let conn = self
             .connections
@@ -362,6 +373,7 @@ impl Workbook {
         source_name: &str,
         anchor: CellCoord,
     ) -> Result<WorksheetTable, CellError> {
+        self.clear_edit_history();
         let source = self
             .named_sources
             .get(source_name)
@@ -410,82 +422,61 @@ impl Workbook {
         coord: CellCoord,
         raw_input: String,
     ) -> Result<(), CellError> {
-        let original_sheet = self.sheets.get(sheet_name).ok_or(CellError::Ref)?.clone();
-        let original_graph = self.dep_graph.clone();
-        let sheet = self.sheets.get_mut(sheet_name).ok_or(CellError::Ref)?;
-        if sheet
-            .tables
-            .values()
-            .any(|table| table.range.contains(coord))
-        {
-            return Err(CellError::Ref);
-        }
-        if sheet
-            .spills
-            .get_spill_at(&coord)
-            .is_some_and(|spill| spill.anchor != coord)
-        {
-            return Err(CellError::Spill);
-        }
-        sheet.spills.clear_anchor(&coord);
-        let cell_data = CellData::new(coord, raw_input);
-        sheet.cells.insert(coord.to_a1(), cell_data);
-
-        // Invalidate in dependency graph
-        let cell_node = DepNode::Cell(coord);
-        self.dep_graph.clear_dependencies(&cell_node);
-
-        // Recalculate atomically so rejected edits preserve both model and sign-offs.
-        if let Err(error) = self.recalculate(sheet_name) {
-            self.sheets.insert(sheet_name.into(), original_sheet);
-            self.dep_graph = original_graph;
-            return Err(error);
-        }
-        self.invalidate_changed_reviews();
-        Ok(())
+        self.edit_range(sheet_name, coord, vec![vec![raw_input]])
     }
 
     pub fn recalculate(&mut self, sheet_name: &str) -> Result<(), CellError> {
-        // Build dependencies before evaluating, including the anchors behind visible spill children.
-        // A changed spill shape can reveal new dependencies; repeat until its layout stabilizes.
+        if !self.sheets.contains_key(sheet_name) {
+            return Err(CellError::Ref);
+        }
         let formulas: Vec<_> = self
             .sheets
-            .get(sheet_name)
-            .ok_or(CellError::Ref)?
-            .cells
-            .values()
-            .filter_map(|c| c.formula.as_ref().map(|f| (c.coord, f.clone())))
+            .iter()
+            .flat_map(|(name, sheet)| {
+                sheet.cells.values().filter_map(|c| {
+                    c.formula
+                        .as_ref()
+                        .map(|f| (name.clone(), c.coord, f.clone()))
+                })
+            })
             .collect();
         for _ in 0..=formulas.len() {
-            let before: HashMap<_, _> = self.sheets[sheet_name]
-                .spills
-                .active_spills
-                .iter()
-                .map(|(a, s)| (*a, s.range))
-                .collect();
+            let layout = |sheets: &HashMap<String, Sheet>| -> HashMap<_, _> {
+                sheets
+                    .iter()
+                    .flat_map(|(name, s)| {
+                        s.spills
+                            .active_spills
+                            .iter()
+                            .map(move |(a, s)| ((name.clone(), *a), s.range))
+                    })
+                    .collect()
+            };
+            let before = layout(&self.sheets);
             let generation = self.dep_graph.generation;
             self.dep_graph = DependencyGraph::new();
             self.dep_graph.generation = generation;
-            for (coord, formula) in &formulas {
+            for (name, coord, formula) in &formulas {
                 if let Ok(ast) = parse_formula(formula) {
-                    self.extract_ast_dependencies(sheet_name, &DepNode::Cell(*coord), &ast)?;
+                    self.extract_ast_dependencies(
+                        name,
+                        &DepNode::SheetCell(name.clone(), *coord),
+                        &ast,
+                    )?;
                 }
             }
-            let nodes: Vec<_> = formulas.iter().map(|(c, _)| DepNode::Cell(*c)).collect();
-            for node in self.dep_graph.get_recalculation_order(&nodes)? {
-                if let DepNode::Cell(coord) = node {
-                    self.evaluate_single_cell(sheet_name, coord)?;
-                }
-            }
-            let after: HashMap<_, _> = self.sheets[sheet_name]
-                .spills
-                .active_spills
+            let nodes: Vec<_> = formulas
                 .iter()
-                .map(|(a, s)| (*a, s.range))
+                .map(|(n, c, _)| DepNode::SheetCell(n.clone(), *c))
                 .collect();
-            if before == after {
+            for node in self.dep_graph.get_recalculation_order(&nodes)? {
+                if let DepNode::SheetCell(name, coord) = node {
+                    self.evaluate_single_cell(&name, coord)?;
+                }
+            }
+            if before == layout(&self.sheets) {
                 self.dep_graph.generation += 1;
-                self.stale_calculation_sheets.remove(sheet_name);
+                self.stale_calculation_sheets.clear();
                 self.invalidate_changed_reviews();
                 return Ok(());
             }
@@ -563,10 +554,17 @@ impl Workbook {
     ) -> Result<(), CellError> {
         use crate::ast::Expr;
         match expr {
+            Expr::SheetRef { sheet, expr } => self.extract_ast_dependencies(sheet, node, expr)?,
             Expr::CellRef(coord) => {
                 self.add_cell_dependency(sheet_name, node, *coord)?;
             }
             Expr::RangeRef(range) => {
+                if (range.end_row as u64 - range.start_row as u64 + 1)
+                    * (range.end_col as u64 - range.start_col as u64 + 1)
+                    > 100_000
+                {
+                    return Err(CellError::Ref);
+                }
                 for r in range.start_row..=range.end_row {
                     for c in range.start_col..=range.end_col {
                         self.add_cell_dependency(sheet_name, node, CellCoord::new(r, c))?;
@@ -575,7 +573,7 @@ impl Workbook {
             }
             Expr::SpillRef(coord) => {
                 self.dep_graph
-                    .add_dependency(node.clone(), DepNode::Cell(*coord))?;
+                    .add_dependency(node.clone(), DepNode::SheetCell(sheet_name.into(), *coord))?;
             }
             Expr::StructuredRef(sref) => {
                 self.dep_graph
@@ -609,13 +607,16 @@ impl Workbook {
         node: &DepNode,
         coord: CellCoord,
     ) -> Result<(), CellError> {
-        let anchor = self.sheets[sheet_name]
+        let anchor = self
+            .sheets
+            .get(sheet_name)
+            .ok_or(CellError::Ref)?
             .spills
             .get_spill_at(&coord)
             .map(|s| s.anchor)
             .unwrap_or(coord);
         self.dep_graph
-            .add_dependency(node.clone(), DepNode::Cell(anchor))
+            .add_dependency(node.clone(), DepNode::SheetCell(sheet_name.into(), anchor))
     }
 
     pub fn get_viewport(&self, req: &ViewportRequest) -> Result<ViewportResponse, CellError> {
@@ -650,6 +651,8 @@ impl Workbook {
                         cells_data.insert(
                             a1.clone(),
                             CellRenderData {
+                                raw_input: None,
+                                style: Default::default(),
                                 coord,
                                 display_text: col_name.clone(),
                                 raw_value: Value::Text(col_name),
@@ -710,6 +713,8 @@ impl Workbook {
                                     cells_data.insert(
                                         a1.clone(),
                                         CellRenderData {
+                                            raw_input: None,
+                                            style: Default::default(),
                                             coord,
                                             display_text: val.to_string_repr(),
                                             raw_value: val,
@@ -746,6 +751,8 @@ impl Workbook {
                                 cells_data.insert(
                                     a1.clone(),
                                     CellRenderData {
+                                        raw_input: None,
+                                        style: Default::default(),
                                         coord,
                                         display_text: val.to_string_repr(),
                                         raw_value: val,
@@ -778,8 +785,13 @@ impl Workbook {
                     cells_data.insert(
                         a1,
                         CellRenderData {
+                            raw_input: Some(cell.raw_input.clone()),
+                            style: cell.style.clone(),
                             coord,
-                            display_text: visible_value.to_string_repr(),
+                            display_text: crate::spreadsheet::format_value(
+                                &visible_value,
+                                cell.number_format.as_deref(),
+                            ),
                             raw_value: visible_value,
                             formula: cell.formula.clone(),
                             number_format: cell.number_format.clone(),
@@ -882,6 +894,7 @@ impl Workbook {
         &mut self,
         connection_name: &str,
     ) -> Result<crate::writeback::AuditRecord, CellError> {
+        self.edit_history = Default::default();
         let conn = self
             .connections
             .get(connection_name)
@@ -921,6 +934,7 @@ impl Workbook {
 
         let serialized = SerializedWorkbook {
             reviews: self.reviews.clone(),
+            close_periods: self.close_periods.clone(),
             stale_sources: self.stale_sources.clone(),
             stale_calculation_sheets: self.stale_calculation_sheets.clone(),
             sheets: self.sheets.clone(),
@@ -969,10 +983,12 @@ impl Workbook {
             pivots: serialized.pivots,
             charts: serialized.charts,
             reviews: serialized.reviews,
+            close_periods: serialized.close_periods,
             stale_sources: serialized.stale_sources,
             stale_calculation_sheets: serialized.stale_calculation_sheets,
             dep_graph: DependencyGraph::new(),
             file_path: Some(p),
+            edit_history: Default::default(),
         };
 
         // Reconnect active database connections
@@ -1012,6 +1028,18 @@ pub struct WorkbookEvalContext<'a> {
 }
 
 impl<'a> EvaluationContext for WorkbookEvalContext<'a> {
+    fn evaluate_on_sheet(&self, sheet: &str, expr: &crate::ast::Expr) -> Result<Value, CellError> {
+        if !self.workbook.sheets.contains_key(sheet) {
+            return Err(CellError::Ref);
+        }
+        let ctx = WorkbookEvalContext {
+            workbook: self.workbook,
+            sheet_name: sheet,
+            current_coord: self.current_coord,
+        };
+        evaluate_expr(expr, &ctx)
+    }
+
     fn get_cell_value(&self, coord: CellCoord) -> Result<Value, CellError> {
         let sheet = self
             .workbook
@@ -1071,6 +1099,12 @@ impl<'a> EvaluationContext for WorkbookEvalContext<'a> {
     }
 
     fn get_range_values(&self, range: CellRange) -> Result<Value, CellError> {
+        if (range.end_row as u64 - range.start_row as u64 + 1)
+            * (range.end_col as u64 - range.start_col as u64 + 1)
+            > 100_000
+        {
+            return Err(CellError::Ref);
+        }
         let mut rows = Vec::new();
         for r in range.start_row..=range.end_row {
             let mut row = Vec::new();

@@ -38,6 +38,10 @@ pub struct StructuredRef {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Expr {
     Literal(Value),
+    SheetRef {
+        sheet: String,
+        expr: Box<Expr>,
+    },
     CellRef(CellCoord),
     RangeRef(CellRange),
     SpillRef(CellCoord), // A1#

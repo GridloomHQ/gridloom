@@ -1,4 +1,5 @@
 import {
+  CellCoord, CellRange, CellStyle, EvidenceUpload, ReviewComparison, SourceDrilldown, ClosePeriod, CloseStatus,
   AuditRecord,
   CellExplanation,
   ReviewRecord,
@@ -22,6 +23,7 @@ import {
 } from './types';
 
 const BASE_URL = '';
+const wireRange = (range: CellRange) => ({ start_row: range.start.row, start_col: range.start.col, end_row: range.end.row, end_col: range.end.col });
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${url}`, {
@@ -39,6 +41,27 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  addSheet: (name: string) => fetchJson<{status: string}>('/api/sheets', { method: 'POST', body: JSON.stringify({name}) }),
+  selectSheet: (name: string) => fetchJson<{status: string}>('/api/sheets/select', { method: 'POST', body: JSON.stringify({name}) }),
+  renameSheet: (old_name: string, new_name: string) => fetchJson<{status: string}>('/api/sheets/rename', { method: 'POST', body: JSON.stringify({old_name,new_name}) }),
+  editRange: (sheet_name: string, row: number, col: number, values: string[][]) => fetchJson<{status: string}>('/api/ranges/edit', { method: 'POST', body: JSON.stringify({sheet_name,row,col,values}) }),
+  captureRange: (sheet_name:string, range:CellRange) => fetchJson<{values:string[][];snapshot:string}>('/api/ranges/capture',{method:'POST',body:JSON.stringify({sheet_name,range:wireRange(range)})}),
+  readRange: (sheet_name: string, range: CellRange) => fetchJson<string[][]>('/api/ranges/read', { method: 'POST', body: JSON.stringify({sheet_name,range:wireRange(range)}) }),
+  formatRangeAttribute: (sheet_name: string, range: CellRange, attribute: string, value: string) => fetchJson<{status: string}>('/api/ranges/format-attribute', {method:'POST', body:JSON.stringify({sheet_name,range:wireRange(range),attribute,value})}),
+  formatRange: (sheet_name: string, range: CellRange, style: CellStyle) => fetchJson<{status: string}>('/api/ranges/format', { method: 'POST', body: JSON.stringify({sheet_name,range:wireRange(range),style}) }),
+  copyRange: (sheet_name: string, range: CellRange, target_sheet: string, target: CellCoord, expected_values?: string[][], expected_snapshot?: string) => fetchJson<{status: string}>('/api/ranges/copy', { method: 'POST', body: JSON.stringify({sheet_name,range:wireRange(range),target_sheet,target,expected_values,expected_snapshot}) }),
+  fillRange: (sheet_name: string, source: CellRange, target: CellRange) => fetchJson<{status: string}>('/api/ranges/fill', { method: 'POST', body: JSON.stringify({sheet_name,source:wireRange(source),target:wireRange(target)}) }),
+  undo: () => fetchJson<{status: string}>('/api/history/undo', {method:'POST'}),
+  redo: () => fetchJson<{status: string}>('/api/history/redo', {method:'POST'}),
+  listClosePeriods: () => fetchJson<ClosePeriod[]>('/api/close/periods'),
+  importTrialBalance: (request: {period:string,csv:string,mappings?:Record<string,string>}) => fetchJson<ClosePeriod>('/api/close/import', {method:'POST',body:JSON.stringify(request)}),
+  mapCloseAccounts: (request: {period_id:string,mappings:Record<string,string>}) => fetchJson<ClosePeriod>('/api/close/map', {method:'POST',body:JSON.stringify(request)}),
+  getCloseStatus: (id: string) => fetchJson<CloseStatus>(`/api/close/${encodeURIComponent(id)}/status`),
+  rollforwardClose: (request: {source_period_id:string,period:string,csv:string}) => fetchJson<ClosePeriod>('/api/close/rollforward', {method:'POST',body:JSON.stringify(request)}),
+  exportReviewPack: (id: string) => fetchJson<Record<string, unknown>>(`/api/close/${encodeURIComponent(id)}/pack`),
+  recordAttachedReview: (request: {review:ReviewInput,attachments:EvidenceUpload[]}) => fetchJson<ReviewRecord>('/api/reviews/attached', {method:'POST',body:JSON.stringify(request)}),
+  getReviewComparison: (id: string, after?: string) => fetchJson<ReviewComparison>(`/api/reviews/${encodeURIComponent(id)}/compare${after ? `?after=${encodeURIComponent(after)}` : ''}`),
+  getSourceDrilldown: (name: string, offset = 0, limit = 50) => fetchJson<SourceDrilldown>(`/api/sources/${encodeURIComponent(name)}/drilldown?offset=${offset}&limit=${limit}`),
   explainCell: (sheet_name: string, row: number, col: number) =>
     fetchJson<CellExplanation>('/api/cells/explain', { method: 'POST', body: JSON.stringify({ sheet_name, row, col }) }),
   getReviews: () => fetchJson<ReviewRecord[]>('/api/reviews'),

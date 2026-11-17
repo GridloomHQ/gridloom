@@ -7,6 +7,7 @@ use std::str::Chars;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
+    Sheet(String),
     Number(Decimal),
     StringLiteral(String),
     Boolean(bool),
@@ -112,6 +113,7 @@ impl<'a> Lexer<'a> {
                 }
             }
             ':' => Ok(Token::Colon),
+            '\'' => self.lex_sheet_name(),
             '"' => self.lex_string(),
             '0'..='9' => self.lex_number(ch),
             'a'..='z' | 'A'..='Z' | '_' | '$' => self.lex_ident_or_ref(ch),
@@ -130,6 +132,25 @@ impl<'a> Lexer<'a> {
             }
             _ => Err(CellError::Name),
         }
+    }
+
+    fn lex_sheet_name(&mut self) -> Result<Token, CellError> {
+        let mut name = String::new();
+        while let Some(ch) = self.chars.next() {
+            if ch == '\'' {
+                if self.chars.peek() == Some(&'\'') {
+                    self.chars.next();
+                    name.push('\'');
+                } else if self.chars.next() == Some('!') {
+                    return Ok(Token::Sheet(name));
+                } else {
+                    return Err(CellError::Ref);
+                }
+            } else {
+                name.push(ch);
+            }
+        }
+        Err(CellError::Ref)
     }
 
     fn lex_string(&mut self) -> Result<Token, CellError> {
@@ -185,6 +206,10 @@ impl<'a> Lexer<'a> {
             }
         }
 
+        if self.chars.peek() == Some(&'!') {
+            self.chars.next();
+            return Ok(Token::Sheet(s));
+        }
         // Check for structured reference: TableName[Column]
         if let Some(&'[') = self.chars.peek() {
             self.chars.next(); // consume '['
@@ -270,11 +295,17 @@ fn parse_structured_ref(table_name: &str, content: &str) -> Result<StructuredRef
         trimmed[1..].trim()
     } else if trimmed.starts_with("[#All]") {
         include_headers = true;
-        let rest = trimmed["[#All]".len()..].trim().trim_start_matches(',').trim();
+        let rest = trimmed["[#All]".len()..]
+            .trim()
+            .trim_start_matches(',')
+            .trim();
         strip_brackets(rest)
     } else if trimmed.starts_with("[#Totals]") {
         include_totals = true;
-        let rest = trimmed["[#Totals]".len()..].trim().trim_start_matches(',').trim();
+        let rest = trimmed["[#Totals]".len()..]
+            .trim()
+            .trim_start_matches(',')
+            .trim();
         strip_brackets(rest)
     } else {
         strip_brackets(trimmed)
@@ -496,6 +527,22 @@ impl<'a> Parser<'a> {
 
     fn parse_primary(&mut self) -> Result<Expr, CellError> {
         match self.peek() {
+            Token::Sheet(_) => {
+                let Token::Sheet(sheet) = self.next() else {
+                    unreachable!()
+                };
+                let expr = self.parse_primary()?;
+                if !matches!(
+                    expr,
+                    Expr::CellRef(_) | Expr::RangeRef(_) | Expr::SpillRef(_)
+                ) {
+                    return Err(CellError::Ref);
+                }
+                Ok(Expr::SheetRef {
+                    sheet,
+                    expr: Box::new(expr),
+                })
+            }
             Token::Number(_) => {
                 if let Token::Number(d) = self.next() {
                     Ok(Expr::Literal(Value::Decimal(d)))
@@ -632,10 +679,16 @@ mod tests {
     fn test_parse_arithmetic() {
         let expr = parse_formula("=1 + 2 * 3").unwrap();
         match expr {
-            Expr::Binary { op: BinaryOp::Add, left, right } => {
+            Expr::Binary {
+                op: BinaryOp::Add,
+                left,
+                right,
+            } => {
                 assert_eq!(*left, Expr::Literal(Value::Decimal(Decimal::from(1))));
                 match *right {
-                    Expr::Binary { op: BinaryOp::Mul, .. } => {}
+                    Expr::Binary {
+                        op: BinaryOp::Mul, ..
+                    } => {}
                     _ => panic!("Expected multiplication on right"),
                 }
             }
@@ -661,16 +714,18 @@ mod tests {
     fn test_parse_structured_ref() {
         let expr = parse_formula("=Invoices[Amount] * 1.05").unwrap();
         match expr {
-            Expr::Binary { op: BinaryOp::Mul, left, .. } => {
-                match *left {
-                    Expr::StructuredRef(sref) => {
-                        assert_eq!(sref.table_name, "Invoices");
-                        assert_eq!(sref.column_name, "Amount");
-                        assert!(!sref.is_row_relative);
-                    }
-                    _ => panic!("Expected structured ref"),
+            Expr::Binary {
+                op: BinaryOp::Mul,
+                left,
+                ..
+            } => match *left {
+                Expr::StructuredRef(sref) => {
+                    assert_eq!(sref.table_name, "Invoices");
+                    assert_eq!(sref.column_name, "Amount");
+                    assert!(!sref.is_row_relative);
                 }
-            }
+                _ => panic!("Expected structured ref"),
+            },
             _ => panic!("Expected binary op"),
         }
     }

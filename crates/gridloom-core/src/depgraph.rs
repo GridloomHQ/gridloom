@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DepNode {
     Cell(CellCoord),
+    SheetCell(String, CellCoord),
     Range(CellRange),
     Table(String),
     Source(String),
@@ -58,10 +59,7 @@ impl DependencyGraph {
             .entry(node.clone())
             .or_default()
             .insert(depends_on.clone());
-        self.dependents
-            .entry(depends_on)
-            .or_default()
-            .insert(node);
+        self.dependents.entry(depends_on).or_default().insert(node);
 
         Ok(())
     }
@@ -89,7 +87,10 @@ impl DependencyGraph {
     }
 
     /// Finds all downstream dependents that need recalculation when `dirty_roots` change
-    pub fn get_recalculation_order(&self, dirty_roots: &[DepNode]) -> Result<Vec<DepNode>, CellError> {
+    pub fn get_recalculation_order(
+        &self,
+        dirty_roots: &[DepNode],
+    ) -> Result<Vec<DepNode>, CellError> {
         // Collect all affected nodes
         let mut affected = HashSet::new();
         let mut queue = VecDeque::new();

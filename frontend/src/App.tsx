@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { MonthlyClosePanel } from './components/MonthlyClosePanel';
+import { normalizedRange, encodeTsv, decodeTsv, GridRange } from './utils/selection';
+import { displayValue } from './utils/values';
 import { ExplainReviewPanel } from './components/ExplainReviewPanel';
 import { Toolbar } from './components/Toolbar';
 import { FormulaBar } from './components/FormulaBar';
@@ -17,14 +20,26 @@ import { parseEdit } from './utils/values';
 import { coordToA1 } from './utils/coords';
 
 export const App: React.FC = () => {
+  const [isCloseOpen, setIsCloseOpen] = useState(false);
+  const [sheets, setSheets] = useState<string[]>(['Sheet1']);
+  const [anchor, setAnchor] = useState({row: 0, col: 0});
+  const [busy, setBusy] = useState(false);
+  const mutationLock = useRef(false);
+  const viewportSequence = useRef(0);
+  const metadataSequence = useRef(0);
+  const clipboard = useRef<{text:string;values:string[][];snapshot:string;sheet:string;range:GridRange} | null>(null);
+  const [copyData, setCopyData] = useState<{text:string;values:string[][];snapshot:string;key:string} | null>(null);
   const reviewDrafts = useRef(new Map<string, ReviewDraft>());
   const [isExplainOpen, setIsExplainOpen] = useState(false);
   const [reviewRevision, setReviewRevision] = useState(0);
   const [workbookEpoch, setWorkbookEpoch] = useState(0);
   const [sheetName, setSheetName] = useState('Sheet1');
+  const activeSheetRef = useRef(sheetName);
+  activeSheetRef.current = sheetName;
   const [selectedRow, setSelectedRow] = useState(0);
   const [selectedCol, setSelectedCol] = useState(0);
-  const [viewport, setViewport] = useState<ViewportResponse | null>(null);
+  const [storedViewport, setViewport] = useState<ViewportResponse | null>(null);
+  const viewport = storedViewport?.sheet_name === sheetName ? storedViewport : null;
   const [stagedCount, setStagedCount] = useState(0);
   const [tables, setTables] = useState<WorksheetTable[]>([]);
 
@@ -53,13 +68,16 @@ export const App: React.FC = () => {
 
   // Load workbook tables & staged patches count
   const refreshMetadata = useCallback(async () => {
+    const request=++metadataSequence.current;
     try {
       const [wb, staged] = await Promise.all([
         api.getWorkbook().catch(() => null),
         api.getStaged().catch(() => []),
       ]);
+      if(request!==metadataSequence.current)return;
       if (wb) {
         setSheetName(wb.active_sheet);
+        setSheets(wb.sheets.map(s => s.name));
         setTables(wb.sheets.find(s => s.name === wb.active_sheet)?.tables ?? []);
       }
       setStagedCount(staged.length);
@@ -72,8 +90,9 @@ export const App: React.FC = () => {
   // Fetch viewport cells
   const fetchViewportData = useCallback(async (startR: number, startC: number, endR: number, endC: number) => {
     try {
+      const request = ++viewportSequence.current;
       const data = await api.getViewport(sheetName, startR, startC, endR, endC, 5);
-      setViewport(data);
+      if (request === viewportSequence.current && data.sheet_name === activeSheetRef.current) setViewport(data);
     } catch (err: any) {
       console.error('Failed to fetch viewport:', err);
     }
@@ -91,6 +110,7 @@ export const App: React.FC = () => {
   }, [fetchViewportData]);
 
   const handleCommitCell = async (row: number, col: number, rawInput: string) => {
+    if(mutationLock.current)return;mutationLock.current=true;setBusy(true);clipboard.current=null;
     try {
       setStatusMsg(`Setting ${coordToA1(row, col)}...`);
       const key = coordToA1(row, col);
@@ -151,27 +171,72 @@ export const App: React.FC = () => {
       fetchViewportData(visibleBounds.startRow, visibleBounds.startCol, visibleBounds.endRow, visibleBounds.endCol);
     } catch (err: any) {
       setStatusMsg(`Error: ${err.message}`);
-    }
+    } finally {mutationLock.current=false;setBusy(false);}
   };
 
-  const handleApplyFormat = async (format: string) => {
-    const key = coordToA1(selectedRow, selectedCol);
-    const cell = viewport?.cells[key];
-    if (cell && cell.formula) {
-      await api.setCell(sheetName, selectedRow, selectedCol, cell.formula);
-      fetchViewportData(visibleBounds.startRow, visibleBounds.startCol, visibleBounds.endRow, visibleBounds.endCol);
-    }
+  const selection = normalizedRange(anchor, {row:selectedRow, col:selectedCol});
+  const rangeKey = `${sheetName}:${anchor.row}:${anchor.col}:${selectedRow}:${selectedCol}:${reviewRevision}`;
+  useEffect(() => {
+    let cancelled = false;
+    setCopyData(null);
+    const count=(selection.end.row-selection.start.row+1)*(selection.end.col-selection.start.col+1);
+    if(count>10000)return;
+    api.captureRange(sheetName,selection).then(({values:rows,snapshot})=>{
+      if(cancelled)return;
+      setCopyData({text:encodeTsv(rows),values:rows,snapshot,key:rangeKey});
+    }).catch(()=>{});
+    return ()=>{cancelled=true;};
+  },[rangeKey]);
+  const selectCell = (r:number,c:number,extend=false) => {
+    setSelectedRow(r);setSelectedCol(c);if(!extend)setAnchor({row:r,col:c});
   };
+  const mutate = async (label:string, operation:()=>Promise<unknown>, preserveClipboard=false) => {
+    if(mutationLock.current)return;
+    mutationLock.current=true;setBusy(true);
+    try {
+      await operation(); if(!preserveClipboard)clipboard.current=null;
+      await refreshMetadata();
+      await fetchViewportData(visibleBounds.startRow,visibleBounds.startCol,visibleBounds.endRow,visibleBounds.endCol);
+      setStatusMsg(label);
+    } catch(error:any){setStatusMsg(`Error: ${error.message}`);}
+    finally{mutationLock.current=false;setBusy(false);}
+  };
+  const handleApplyFormat = (format:string) => {
+    const style=viewport?.cells[coordToA1(selectedRow,selectedCol)]?.style ?? {bold:false,italic:false,fill:null,number_format:null};
+    let attribute: string, value: string;
+    if(format==='Bold'){attribute='bold';value=String(!style.bold);}
+    else if(format==='Italic'){attribute='italic';value=String(!style.italic);}
+    else if(format.startsWith('Fill:')){attribute='fill';value=format.slice(5);}
+    else {attribute='number_format';value=format.toLowerCase();}
+    void mutate('Formatted selection',()=>api.formatRangeAttribute(sheetName,selection,attribute,value));
+  };
+  const handleCopy = (event:React.ClipboardEvent) => {
+    event.preventDefault();
+    if(copyData===null || copyData.key !== rangeKey){setStatusMsg('Selection is loading or exceeds 10,000 cells. Try copying again.');return;}
+    event.clipboardData.setData('text/plain',copyData.text);
+    clipboard.current={...copyData,sheet:sheetName,range:selection};
+    setStatusMsg('Copied selection. Paste into a destination cell.');
+  };
+  const pasteText = (text:string) => {
+    const copied=clipboard.current;
+    void mutate('Pasted selection',()=>copied?.text===text
+      ?api.copyRange(copied.sheet,copied.range,sheetName,{row:selectedRow,col:selectedCol},copied.values,copied.snapshot)
+      :api.editRange(sheetName,selectedRow,selectedCol,decodeTsv(text)),true);
+  };
+  const handlePaste = (event:React.ClipboardEvent) => {event.preventDefault();pasteText(event.clipboardData.getData('text/plain'));};
+  const handleFillDown = () => void mutate('Filled selection down',()=>api.fillRange(sheetName,{start:selection.start,end:{row:selection.start.row,col:selection.end.col}},selection));
+  const handleFillRight = () => void mutate('Filled selection right',()=>api.fillRange(sheetName,{start:selection.start,end:{row:selection.end.row,col:selection.start.col}},selection));
+  const changeSheet = (name:string) => void mutate(`Selected ${name}`,async()=>{await api.selectSheet(name);setViewport(null);selectCell(0,0);},true);
+  const addSheet = () => {const name=prompt('New worksheet name:',`Sheet${sheets.length+1}`);if(name)void mutate(`Added ${name}`,async()=>{await api.addSheet(name);await api.selectSheet(name);selectCell(0,0);});};
+  const renameSheet = () => {const name=prompt('Rename worksheet:',sheetName);if(name&&name!==sheetName)void mutate(`Renamed to ${name}`,()=>api.renameSheet(sheetName,name));};
 
   const handleNewWorkbook = async () => {
-    if (confirm('Create a new workbook? Unsaved changes will be discarded.')) {
+    if (mutationLock.current || !confirm('Create a new workbook? Unsaved changes will be discarded.')) return;
+    await mutate('Created new workbook', async () => {
       await api.newWorkbook();
-      setWorkbookEpoch(e => e + 1);
-      reviewDrafts.current.clear();
-      await refreshMetadata();
-      fetchViewportData(0, 0, 40, 20);
-      setStatusMsg('Created new workbook');
-    }
+      viewportSequence.current++; setViewport(null); selectCell(0, 0);
+      setWorkbookEpoch(e => e + 1); reviewDrafts.current.clear();
+    });
   };
 
   const handleSaveWorkbook = async () => {
@@ -187,34 +252,21 @@ export const App: React.FC = () => {
   };
 
   const handleOpenWorkbook = async () => {
-    const path = prompt('Enter path of .gridloom file to open:', 'my_workbook.gridloom');
-    if (path) {
-      try {
-        await api.openWorkbook(path);
-        setWorkbookEpoch(e => e + 1);
-        reviewDrafts.current.clear();
-        await refreshMetadata();
-        fetchViewportData(0, 0, 40, 20);
-        setStatusMsg(`Opened workbook from ${path}`);
-      } catch (err: any) {
-        alert(`Failed to open: ${err.message}`);
-      }
-    }
+    if (mutationLock.current) return;
+    const path = prompt('Enter path of .gridloom file to open. Unsaved changes will be discarded:', 'my_workbook.gridloom');
+    if (!path) return;
+    await mutate(`Opened workbook from ${path}`, async () => {
+      await api.openWorkbook(path);
+      viewportSequence.current++; setViewport(null); selectCell(0, 0);
+      setWorkbookEpoch(e => e + 1); reviewDrafts.current.clear();
+    });
   };
 
   const handleRefreshAll = async () => {
-    try {
-      setStatusMsg('Refreshing all data sources...');
+    await mutate('All sources refreshed successfully', async () => {
       const sources = await api.getSources();
-      for (const s of sources) {
-        await api.refreshSource(s.name);
-      }
-      await refreshMetadata();
-      fetchViewportData(visibleBounds.startRow, visibleBounds.startCol, visibleBounds.endRow, visibleBounds.endCol);
-      setStatusMsg('All sources refreshed successfully');
-    } catch (err: any) {
-      setStatusMsg(`Refresh error: ${err.message}`);
-    }
+      for (const source of sources) await api.refreshSource(source.name);
+    });
   };
 
   const openQueryWithTable = (connName: string, tableName: string) => {
@@ -230,6 +282,12 @@ export const App: React.FC = () => {
     <div className="flex flex-col h-screen w-screen bg-slate-100 overflow-hidden font-sans">
       {/* Top Application Toolbar */}
       <Toolbar
+        busy={busy}
+        onOpenClose={() => setIsCloseOpen(true)}
+        onUndo={() => void mutate('Undid worksheet edit',api.undo)}
+        onRedo={() => void mutate('Redid worksheet edit',api.redo)}
+        onFillDown={handleFillDown}
+        onFillRight={handleFillRight}
         onOpenExplain={() => setIsExplainOpen(true)}
         onOpenSchemaBrowser={() => setIsSchemaBrowserOpen(true)}
         onOpenQueryEditor={() => setIsQueryEditorOpen(true)}
@@ -248,7 +306,8 @@ export const App: React.FC = () => {
       />
 
       {/* Formula Bar */}
-      <FormulaBar
+      <FormulaBar key={`${workbookEpoch}:${sheetName}`}
+        disabled={busy}
         selectedRow={selectedRow}
         selectedCol={selectedCol}
         activeCellData={activeCellData}
@@ -262,10 +321,13 @@ export const App: React.FC = () => {
         viewport={viewport}
         selectedRow={selectedRow}
         selectedCol={selectedCol}
-        onSelectCell={(r, c) => {
-          setSelectedRow(r);
-          setSelectedCol(c);
-        }}
+        selection={selection} busy={busy}
+        onSelectCell={selectCell}
+        onCopy={handleCopy} onPaste={handlePaste}
+        onUndo={() => void mutate('Undid worksheet edit',api.undo)}
+        onRedo={() => void mutate('Redid worksheet edit',api.redo)}
+        onFillDown={handleFillDown}
+        onClear={() => void mutate('Cleared selection',()=>api.editRange(sheetName,selection.start.row,selection.start.col,Array.from({length:selection.end.row-selection.start.row+1},()=>Array(selection.end.col-selection.start.col+1).fill(''))))}
         onCommitCell={handleCommitCell}
         onViewportChange={handleViewportChange}
       />
@@ -276,7 +338,7 @@ export const App: React.FC = () => {
         revision={`${viewport?.generation ?? 0}:${reviewRevision}`}
         drafts={reviewDrafts.current}
         onClose={() => setIsExplainOpen(false)}
-        onNavigate={(row, col) => { setSelectedRow(row); setSelectedCol(col); }}
+        onNavigate={(row, col, targetSheet) => { if(targetSheet && targetSheet!==sheetName)void mutate(`Selected ${targetSheet}`,async()=>{await api.selectSheet(targetSheet);selectCell(row,col);});else selectCell(row,col); }}
       />}
       </div>
 
@@ -284,17 +346,14 @@ export const App: React.FC = () => {
       <div className="flex items-center justify-between border-t border-slate-300 bg-white px-3 py-1 text-xs select-none shadow-inner">
         {/* Sheet Tabs */}
         <div className="flex items-center gap-1">
-          <div className="px-3 py-0.5 bg-slate-100 text-emerald-800 font-bold border-b-2 border-emerald-600 rounded-t text-xs">
-            {sheetName}
-          </div>
-          <button className="px-2 py-0.5 text-slate-400 hover:text-slate-600 font-bold text-xs">
-            +
-          </button>
+          {sheets.map(name=><button key={name} disabled={busy} onClick={()=>changeSheet(name)} onDoubleClick={()=>{if(name===sheetName)renameSheet();}} aria-current={name===sheetName?'page':undefined} className={`px-3 py-1 rounded-t ${name===sheetName?'bg-emerald-50 text-emerald-800 font-bold border-b-2 border-emerald-600':'hover:bg-slate-100'}`}>{name}</button>)}
+          <button disabled={busy} onClick={addSheet} aria-label="Add worksheet" className="px-2 py-1 font-bold">+</button>
+          <button disabled={busy} onClick={renameSheet} className="px-2 py-1 text-slate-500">Rename</button>
         </div>
 
         {/* Calculation & System Status */}
         <div className="flex items-center gap-4 text-slate-500 text-[11px]">
-          <span className="truncate max-w-sm">{statusMsg}</span>
+          <span role="status" className="truncate max-w-sm">{busy ? 'Working…' : statusMsg}</span>
           <span className="font-mono text-slate-400">Gen #{viewport?.generation ?? 0}</span>
           {stagedCount > 0 && (
             <button
@@ -304,10 +363,11 @@ export const App: React.FC = () => {
               {stagedCount} staged {stagedCount === 1 ? 'edit' : 'edits'} pending writeback
             </button>
           )}
-          <span className="font-mono text-slate-400">{activeKey}</span>
+          <span className="font-mono text-slate-400">{coordToA1(selection.start.row,selection.start.col)}:{coordToA1(selection.end.row,selection.end.col)}</span>
         </div>
       </div>
 
+      {isCloseOpen && <MonthlyClosePanel onClose={()=>setIsCloseOpen(false)} onChanged={()=>{clipboard.current=null;void refreshMetadata();void fetchViewportData(visibleBounds.startRow,visibleBounds.startCol,visibleBounds.endRow,visibleBounds.endCol);}} onSelectCell={(sheet,row,col)=>{void mutate(`Selected ${sheet}!${coordToA1(row,col)}`,async()=>{await api.selectSheet(sheet);selectCell(row,col);setIsExplainOpen(true);setIsCloseOpen(false);});}}/>}
       {/* Modals */}
       <SchemaBrowserModal
         isOpen={isSchemaBrowserOpen}

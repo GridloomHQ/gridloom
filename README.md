@@ -29,19 +29,15 @@ The database remains in its original format. Editing an eligible source-backed t
 
 ---
 
-## 0.2 Preview: Explain & Review
+## 0.3 Preview: Monthly Close & Captured Review Evidence
 
-Select a populated cell and click **Explain & Review**. The sidebar shows the current cached value, formula, transitive cell/range/spill dependencies, and named-table/query boundaries. In the sample workbook, **J8** is a small cash-reserve model: change the fixed-cost assumption in **J6** to see its downstream review become stale.
+**Monthly close** imports a trial-balance CSV, maps accounts, generates an explained P&L, checks debit-credit reconciliation and exposes a six-line review queue. Attach retained support files, record local reviews or questions, compare exact before/after inputs, roll mappings into a new period and export a self-contained JSON review pack.
 
-- **Record review** saves a self-reported reviewer label, note and optional evidence references against a content snapshot.
-- **Circle up a question** records an unresolved question on the same cell. Earlier records remain in its review history.
-- Changes to an upstream input, formula or observed source result invalidate prior records, even if the displayed total is unchanged. Restoring the old input does not silently restore a sign-off. Unrelated cell edits do not invalidate an ordinary cell-only model.
-- A changed snapshot is rejected if submitted from an outdated sidebar. Review history and evidence references are saved inside the `.gridloom` file when you click **Save**. Older files without review records still open.
-- Pending database patches block review because staged overlays do not feed formula calculations. Applied writeback conservatively invalidates all prior records; affected named sources must be refreshed before their totals can be reviewed again.
+The worksheet now supports range selection/copy/paste, formula fill, persisted number/bold/italic/fill formatting, bounded undo/redo, multiple sheets and cross-sheet formulas. Reviewed calculations retain their full observed inputs and cached source results, not just a digest. Evidence replacement retains earlier embedded file versions. Valid direct SQL projections can expose cached primary-keyed source rows; ambiguous, joined and aggregate queries cannot claim transaction provenance.
 
-**Boundaries:** This is a local review notebook, not audit assurance or authenticated multi-user approval. Evidence references are text, not uploaded or verified documents, and external document edits are not monitored. SQL explanations stop at the query and cached result, including joins and aggregates: they do not identify contributing database rows. External database changes are only observed on refresh/recalculation. All formula branches are conservatively included. Traces beyond 256 nodes or 64 levels, blank cells and error-containing calculations cannot be reviewed. Table/source dependencies bind the entire cached result, so changes outside the exact referenced column can conservatively invalidate a review.
+See [the complete workflow and trust boundaries](docs/RELEASE-0.3.md) for CSV examples, clipboard/history limits, snapshot limits and packaging instructions.
 
-**Acceptance example:** Calculate a P&L total with `=SUMIF(TB[mapping],"P&L",TB[amount])`, add a trial-balance evidence reference and record a review. Change a contributing account's mapping in the source, then refresh. The total is recalculated and the prior review is marked **Needs re-review**, retaining its original note and evidence reference.
+**Important:** reviewer labels remain self-reported, not authenticated signatures. A review pack is a local working paper, not audit assurance, an external database backup or proof of ledger completeness. Files are unencrypted. Source refreshes observe external changes; they are not monitored automatically. Trusted multi-user review identities and interactive native coverage remain separate release gaps, not implied capabilities.
 
 ---
 
@@ -159,7 +155,7 @@ Correctness checks validate the final chain value, aggregate sums and counts, lo
 
 ### Prerequisites
 
-- [Rust 1.88+](https://www.rust-lang.org/tools/install)
+- [Rust 1.95+](https://www.rust-lang.org/tools/install)
 - [Node.js 20+](https://nodejs.org/)
 - WebKitGTK (on Linux for native window shell: `sudo apt-get install libwebkit2gtk-4.1-dev libgtk-3-dev`)
 
@@ -168,7 +164,7 @@ Correctness checks validate the final chain value, aggregate sums and counts, lo
 ```bash
 # 1. Build the React frontend
 cd frontend
-npm install
+npm ci
 npm run build
 cd ..
 
@@ -185,6 +181,9 @@ cargo run -p gridloom-desktop
 ```bash
 # Run all core, parser, formula, lineage, and writeback integration tests
 cargo test --workspace
+cd frontend && npm test && npm run build
+# After building gridloom-server, run against a real synthetic monthly close:
+npm run test:browser
 ```
 
 ### 3. Run the Performance Acceptance Suite

@@ -1,6 +1,6 @@
 [package]
 name = "gridloom-server"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Embedded HTTP/JSON local server for Gridloom desktop engine"
 license = "MIT OR Apache-2.0"
@@ -21,7 +21,6 @@ anyhow = { workspace = true }
 clap = { workspace = true }
 rust_decimal = { workspace = true }
 chrono = { workspace = true }
-tempfile = { workspace = true }
 
 [lib]
 name = "gridloom_server"
@@ -32,4 +31,5 @@ name = "gridloom-server"
 path = "src/main.rs"
 
 [dev-dependencies]
+tempfile = { workspace = true }
 tower = { version = "0.5", features = ["util"] }

@@ -1,10 +1,11 @@
-import { displayValue } from '../utils/values';
+import { editableCellInput } from '../utils/cellInput';
 import React, { useState, useEffect, useRef } from 'react';
 import { Check, X } from 'lucide-react';
 import { CellRenderData } from '../types';
 import { coordToA1 } from '../utils/coords';
 
 interface FormulaBarProps {
+  disabled?: boolean;
   selectedRow: number;
   selectedCol: number;
   activeCellData?: CellRenderData;
@@ -41,6 +42,7 @@ const COMMON_FUNCTIONS = [
 ];
 
 export const FormulaBar: React.FC<FormulaBarProps> = ({
+  disabled = false,
   selectedRow,
   selectedCol,
   activeCellData,
@@ -51,22 +53,18 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [filterSuggestions, setFilterSuggestions] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dirty = useRef(false);
+  const identity = useRef(coordA1);
+  const reset = () => { dirty.current = false; setInputValue(editableCellInput(activeCellData)); setShowSuggestions(false); };
+  const commit = () => { dirty.current = false; setShowSuggestions(false); onCommit(inputValue); };
 
   useEffect(() => {
-    if (activeCellData) {
-      if (activeCellData.formula) {
-        setInputValue(activeCellData.formula);
-      } else if (activeCellData.raw_value !== null && activeCellData.raw_value !== undefined) {
-        setInputValue(displayValue(activeCellData.raw_value));
-      } else {
-        setInputValue(activeCellData.display_text || '');
-      }
-    } else {
-      setInputValue('');
-    }
-  }, [activeCellData, selectedRow, selectedCol]);
+    if (identity.current !== coordA1) { dirty.current = false; identity.current = coordA1; setShowSuggestions(false); }
+    if (!dirty.current) setInputValue(editableCellInput(activeCellData));
+  }, [activeCellData, coordA1]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    dirty.current = true;
     const val = e.target.value;
     setInputValue(val);
 
@@ -85,18 +83,14 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-      setShowSuggestions(false);
-      onCommit(inputValue);
+      e.preventDefault(); commit();
     } else if (e.key === 'Escape') {
-      setShowSuggestions(false);
-      if (activeCellData) {
-        setInputValue(activeCellData.formula || displayValue(activeCellData.raw_value));
-      }
+      e.preventDefault(); reset();
     }
   };
 
   const selectSuggestion = (fnName: string) => {
-    setInputValue(`=${fnName}(`);
+    dirty.current = true; setInputValue(`=${fnName}(`);
     setShowSuggestions(false);
     if (inputRef.current) {
       inputRef.current.focus();
@@ -136,19 +130,15 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
 
       {/* Action icons */}
       <div className="flex items-center gap-0.5 text-slate-400">
-        <button
-          onClick={() => {
-            if (activeCellData) {
-              setInputValue(activeCellData.formula || displayValue(activeCellData.raw_value));
-            }
-          }}
+        <button disabled={disabled}
+          onClick={reset}
           className="p-1 hover:text-slate-600 rounded hover:bg-slate-100"
           title="Cancel"
         >
           <X className="w-3.5 h-3.5" />
         </button>
-        <button
-          onClick={() => onCommit(inputValue)}
+        <button disabled={disabled}
+          onClick={commit}
           className="p-1 hover:text-emerald-600 rounded hover:bg-slate-100"
           title="Commit (Enter)"
         >
@@ -164,6 +154,8 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
       {/* Formula Input */}
       <div className="relative flex-1">
         <input
+          disabled={disabled}
+          aria-label="Formula input"
           ref={inputRef}
           type="text"
           value={inputValue}
@@ -177,7 +169,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
         {showSuggestions && filterSuggestions.length > 0 && (
           <div className="absolute left-0 top-full mt-1 w-64 max-h-48 overflow-y-auto bg-white border border-slate-200 rounded shadow-lg z-50 py-1">
             {filterSuggestions.map((fn) => (
-              <button
+              <button disabled={disabled}
                 key={fn}
                 onClick={() => selectSuggestion(fn)}
                 className="w-full text-left px-3 py-1 text-xs hover:bg-emerald-50 hover:text-emerald-700 font-mono flex items-center justify-between"

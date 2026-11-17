@@ -10,6 +10,7 @@ pub fn evaluate_expr<C: EvaluationContext + ?Sized>(
     ctx: &C,
 ) -> Result<Value, CellError> {
     match expr {
+        Expr::SheetRef { sheet, expr } => ctx.evaluate_on_sheet(sheet, expr),
         Expr::Literal(val) => Ok(val.clone()),
         Expr::CellRef(coord) => ctx.get_cell_value(*coord),
         Expr::RangeRef(range) => ctx.get_range_values(*range),

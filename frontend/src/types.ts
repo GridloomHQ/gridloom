@@ -26,6 +26,8 @@ export interface CellRenderData {
   raw_value: CellValue;
   formula?: string;
   number_format?: string;
+  raw_input?: string;
+  style?: CellStyle;
   is_staged: boolean;
   is_spill: boolean;
   is_error: boolean;
@@ -189,6 +191,8 @@ export interface ReviewRecord {
   reviewer: string;
   note: string;
   evidence: EvidenceReference[];
+  attachments?: EvidenceAttachment[];
+  input_snapshot?: ReviewInputSnapshot | null;
   created_at: string;
   snapshot: string;
   invalidated: boolean;
@@ -203,6 +207,8 @@ export interface ExplanationNode {
   depends_on: string[];
   detail: string | null;
   coord: CellCoord | null;
+  sheet_name?: string | null;
+  source_name?: string | null;
 }
 export interface CellExplanation {
   sheet_name: string;
@@ -214,6 +220,7 @@ export interface CellExplanation {
   snapshot: string;
   can_review: boolean;
   review: ReviewRecord | null;
+  input_snapshot?: ReviewInputSnapshot;
 }
 export interface ReviewInput {
   sheet_name: string;
@@ -226,4 +233,24 @@ export interface ReviewInput {
   evidence: EvidenceReference[];
 }
 
-export interface ReviewDraft { reviewer: string; decision: 'Reviewed' | 'Question'; note: string; evidence: EvidenceReference[] }
+export interface ReviewDraft { reviewer: string; decision: 'Reviewed' | 'Question'; note: string; evidence: EvidenceReference[]; attachments?: EvidenceUpload[] }
+
+export interface CellRange { start: CellCoord; end: CellCoord }
+export interface CellStyle { bold: boolean; italic: boolean; fill: string | null; number_format: string | null }
+export interface ReviewInputSnapshot {
+  version: number; sheet_name: string; coord: CellCoord; value: CellValue;
+  formula: string | null; inputs: Record<string, unknown>; nodes: ExplanationNode[];
+  warnings: string[]; can_review: boolean;
+}
+export interface EvidenceUpload { filename: string; media_type: string; bytes: number[]; replaces?: string | null }
+export interface EvidenceAttachment { id: string; version: number; previous_version_id: string | null; filename: string; media_type: string; sha256: string; bytes: number[]; created_at: string }
+export interface SnapshotChange { path: string; before: unknown | null; after: unknown | null }
+export interface ReviewComparison { before_review_id: string; after_review_id: string | null; before_snapshot: string; after_snapshot: string; changes: SnapshotChange[] }
+export interface SourceDrilldownRow { cached_row_index: number; primary_key: Record<string, CellValue>; values: CellValue[] }
+export interface SourceDrilldown { source_name: string; connection_name: string; base_table: string; sql: string; columns: string[]; rows: SourceDrilldownRow[]; total_rows: number; offset: number; warning: string }
+export type CloseMapping = 'Revenue' | 'Cost of sales' | 'Operating expenses' | 'Other income' | 'Other expense' | 'Balance sheet';
+export interface CloseAccount { account: string; name: string; debit: string; credit: string; mapping: string }
+export interface ClosePeriod { id: string; period: string; version: number; sheet_name: string; created_at: string; source_csv: string; source_sha256: string; accounts: CloseAccount[]; prior_period_id: string | null }
+export interface CloseQueueItem { label: string; coord: CellCoord; value: CellValue; status: string; review_id: string | null }
+export interface LiveCloseAccount { row: number; imported_account: string; account: string; name: string; mapping: string; debit: string | null; credit: string | null; identity_matches_import: boolean }
+export interface CloseStatus { period: ClosePeriod; live_accounts: LiveCloseAccount[]; debits: string; credits: string; difference: string; balanced: boolean; unmapped_accounts: string[]; queue: CloseQueueItem[]; ready_for_close: boolean; warnings: string[] }

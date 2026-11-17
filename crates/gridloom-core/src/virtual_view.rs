@@ -15,6 +15,9 @@ pub struct ViewportRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CellRenderData {
     pub coord: CellCoord,
+    pub raw_input: Option<String>,
+    #[serde(default)]
+    pub style: crate::spreadsheet::CellStyle,
     pub display_text: String,
     pub raw_value: Value,
     pub formula: Option<String>,

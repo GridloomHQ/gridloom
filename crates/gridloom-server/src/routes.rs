@@ -1,16 +1,18 @@
 use crate::benchmark::run_performance_benchmarks;
 use crate::state::AppState;
-use axum::extract::{Path, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use gridloom_core::chart::ChartDefinition;
+use gridloom_core::close::{ImportTrialBalanceRequest, MapAccountsRequest, RollforwardRequest};
 use gridloom_core::db::EngineKind;
 use gridloom_core::lineage::analyze_lineage;
 use gridloom_core::pivot::PivotDefinition;
-use gridloom_core::review::ReviewRequest;
-use gridloom_core::value::{CellCoord, Value};
+use gridloom_core::review::{EvidenceUpload, ReviewRequest};
+use gridloom_core::spreadsheet::CellStyle;
+use gridloom_core::value::{CellCoord, CellRange, Value};
 use gridloom_core::virtual_view::ViewportRequest;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -24,6 +26,24 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/workbook/new", post(new_workbook))
         .route("/api/workbook/open", post(open_workbook))
         .route("/api/workbook/save", post(save_workbook))
+        .route("/api/sheets", post(add_sheet))
+        .route("/api/sheets/select", post(select_sheet))
+        .route("/api/sheets/rename", post(rename_sheet))
+        .route("/api/ranges/edit", post(edit_range))
+        .route("/api/ranges/read", post(read_range))
+        .route("/api/ranges/capture", post(capture_range))
+        .route("/api/ranges/format", post(format_range))
+        .route("/api/ranges/format-attribute", post(format_range_attribute))
+        .route("/api/ranges/copy", post(copy_range))
+        .route("/api/ranges/fill", post(fill_range))
+        .route("/api/history/undo", post(undo))
+        .route("/api/history/redo", post(redo))
+        .route("/api/close/periods", get(list_close_periods))
+        .route("/api/close/import", post(import_trial_balance))
+        .route("/api/close/map", post(map_close_accounts))
+        .route("/api/close/rollforward", post(rollforward_close))
+        .route("/api/close/{id}/status", get(close_status))
+        .route("/api/close/{id}/pack", get(export_review_pack))
         // Database Connections & Schema
         .route("/api/connections", get(list_connections).post(connect_db))
         .route("/api/connections/{name}/tables", get(list_tables))
@@ -44,6 +64,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/cells/viewport", post(get_viewport))
         .route("/api/cells/explain", post(explain_cell))
         .route("/api/reviews", get(list_reviews).post(record_review))
+        .route("/api/reviews/attached", post(record_attached_review))
+        .route("/api/reviews/{id}/compare", get(compare_review))
+        .route("/api/sources/{name}/drilldown", get(source_drilldown))
         // Staged Writeback & Review
         .route(
             "/api/staged",
@@ -60,6 +83,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/charts/{id}/data", get(get_chart_data))
         // Performance Acceptance Benchmark Runner
         .route("/api/benchmark/run", post(run_benchmarks))
+        .layer(DefaultBodyLimit::max(40 * 1024 * 1024))
         .with_state(state)
 }
 
@@ -555,4 +579,347 @@ async fn record_review(
 async fn list_reviews(State(state): State<AppState>) -> impl IntoResponse {
     let wb = state.workbook.read().await;
     Json(wb.review_history())
+}
+
+type ApiError = (StatusCode, String);
+fn bad_request(error: impl std::fmt::Display) -> ApiError {
+    (StatusCode::BAD_REQUEST, error.to_string())
+}
+
+#[derive(Deserialize)]
+struct SheetNameRequest {
+    name: String,
+}
+#[derive(Deserialize)]
+struct RenameSheetRequest {
+    old_name: String,
+    new_name: String,
+}
+async fn add_sheet(
+    State(state): State<AppState>,
+    Json(req): Json<SheetNameRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    state
+        .workbook
+        .write()
+        .await
+        .add_sheet(&req.name)
+        .map_err(bad_request)?;
+    Ok(Json(serde_json::json!({"status":"created"})))
+}
+async fn select_sheet(
+    State(state): State<AppState>,
+    Json(req): Json<SheetNameRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    state
+        .workbook
+        .write()
+        .await
+        .select_sheet(&req.name)
+        .map_err(bad_request)?;
+    Ok(Json(serde_json::json!({"status":"selected"})))
+}
+async fn rename_sheet(
+    State(state): State<AppState>,
+    Json(req): Json<RenameSheetRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    state
+        .workbook
+        .write()
+        .await
+        .rename_sheet(&req.old_name, &req.new_name)
+        .map_err(bad_request)?;
+    Ok(Json(serde_json::json!({"status":"renamed"})))
+}
+#[derive(Deserialize)]
+struct EditRangeRequest {
+    sheet_name: String,
+    row: u32,
+    col: u32,
+    values: Vec<Vec<String>>,
+}
+#[derive(Deserialize)]
+struct ReadRangeRequest {
+    sheet_name: String,
+    range: CellRange,
+}
+#[derive(Deserialize)]
+struct FormatRangeRequest {
+    sheet_name: String,
+    range: CellRange,
+    style: CellStyle,
+}
+#[derive(Deserialize)]
+struct CopyRangeRequest {
+    sheet_name: String,
+    range: CellRange,
+    target_sheet: String,
+    target: CellCoord,
+    expected_values: Option<Vec<Vec<String>>>,
+    expected_snapshot: Option<String>,
+}
+#[derive(Deserialize)]
+struct FillRangeRequest {
+    sheet_name: String,
+    source: CellRange,
+    target: CellRange,
+}
+async fn edit_range(
+    State(state): State<AppState>,
+    Json(req): Json<EditRangeRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    state
+        .workbook
+        .write()
+        .await
+        .edit_range(
+            &req.sheet_name,
+            CellCoord::new(req.row, req.col),
+            req.values,
+        )
+        .map_err(bad_request)?;
+    Ok(Json(serde_json::json!({"status":"updated"})))
+}
+async fn read_range(
+    State(state): State<AppState>,
+    Json(req): Json<ReadRangeRequest>,
+) -> Result<Json<Vec<Vec<String>>>, ApiError> {
+    Ok(Json(
+        state
+            .workbook
+            .read()
+            .await
+            .read_range(&req.sheet_name, req.range)
+            .map_err(bad_request)?,
+    ))
+}
+async fn format_range(
+    State(state): State<AppState>,
+    Json(req): Json<FormatRangeRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    state
+        .workbook
+        .write()
+        .await
+        .format_range(&req.sheet_name, req.range, req.style)
+        .map_err(bad_request)?;
+    Ok(Json(serde_json::json!({"status":"formatted"})))
+}
+async fn copy_range(
+    State(state): State<AppState>,
+    Json(req): Json<CopyRangeRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let mut wb = state.workbook.write().await;
+    if let Some(snapshot) = req.expected_snapshot {
+        wb.copy_range_snapshot_checked(
+            &req.sheet_name,
+            req.range,
+            &req.target_sheet,
+            req.target,
+            &snapshot,
+        )
+    } else if let Some(values) = req.expected_values {
+        wb.copy_range_checked(
+            &req.sheet_name,
+            req.range,
+            &req.target_sheet,
+            req.target,
+            &values,
+        )
+    } else {
+        wb.copy_range(&req.sheet_name, req.range, &req.target_sheet, req.target)
+    }
+    .map_err(bad_request)?;
+    Ok(Json(serde_json::json!({"status":"copied"})))
+}
+async fn fill_range(
+    State(state): State<AppState>,
+    Json(req): Json<FillRangeRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    state
+        .workbook
+        .write()
+        .await
+        .fill_range(&req.sheet_name, req.source, req.target)
+        .map_err(bad_request)?;
+    Ok(Json(serde_json::json!({"status":"filled"})))
+}
+async fn undo(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    state
+        .workbook
+        .write()
+        .await
+        .undo_sheet_edit()
+        .map_err(bad_request)?;
+    Ok(Json(serde_json::json!({"status":"undone"})))
+}
+async fn redo(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    state
+        .workbook
+        .write()
+        .await
+        .redo_sheet_edit()
+        .map_err(bad_request)?;
+    Ok(Json(serde_json::json!({"status":"redone"})))
+}
+async fn list_close_periods(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.workbook.read().await.close_periods.clone())
+}
+async fn import_trial_balance(
+    State(state): State<AppState>,
+    Json(req): Json<ImportTrialBalanceRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .workbook
+            .write()
+            .await
+            .import_trial_balance(req)
+            .map_err(bad_request)?,
+    ))
+}
+async fn map_close_accounts(
+    State(state): State<AppState>,
+    Json(req): Json<MapAccountsRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .workbook
+            .write()
+            .await
+            .map_close_accounts(req)
+            .map_err(bad_request)?,
+    ))
+}
+async fn rollforward_close(
+    State(state): State<AppState>,
+    Json(req): Json<RollforwardRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .workbook
+            .write()
+            .await
+            .rollforward_close(req)
+            .map_err(bad_request)?,
+    ))
+}
+async fn close_status(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .workbook
+            .read()
+            .await
+            .close_status(id)
+            .map_err(bad_request)?,
+    ))
+}
+async fn export_review_pack(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .workbook
+            .read()
+            .await
+            .export_review_pack(id)
+            .map_err(bad_request)?,
+    ))
+}
+#[derive(Deserialize)]
+struct AttachedReviewRequest {
+    review: ReviewRequest,
+    attachments: Vec<EvidenceUpload>,
+}
+async fn record_attached_review(
+    State(state): State<AppState>,
+    Json(req): Json<AttachedReviewRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .workbook
+            .write()
+            .await
+            .record_review_with_attachments(req.review, req.attachments)
+            .map_err(|message| (StatusCode::CONFLICT, message))?,
+    ))
+}
+#[derive(Deserialize)]
+struct CompareQuery {
+    after: Option<Uuid>,
+}
+async fn compare_review(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Query(query): Query<CompareQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let wb = state.workbook.read().await;
+    let comparison = if let Some(after) = query.after {
+        wb.compare_review_versions(id, after)
+    } else {
+        wb.compare_review(id)
+    };
+    Ok(Json(comparison.map_err(bad_request)?))
+}
+#[derive(Deserialize)]
+struct DrilldownQuery {
+    #[serde(default)]
+    offset: usize,
+    #[serde(default = "drilldown_limit")]
+    limit: usize,
+}
+fn drilldown_limit() -> usize {
+    50
+}
+async fn source_drilldown(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Query(query): Query<DrilldownQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .workbook
+            .read()
+            .await
+            .source_drilldown(&name, query.offset, query.limit)
+            .map_err(bad_request)?,
+    ))
+}
+
+async fn capture_range(
+    State(state): State<AppState>,
+    Json(req): Json<ReadRangeRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .workbook
+            .read()
+            .await
+            .capture_range(&req.sheet_name, req.range)
+            .map_err(bad_request)?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct FormatAttributeRequest {
+    sheet_name: String,
+    range: CellRange,
+    attribute: String,
+    value: String,
+}
+async fn format_range_attribute(
+    State(state): State<AppState>,
+    Json(req): Json<FormatAttributeRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    state
+        .workbook
+        .write()
+        .await
+        .format_range_attribute(&req.sheet_name, req.range, &req.attribute, &req.value)
+        .map_err(bad_request)?;
+    Ok(Json(serde_json::json!({"status":"formatted"})))
 }

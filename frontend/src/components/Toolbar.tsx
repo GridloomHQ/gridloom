@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 
 interface ToolbarProps {
+  busy: boolean;
+  onUndo: () => void; onRedo: () => void; onFillDown: () => void; onFillRight: () => void; onOpenClose: () => void;
   onOpenExplain: () => void;
   onOpenSchemaBrowser: () => void;
   onOpenQueryEditor: () => void;
@@ -35,6 +37,7 @@ interface ToolbarProps {
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
+  busy, onUndo, onRedo, onFillDown, onFillRight, onOpenClose,
   onOpenExplain,
   onOpenSchemaBrowser,
   onOpenQueryEditor,
@@ -61,11 +64,11 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           </div>
           <span>Gridloom</span>
           <span className="text-[10px] px-1 py-0.2 bg-emerald-100 text-emerald-800 rounded font-semibold ml-0.5">
-            0.2 preview
+            0.3 preview
           </span>
         </div>
 
-        <button
+        <button disabled={busy}
           onClick={onNewWorkbook}
           title="New Workbook"
           className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 text-slate-700 transition-colors"
@@ -74,7 +77,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <span>New</span>
         </button>
 
-        <button
+        <button disabled={busy}
           onClick={onOpenWorkbook}
           title="Open Workbook (.gridloom)"
           className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 text-slate-700 transition-colors"
@@ -83,7 +86,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <span>Open</span>
         </button>
 
-        <button
+        <button disabled={busy}
           onClick={onSaveWorkbook}
           title="Save Workbook"
           className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 text-slate-700 transition-colors"
@@ -95,7 +98,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       {/* SQL & Database Controls */}
       <div className="flex items-center gap-1 border-r border-slate-200 px-3">
-        <button
+        <button disabled={busy}
           onClick={onOpenSchemaBrowser}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 font-medium transition-colors"
         >
@@ -103,7 +106,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <span>Databases</span>
         </button>
 
-        <button
+        <button disabled={busy}
           onClick={onOpenQueryEditor}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 font-medium transition-colors"
         >
@@ -111,7 +114,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <span>SQL Query</span>
         </button>
 
-        <button
+        <button disabled={busy}
           onClick={onOpenInsertTable}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 font-medium transition-colors"
         >
@@ -119,7 +122,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <span>Insert Table</span>
         </button>
 
-        <button
+        <button disabled={busy}
           onClick={onRefreshAll}
           title="Refresh All Data Sources"
           className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 text-slate-600 transition-colors"
@@ -129,23 +132,29 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </button>
       </div>
 
+      <div className="flex gap-1 px-2">
+        <button disabled={busy} onClick={onUndo} title="Undo worksheet edit (Ctrl/Cmd+Z)" className="px-2 py-1 hover:bg-slate-100">Undo</button>
+        <button disabled={busy} onClick={onRedo} title="Redo worksheet edit" className="px-2 py-1 hover:bg-slate-100">Redo</button>
+        <button disabled={busy} onClick={onFillDown} title="Fill selected range from its first row (Ctrl/Cmd+D)" className="px-2 py-1 hover:bg-slate-100">Fill down</button>
+        <button disabled={busy} onClick={onFillRight} title="Fill selected range from its first column" className="px-2 py-1 hover:bg-slate-100">Fill right</button>
+      </div>
       {/* Cell Formatting */}
       <div className="flex items-center gap-1 border-r border-slate-200 px-3">
-        <button
+        <button disabled={busy}
           onClick={() => onApplyFormat('General')}
           title="Format as General"
           className="px-2 py-1 rounded hover:bg-slate-100 text-slate-700 font-mono"
         >
           123
         </button>
-        <button
+        <button disabled={busy}
           onClick={() => onApplyFormat('Currency')}
           title="Format as Currency ($)"
           className="p-1 rounded hover:bg-slate-100 text-slate-700"
         >
           <DollarSign className="w-3.5 h-3.5" />
         </button>
-        <button
+        <button disabled={busy}
           onClick={() => onApplyFormat('Percent')}
           title="Format as Percent (%)"
           className="p-1 rounded hover:bg-slate-100 text-slate-700"
@@ -154,9 +163,16 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </button>
       </div>
 
+      <div className="flex gap-1 items-center">
+        <button disabled={busy} onClick={()=>onApplyFormat('Bold')} title="Toggle bold" className="px-2 py-1 font-bold">B</button>
+        <button disabled={busy} onClick={()=>onApplyFormat('Italic')} title="Toggle italic" className="px-2 py-1 italic">I</button>
+        <label className="flex gap-1 items-center">Fill <input type="color" aria-label="Cell fill color" disabled={busy} defaultValue="#fef3c7" onChange={e=>onApplyFormat(`Fill:${e.target.value}`)} className="w-7 h-6"/></label>
+        <button disabled={busy} onClick={()=>onApplyFormat('Fill:')} title="Clear cell fill" className="px-2 py-1">No fill</button>
+      </div>
+      <button disabled={busy} onClick={onOpenClose} className="px-3 py-1 rounded bg-emerald-100 text-emerald-900 font-semibold">Monthly close</button>
       {/* Staged Writeback Badge & Review */}
       <div className="flex items-center gap-1 border-r border-slate-200 px-3">
-        <button
+        <button disabled={busy}
           onClick={onOpenStagedReview}
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded font-semibold transition-all shadow-sm ${
             stagedCount > 0
@@ -180,12 +196,12 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </button>
       </div>
 
-      <button onClick={onOpenExplain} className="px-3 py-1 rounded bg-indigo-100 text-indigo-900 font-semibold hover:bg-indigo-200">
+      <button disabled={busy} onClick={onOpenExplain} className="px-3 py-1 rounded bg-indigo-100 text-indigo-900 font-semibold hover:bg-indigo-200">
         Explain &amp; Review
       </button>
       {/* Analysis, Charts, Benchmarks & Audit */}
       <div className="flex items-center gap-1 pl-2">
-        <button
+        <button disabled={busy}
           onClick={onOpenPivots}
           className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 text-slate-700 transition-colors"
         >
@@ -193,7 +209,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <span>Pivot</span>
         </button>
 
-        <button
+        <button disabled={busy}
           onClick={onOpenCharts}
           className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 text-slate-700 transition-colors"
         >
@@ -201,7 +217,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <span>Charts</span>
         </button>
 
-        <button
+        <button disabled={busy}
           onClick={onOpenAuditLog}
           title="Audit Log of Applied Writebacks"
           className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 text-slate-700 transition-colors"
@@ -210,7 +226,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <span>Audit</span>
         </button>
 
-        <button
+        <button disabled={busy}
           onClick={onOpenBenchmarks}
           title="Performance Acceptance Protocol"
           className="flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-50 text-emerald-800 hover:bg-emerald-100 font-semibold border border-emerald-200 transition-colors"

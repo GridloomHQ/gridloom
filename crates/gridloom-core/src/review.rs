@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
-const MAX_NODES: usize = 256;
+const MAX_NODES: usize = 8192;
 const MAX_DEPTH: usize = 64;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -39,6 +39,10 @@ pub struct ReviewRecord {
     pub snapshot: String,
     pub invalidated: bool,
     pub invalidation_reason: Option<String>,
+    #[serde(default)]
+    pub input_snapshot: Option<ReviewInputSnapshot>,
+    #[serde(default)]
+    pub attachments: Vec<EvidenceAttachment>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,7 +57,7 @@ pub struct ReviewRequest {
     pub evidence: Vec<EvidenceReference>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExplanationNode {
     pub id: String,
     pub kind: String,
@@ -63,6 +67,10 @@ pub struct ExplanationNode {
     pub depends_on: Vec<String>,
     pub detail: Option<String>,
     pub coord: Option<CellCoord>,
+    #[serde(default)]
+    pub sheet_name: Option<String>,
+    #[serde(default)]
+    pub source_name: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -76,6 +84,73 @@ pub struct CellExplanation {
     pub snapshot: String,
     pub can_review: bool,
     pub review: Option<ReviewRecord>,
+    pub input_snapshot: ReviewInputSnapshot,
+}
+
+/// Full captured calculation inputs, not a live database backup or a signature.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewInputSnapshot {
+    pub version: u32,
+    pub sheet_name: String,
+    pub coord: CellCoord,
+    pub value: Value,
+    pub formula: Option<String>,
+    pub inputs: BTreeMap<String, serde_json::Value>,
+    pub nodes: Vec<ExplanationNode>,
+    pub warnings: Vec<String>,
+    pub can_review: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvidenceAttachment {
+    pub id: Uuid,
+    pub version: u32,
+    pub previous_version_id: Option<Uuid>,
+    pub filename: String,
+    pub media_type: String,
+    pub sha256: String,
+    pub bytes: Vec<u8>,
+    pub created_at: DateTime<Utc>,
+}
+#[derive(Debug, Deserialize)]
+pub struct EvidenceUpload {
+    pub filename: String,
+    pub media_type: String,
+    pub bytes: Vec<u8>,
+    #[serde(default)]
+    pub replaces: Option<Uuid>,
+}
+#[derive(Debug, Serialize)]
+pub struct SnapshotChange {
+    /// JSON pointer into the retained snapshot. Values are complete, not display previews.
+    pub path: String,
+    pub before: Option<serde_json::Value>,
+    pub after: Option<serde_json::Value>,
+}
+#[derive(Debug, Serialize)]
+pub struct ReviewComparison {
+    pub before_review_id: Uuid,
+    pub after_review_id: Option<Uuid>,
+    pub before_snapshot: String,
+    pub after_snapshot: String,
+    pub changes: Vec<SnapshotChange>,
+}
+#[derive(Debug, Serialize)]
+pub struct SourceDrilldownRow {
+    pub cached_row_index: usize,
+    pub primary_key: BTreeMap<String, Value>,
+    pub values: Vec<Value>,
+}
+#[derive(Debug, Serialize)]
+pub struct SourceDrilldown {
+    pub source_name: String,
+    pub connection_name: String,
+    pub base_table: String,
+    pub sql: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<SourceDrilldownRow>,
+    pub total_rows: usize,
+    pub offset: usize,
+    pub warning: String,
 }
 
 impl Workbook {
@@ -99,7 +174,8 @@ impl Workbook {
         let formula = sheet.get_cell(&coord).and_then(|c| c.formula.clone());
         let mut trace = TraceBuilder {
             workbook: self,
-            sheet_name,
+            sheet_name: sheet_name.into(),
+            root_sheet_name: sheet_name.into(),
             nodes: BTreeMap::new(),
             parts: BTreeMap::new(),
             warnings: BTreeSet::new(),
@@ -137,6 +213,17 @@ impl Workbook {
         let bytes = serde_json::to_vec(&(1, &trace.parts, &nodes, &warnings, trace.can_review))
             .map_err(|_| CellError::Value)?;
         let snapshot = format!("v1:{:x}", Sha256::digest(bytes));
+        let input_snapshot = ReviewInputSnapshot {
+            version: 1,
+            sheet_name: sheet_name.into(),
+            coord,
+            value: value.clone(),
+            formula: formula.clone(),
+            inputs: trace.parts,
+            nodes: nodes.clone(),
+            warnings: warnings.clone(),
+            can_review: trace.can_review,
+        };
         let review = self.reviews.iter().rev().find(|r| r.sheet_name == sheet_name && r.coord == coord).cloned().map(|mut r| {
             if r.snapshot != snapshot || !trace.can_review {
                 r.invalidated = true;
@@ -154,6 +241,7 @@ impl Workbook {
             snapshot,
             can_review: trace.can_review,
             review,
+            input_snapshot,
         })
     }
 
@@ -193,6 +281,13 @@ impl Workbook {
                 "This calculation cannot be reviewed yet. Resolve its warnings first.".into(),
             );
         }
+        if serde_json::to_vec(&explanation.input_snapshot)
+            .map_err(|e| e.to_string())?
+            .len()
+            > 16 * 1024 * 1024
+        {
+            return Err("Review inputs exceed the 16 MiB snapshot limit; narrow the source query before reviewing.".into());
+        }
         let record = ReviewRecord {
             id: Uuid::new_v4(),
             sheet_name: request.sheet_name,
@@ -205,6 +300,8 @@ impl Workbook {
             snapshot: explanation.snapshot,
             invalidated: false,
             invalidation_reason: None,
+            input_snapshot: Some(explanation.input_snapshot),
+            attachments: vec![],
         };
         self.reviews.push(record.clone());
         Ok(record)
@@ -265,7 +362,8 @@ fn preview_value(value: &Value) -> Value {
 
 struct TraceBuilder<'a> {
     workbook: &'a Workbook,
-    sheet_name: &'a str,
+    sheet_name: String,
+    root_sheet_name: String,
     nodes: BTreeMap<String, ExplanationNode>,
     parts: BTreeMap<String, serde_json::Value>,
     warnings: BTreeSet<String>,
@@ -287,7 +385,7 @@ impl TraceBuilder<'_> {
     fn limit(&mut self, depth: usize) -> bool {
         if self.nodes.len() >= MAX_NODES || depth > MAX_DEPTH {
             self.can_review = false;
-            self.warnings.insert("The dependency trace exceeds the 256-node or 64-level review limit. A partial trace cannot be signed off.".into());
+            self.warnings.insert("The dependency trace exceeds the 8192-node or 64-level review limit. A partial trace cannot be signed off.".into());
             true
         } else {
             false
@@ -295,7 +393,11 @@ impl TraceBuilder<'_> {
     }
 
     fn cell(&mut self, coord: CellCoord, depth: usize) -> Result<String, CellError> {
-        let id = format!("cell:{}", coord.to_a1());
+        let id = if self.sheet_name == self.root_sheet_name {
+            format!("cell:{}", coord.to_a1())
+        } else {
+            format!("cell:{}!{}", self.sheet_name, coord.to_a1())
+        };
         if self.visiting.contains(&id) {
             self.can_review = false;
             self.warnings
@@ -305,11 +407,19 @@ impl TraceBuilder<'_> {
         if self.nodes.contains_key(&id) || self.limit(depth) {
             return Ok(id);
         }
-        let sheet = &self.workbook.sheets[self.sheet_name];
+        if self
+            .workbook
+            .stale_calculation_sheets
+            .contains(&self.sheet_name)
+        {
+            self.can_review = false;
+            self.warnings.insert(format!("Referenced sheet {} has a stale calculation; recalculate successfully before reviewing.", self.sheet_name));
+        }
+        let sheet = &self.workbook.sheets[&self.sheet_name];
         let cell = sheet.get_cell(&coord);
         let ctx = WorkbookEvalContext {
             workbook: self.workbook,
-            sheet_name: self.sheet_name,
+            sheet_name: &self.sheet_name,
             current_coord: coord,
         };
         let value = ctx.get_cell_value(coord)?;
@@ -331,6 +441,8 @@ impl TraceBuilder<'_> {
                 depends_on: vec![],
                 detail: None,
                 coord: Some(coord),
+                sheet_name: Some(self.sheet_name.clone()),
+                source_name: None,
             },
         );
         self.visiting.insert(id.clone());
@@ -364,13 +476,17 @@ impl TraceBuilder<'_> {
     }
 
     fn table(&mut self, name: &str, depth: usize) -> Result<String, CellError> {
-        let sheet = &self.workbook.sheets[self.sheet_name];
+        let sheet = &self.workbook.sheets[&self.sheet_name];
         let table = sheet
             .tables
             .values()
             .find(|t| t.name.eq_ignore_ascii_case(name))
             .ok_or(CellError::Ref)?;
-        let id = format!("table:{}", table.name);
+        let id = if self.sheet_name == self.root_sheet_name {
+            format!("table:{}", table.name)
+        } else {
+            format!("table:{}!{}", self.sheet_name, table.name)
+        };
         if self.nodes.contains_key(&id) || self.limit(depth) {
             return Ok(id);
         }
@@ -393,6 +509,8 @@ impl TraceBuilder<'_> {
                     table.source_name
                 )),
                 coord: None,
+                sheet_name: Some(self.sheet_name.clone()),
+                source_name: None,
             },
         );
         let source_name = table.source_name.clone();
@@ -447,8 +565,11 @@ impl TraceBuilder<'_> {
                     source.sql
                 )),
                 coord: None,
+                sheet_name: Some(self.sheet_name.clone()),
+                source_name: None,
             },
         );
+        self.nodes.get_mut(&id).unwrap().source_name = Some(name.into());
         self.warnings.insert("SQL provenance stops at the named query and its cached result. Contributing database rows are not inferred, including for aggregates or joins. Refresh to observe database changes.".into());
         if source.last_result.is_none() {
             self.can_review = false;
@@ -467,6 +588,16 @@ impl TraceBuilder<'_> {
             return Ok(());
         }
         match expr {
+            Expr::SheetRef { sheet, expr } => {
+                if !self.workbook.sheets.contains_key(sheet) {
+                    self.can_review = false;
+                    return Err(CellError::Ref);
+                }
+                let previous = std::mem::replace(&mut self.sheet_name, sheet.clone());
+                let result = self.expr(parent, expr, current, depth + 1);
+                self.sheet_name = previous;
+                result?;
+            }
             Expr::CellRef(coord) => {
                 let child = self.cell(*coord, depth)?;
                 self.edge(parent, child);
@@ -492,7 +623,7 @@ impl TraceBuilder<'_> {
                 // Resolve to verify the exact column/row scope; retain it in the snapshot.
                 let ctx = WorkbookEvalContext {
                     workbook: self.workbook,
-                    sheet_name: self.sheet_name,
+                    sheet_name: &self.sheet_name,
                     current_coord: current,
                 };
                 if ctx.get_table_column(sref).is_err() {
@@ -524,6 +655,8 @@ impl TraceBuilder<'_> {
                             depends_on: vec![],
                             detail: Some(detail),
                             coord: None,
+                            sheet_name: Some(self.sheet_name.clone()),
+                            source_name: None,
                         },
                     );
                     // Dynamic SQL can select any configured connection. Bind the conservative set, canonically.
@@ -551,5 +684,259 @@ impl TraceBuilder<'_> {
             Expr::Literal(_) => {}
         }
         Ok(())
+    }
+}
+
+impl Workbook {
+    /// Attach bytes to a newly created review. Existing records/versions are never overwritten.
+    pub fn record_review_with_attachments(
+        &mut self,
+        request: ReviewRequest,
+        uploads: Vec<EvidenceUpload>,
+    ) -> Result<ReviewRecord, String> {
+        if uploads.len() > 20
+            || uploads.iter().map(|u| u.bytes.len()).sum::<usize>() > 8 * 1024 * 1024
+        {
+            return Err("Attach at most 20 files totaling 8 MiB per review.".into());
+        }
+        let mut attachments = Vec::new();
+        let mut replaced = BTreeSet::new();
+        for upload in uploads {
+            let filename = upload.filename.trim();
+            let media_type = upload.media_type.trim();
+            if filename.is_empty()
+                || filename.len() > 255
+                || filename.contains(['/', '\\'])
+                || filename.chars().any(char::is_control)
+                || media_type.is_empty()
+                || media_type.len() > 120
+                || media_type.chars().any(char::is_control)
+                || upload.bytes.len() > 2 * 1024 * 1024
+            {
+                return Err("Each attachment needs a safe filename, a media type, and at most 2 MiB of bytes.".into());
+            }
+            let version = if let Some(id) = upload.replaces {
+                if !replaced.insert(id) {
+                    return Err(
+                        "An attachment version can only be replaced once in a review.".into(),
+                    );
+                }
+                if self
+                    .reviews
+                    .iter()
+                    .flat_map(|r| &r.attachments)
+                    .any(|a| a.previous_version_id == Some(id))
+                {
+                    return Err("This evidence version has already been superseded. Replace its latest version instead.".into());
+                }
+                let prior = self
+                    .reviews
+                    .iter()
+                    .filter(|r| {
+                        r.sheet_name == request.sheet_name
+                            && r.coord == CellCoord::new(request.row, request.col)
+                    })
+                    .flat_map(|r| &r.attachments)
+                    .find(|a| a.id == id)
+                    .ok_or(
+                        "Previous evidence version does not belong to this cell's review history.",
+                    )?;
+                prior
+                    .version
+                    .checked_add(1)
+                    .ok_or("Evidence version overflow")?
+            } else {
+                1
+            };
+            attachments.push(EvidenceAttachment {
+                id: Uuid::new_v4(),
+                version,
+                previous_version_id: upload.replaces,
+                filename: filename.into(),
+                media_type: media_type.into(),
+                sha256: format!("{:x}", Sha256::digest(&upload.bytes)),
+                bytes: upload.bytes,
+                created_at: Utc::now(),
+            });
+        }
+        let mut record = self.record_review(request)?;
+        record.attachments = attachments;
+        *self.reviews.last_mut().expect("record_review appended") = record.clone();
+        Ok(record)
+    }
+
+    pub fn compare_review(&self, review_id: Uuid) -> Result<ReviewComparison, String> {
+        let before = self
+            .reviews
+            .iter()
+            .find(|r| r.id == review_id)
+            .ok_or("Review not found")?;
+        let retained = before.input_snapshot.as_ref().ok_or("This legacy review retained only a digest, not its inputs. Exact comparison is unavailable.")?;
+        let current = self
+            .explain_cell(&before.sheet_name, before.coord)
+            .map_err(|e| e.message().to_string())?;
+        Ok(ReviewComparison {
+            before_review_id: before.id,
+            after_review_id: None,
+            before_snapshot: before.snapshot.clone(),
+            after_snapshot: current.snapshot,
+            changes: snapshot_diff(retained, &current.input_snapshot)?,
+        })
+    }
+
+    pub fn compare_review_versions(
+        &self,
+        before_id: Uuid,
+        after_id: Uuid,
+    ) -> Result<ReviewComparison, String> {
+        let before = self
+            .reviews
+            .iter()
+            .find(|r| r.id == before_id)
+            .ok_or("Before review not found")?;
+        let after = self
+            .reviews
+            .iter()
+            .find(|r| r.id == after_id)
+            .ok_or("After review not found")?;
+        if before.sheet_name != after.sheet_name || before.coord != after.coord {
+            return Err("Compare reviews of the same cell.".into());
+        }
+        let a = before
+            .input_snapshot
+            .as_ref()
+            .ok_or("Before review has no retained inputs")?;
+        let b = after
+            .input_snapshot
+            .as_ref()
+            .ok_or("After review has no retained inputs")?;
+        let mut changes = snapshot_diff(a, b)?;
+        diff_json(
+            "/attachments",
+            Some(&serde_json::to_value(&before.attachments).map_err(|e| e.to_string())?),
+            Some(&serde_json::to_value(&after.attachments).map_err(|e| e.to_string())?),
+            &mut changes,
+        );
+        Ok(ReviewComparison {
+            before_review_id: before.id,
+            after_review_id: Some(after.id),
+            before_snapshot: before.snapshot.clone(),
+            after_snapshot: after.snapshot.clone(),
+            changes,
+        })
+    }
+
+    /// Only returns observed, direct-projection result rows with complete declared primary keys.
+    /// This is not aggregate contribution inference and never runs a new query.
+    pub fn source_drilldown(
+        &self,
+        name: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<SourceDrilldown, String> {
+        let source = self.named_sources.get(name).ok_or("Source not found")?;
+        let lineage = source.lineage.as_ref().filter(|l| l.is_editable && !l.primary_keys.is_empty() && l.read_only_columns.is_empty())
+            .ok_or("Row drilldown requires a direct single-table projection with declared primary keys; aggregates, joins and computed projections have no inferred transaction lineage.")?;
+        if self.stale_sources.contains(name) {
+            return Err("Refresh this stale source before drilling down.".into());
+        }
+        let result = source
+            .last_result
+            .as_ref()
+            .ok_or("Refresh the source first")?;
+        let indices: Vec<_> = lineage
+            .primary_keys
+            .iter()
+            .map(|pk| {
+                result
+                    .columns
+                    .iter()
+                    .position(|c| c.name == *pk)
+                    .ok_or("The cached result is missing a primary key column")
+            })
+            .collect::<Result<_, _>>()?;
+        let mut keys = BTreeSet::new();
+        for row in &result.rows {
+            let key: Vec<_> = indices
+                .iter()
+                .map(|i| {
+                    row.get(*i)
+                        .filter(|v| !matches!(v, Value::Null | Value::Blank))
+                        .ok_or("Cached row has an incomplete primary key")
+                })
+                .collect::<Result<_, _>>()?;
+            if !keys.insert(serde_json::to_string(&key).map_err(|e| e.to_string())?) {
+                return Err(
+                    "Cached primary keys are not unique; transaction lineage is unavailable."
+                        .into(),
+                );
+            }
+        }
+        let rows = result
+            .rows
+            .iter()
+            .enumerate()
+            .skip(offset)
+            .take(limit.clamp(1, 500))
+            .map(|(i, row)| SourceDrilldownRow {
+                cached_row_index: i,
+                primary_key: lineage
+                    .primary_keys
+                    .iter()
+                    .zip(indices.iter())
+                    .map(|(pk, idx)| (pk.clone(), row[*idx].clone()))
+                    .collect(),
+                values: row.clone(),
+            })
+            .collect();
+        Ok(SourceDrilldown { source_name: name.into(), connection_name: source.connection_name.clone(),
+            base_table: lineage.base_table.clone().ok_or("No base table")?, sql: source.sql.clone(),
+            columns: result.columns.iter().map(|c| c.name.clone()).collect(), rows, total_rows: result.rows.len(), offset,
+            warning: "Cached source rows, not a live database read. These rows are not claimed to contribute to any selected aggregate formula. Refresh to observe external changes.".into() })
+    }
+}
+
+fn snapshot_diff(
+    a: &ReviewInputSnapshot,
+    b: &ReviewInputSnapshot,
+) -> Result<Vec<SnapshotChange>, String> {
+    let a = serde_json::to_value(a).map_err(|e| e.to_string())?;
+    let b = serde_json::to_value(b).map_err(|e| e.to_string())?;
+    let mut changes = Vec::new();
+    diff_json("", Some(&a), Some(&b), &mut changes);
+    Ok(changes)
+}
+fn diff_json(
+    path: &str,
+    a: Option<&serde_json::Value>,
+    b: Option<&serde_json::Value>,
+    changes: &mut Vec<SnapshotChange>,
+) {
+    use serde_json::Value as J;
+    if a == b {
+        return;
+    }
+    match (a, b) {
+        (Some(J::Object(a)), Some(J::Object(b))) => {
+            let keys: BTreeSet<_> = a.keys().chain(b.keys()).collect();
+            for key in keys {
+                diff_json(
+                    &format!("{}/{}", path, key.replace('~', "~0").replace('/', "~1")),
+                    a.get(key),
+                    b.get(key),
+                    changes,
+                );
+            }
+        }
+        (Some(J::Array(a)), Some(J::Array(b))) => {
+            for i in 0..a.len().max(b.len()) {
+                diff_json(&format!("{path}/{i}"), a.get(i), b.get(i), changes);
+            }
+        }
+        _ => changes.push(SnapshotChange {
+            path: path.into(),
+            before: a.cloned(),
+            after: b.cloned(),
+        }),
     }
 }
