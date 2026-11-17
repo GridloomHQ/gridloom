@@ -52,6 +52,9 @@ jobs:
           echo "DUCKDB_INCLUDE_DIR=$duckdb_native_dir" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$duckdb_native_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
+      - name: Test package integrity contracts
+        run: python3 -m unittest discover -s scripts/tests -v
+
       - name: Check workspace
         run: cargo check --workspace
 
@@ -117,3 +120,96 @@ jobs:
       - name: Build frontend
         working-directory: ./frontend
         run: npm run build
+
+  package-linux:
+    name: Verified Linux release packages
+    if: github.event_name == 'push'
+    needs: [test-rust, build-frontend]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      GRIDLOOM_PACKAGE_DIR: ${{ runner.temp }}/gridloom-packages
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Install native build and smoke dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev xvfb dbus-x11 at-spi2-core
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache release dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-release-packages
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install locked DuckDB native library
+        shell: bash
+        run: |
+          duckdb_version=$(python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+          packages = tomllib.loads(Path("Cargo.lock").read_text())["package"]
+          version = next(p["version"] for p in packages if p["name"] == "libduckdb-sys")
+          encoded = int(version.split(".")[1])
+          print(f"{encoded // 10000}.{encoded // 100 % 100}.{encoded % 100}")
+          PY
+          )
+          duckdb_native_dir="$RUNNER_TEMP/gridloom-duckdb/$duckdb_version"
+          mkdir -p "$duckdb_native_dir"
+          curl --fail --location --retry 3 \
+            "https://github.com/duckdb/duckdb/releases/download/v$duckdb_version/libduckdb-linux-amd64.zip" \
+            --output "$duckdb_native_dir/libduckdb.zip"
+          unzip -q -o "$duckdb_native_dir/libduckdb.zip" -d "$duckdb_native_dir"
+          test -s "$duckdb_native_dir/libduckdb.so"
+          echo "DUCKDB_LIB_DIR=$duckdb_native_dir" >> "$GITHUB_ENV"
+          echo "DUCKDB_INCLUDE_DIR=$duckdb_native_dir" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$duckdb_native_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+
+
+      - name: Build exact-commit server and desktop archives
+        run: |
+          scripts/package-linux.sh server
+          scripts/package-linux.sh desktop
+
+      - name: Verify installation integrity and relocated launch
+        shell: bash
+        run: |
+          set -euo pipefail
+          tree=$(git rev-parse HEAD^{tree})
+          for archive in "$GRIDLOOM_PACKAGE_DIR"/*.tar.gz; do
+            extra=()
+            case "$archive" in *-desktop.tar.gz) extra=(--native-window);; esac
+            python3 scripts/package-smoke.py "$archive" \
+              --expected-commit "$GITHUB_SHA" --expected-tree "$tree" "${extra[@]}" 2>&1 \
+              | tee "$archive.smoke.log"
+          done
+
+      - name: Upload verified portable Linux packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: gridloom-linux-x86_64-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            ${{ env.GRIDLOOM_PACKAGE_DIR }}/*.tar.gz
+            ${{ env.GRIDLOOM_PACKAGE_DIR }}/*.sha256
+            ${{ env.GRIDLOOM_PACKAGE_DIR }}/*.smoke.log
+
+      - name: Upload package failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gridloom-package-diagnostics-${{ github.sha }}
+          retention-days: 7
+          path: ${{ env.GRIDLOOM_PACKAGE_DIR }}/*.smoke.log

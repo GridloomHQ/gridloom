@@ -8,6 +8,7 @@
 - Conservative cached source-row drilldown for direct keyed SQL projections.
 - Atomic range edits/copy/paste/fill, persisted formatting, bounded worksheet undo/redo, multi-sheet/cross-sheet formulas.
 - Real Chromium workflow acceptance, Linux server/desktop packaging scripts and native window-open smoke tooling.
+- Exact-commit Ubuntu 24.04 x86_64 release packages in CI, with build identities, complete integrity manifests and relocated backend/native-window smoke before artifact upload.
 - Loopback-host/origin boundary; no claim of trusted reviewer authentication, locked ledger close or audit assurance.
 
 

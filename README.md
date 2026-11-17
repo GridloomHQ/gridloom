@@ -35,7 +35,7 @@ The database remains in its original format. Editing an eligible source-backed t
 
 The worksheet now supports range selection/copy/paste, formula fill, persisted number/bold/italic/fill formatting, bounded undo/redo, multiple sheets and cross-sheet formulas. Reviewed calculations retain their full observed inputs and cached source results, not just a digest. Evidence replacement retains earlier embedded file versions. Valid direct SQL projections can expose cached primary-keyed source rows; ambiguous, joined and aggregate queries cannot claim transaction provenance.
 
-See [the complete workflow and trust boundaries](docs/RELEASE-0.3.md) for CSV examples, clipboard/history limits, snapshot limits and packaging instructions.
+See [the complete workflow and trust boundaries](docs/RELEASE-0.3.md) for CSV examples, clipboard/history limits, snapshot limits and verified CI package download instructions. Main-branch CI builds Linux server/desktop tarballs with exact source identities, checksums and relocation smoke; they are not signed installers.
 
 **Important:** reviewer labels remain self-reported, not authenticated signatures. A review pack is a local working paper, not audit assurance, an external database backup or proof of ledger completeness. Files are unencrypted. Source refreshes observe external changes; they are not monitored automatically. Trusted multi-user review identities and interactive native coverage remain separate release gaps, not implied capabilities.
 

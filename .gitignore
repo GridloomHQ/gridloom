@@ -33,3 +33,7 @@ yarn-error.log*
 # Generated sample databases
 /fixtures/*.sqlite
 /fixtures/*.duckdb
+
+# Python verification helpers
+__pycache__/
+*.py[cod]

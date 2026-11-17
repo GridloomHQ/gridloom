@@ -42,3 +42,20 @@ The server binds loopback and rejects foreign browser origins and non-loopback H
 The launcher works from any working directory; `GRIDLOOM_FRONTEND_DIR` locates static assets. Tests include Rust core/API suites, frontend utility tests and a real Chromium monthly-close smoke test. Native window-open smoke is separate and does not establish full interactive Wry/WebKit coverage. See the release verification notes for what actually ran.
 
 Do not round-trip a 0.3 workbook through an older Gridloom version: older applications may ignore and then discard newer review, attachment or close fields.
+
+
+### Verified CI package downloads
+
+After a successful main-branch CI run, open **Actions → CI → Artifacts** and download `gridloom-linux-x86_64-<commit>`. It contains release-mode server/browser and native desktop tarballs, matching `.sha256` files and relocation smoke logs. Artifacts expire after 14 days; the exact commit remains recorded in the package's `docs/build-info.json`.
+
+From the directory containing a tarball and checksum file:
+
+```bash
+sha256sum -c gridloom-0.3.0-linux-x86_64-desktop.tar.gz.sha256
+tar -xzf gridloom-0.3.0-linux-x86_64-desktop.tar.gz
+./gridloom-0.3.0-linux-x86_64-desktop/gridloom --no-samples
+```
+
+The server variant launches a local URL instead of a native window. The native bundle needs compatible system GTK3/WebKitGTK4.1 and C/C++ runtime libraries. Builds are made on Ubuntu 24.04 x86_64; this is not a universal Linux image, signed installer or proof of publisher authenticity. Keep extracted executable permissions. The launcher locates its bundled DuckDB and frontend assets regardless of the working directory.
+
+For a local Git checkout, run `scripts/package-linux.sh server` or `scripts/package-linux.sh desktop`; `GRIDLOOM_PACKAGE_DIR` optionally chooses the output directory. Uncommitted/untracked source is recorded as dirty. CI refuses dirty or mismatched-commit packages rather than labeling them exact-commit builds.
