@@ -73,6 +73,22 @@ export const Grid: React.FC<GridProps> = ({
     setScrollLeft(e.currentTarget.scrollLeft);
   };
 
+  // Keep dependency navigation (including off-screen cells) visible in the worksheet.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const x = selectedCol * CELL_WIDTH;
+    const y = selectedRow * CELL_HEIGHT;
+    const availableWidth = container.clientWidth - ROW_HEADER_WIDTH;
+    const availableHeight = container.clientHeight - HEADER_HEIGHT;
+    if (x < container.scrollLeft) container.scrollLeft = x;
+    else if (x + CELL_WIDTH > container.scrollLeft + availableWidth)
+      container.scrollLeft = Math.max(0, x + CELL_WIDTH - availableWidth);
+    if (y < container.scrollTop) container.scrollTop = y;
+    else if (y + CELL_HEIGHT > container.scrollTop + availableHeight)
+      container.scrollTop = Math.max(0, y + CELL_HEIGHT - availableHeight);
+  }, [selectedRow, selectedCol]);
+
   // Keyboard navigation
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

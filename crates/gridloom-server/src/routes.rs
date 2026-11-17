@@ -9,6 +9,7 @@ use gridloom_core::chart::ChartDefinition;
 use gridloom_core::db::EngineKind;
 use gridloom_core::lineage::analyze_lineage;
 use gridloom_core::pivot::PivotDefinition;
+use gridloom_core::review::ReviewRequest;
 use gridloom_core::value::{CellCoord, Value};
 use gridloom_core::virtual_view::ViewportRequest;
 use serde::{Deserialize, Serialize};
@@ -41,6 +42,8 @@ pub fn create_router(state: AppState) -> Router {
         // Cells & Virtual Viewport
         .route("/api/cells/set", post(set_cell))
         .route("/api/cells/viewport", post(get_viewport))
+        .route("/api/cells/explain", post(explain_cell))
+        .route("/api/reviews", get(list_reviews).post(record_review))
         // Staged Writeback & Review
         .route(
             "/api/staged",
@@ -284,7 +287,7 @@ async fn create_source(
     let mut wb = state.workbook.write().await;
     let source = wb
         .create_named_source(&req.name, &req.connection_name, &req.sql)
-        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.message().to_string()))?;
     Ok(Json(source))
 }
 
@@ -390,6 +393,7 @@ async fn stage_edit(
         req.original_value,
         req.proposed_value,
     );
+    wb.invalidate_changed_reviews();
     Json(serde_json::json!({ "status": "staged", "id": id }))
 }
 
@@ -405,12 +409,14 @@ async fn discard_staged_item(
 ) -> impl IntoResponse {
     let mut wb = state.workbook.write().await;
     let removed = wb.staged.discard_patch(&id);
+    wb.invalidate_changed_reviews();
     Json(serde_json::json!({ "status": "discarded", "removed": removed }))
 }
 
 async fn discard_all_staged(State(state): State<AppState>) -> impl IntoResponse {
     let mut wb = state.workbook.write().await;
     wb.staged.discard_all();
+    wb.invalidate_changed_reviews();
     Json(serde_json::json!({ "status": "all_discarded" }))
 }
 
@@ -515,4 +521,38 @@ async fn get_chart_data(
 async fn run_benchmarks() -> impl IntoResponse {
     let report = run_performance_benchmarks();
     Json(report)
+}
+
+#[derive(Deserialize)]
+struct ExplainCellRequest {
+    sheet_name: String,
+    row: u32,
+    col: u32,
+}
+
+async fn explain_cell(
+    State(state): State<AppState>,
+    Json(req): Json<ExplainCellRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let wb = state.workbook.read().await;
+    let explanation = wb
+        .explain_cell(&req.sheet_name, CellCoord::new(req.row, req.col))
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.message().to_string()))?;
+    Ok(Json(explanation))
+}
+
+async fn record_review(
+    State(state): State<AppState>,
+    Json(req): Json<ReviewRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let mut wb = state.workbook.write().await;
+    let review = wb
+        .record_review(req)
+        .map_err(|message| (StatusCode::CONFLICT, message))?;
+    Ok(Json(review))
+}
+
+async fn list_reviews(State(state): State<AppState>) -> impl IntoResponse {
+    let wb = state.workbook.read().await;
+    Json(wb.review_history())
 }

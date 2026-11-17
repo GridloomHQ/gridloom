@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { ExplainReviewPanel } from './components/ExplainReviewPanel';
 import { Toolbar } from './components/Toolbar';
 import { FormulaBar } from './components/FormulaBar';
 import { Grid } from './components/Grid';
@@ -11,11 +12,15 @@ import { ChartModal } from './components/ChartModal';
 import { AuditLogModal } from './components/AuditLogModal';
 import { BenchmarkModal } from './components/BenchmarkModal';
 import { api } from './api';
-import { ViewportResponse, WorksheetTable } from './types';
+import { ViewportResponse, WorksheetTable, ReviewDraft } from './types';
 import { parseEdit } from './utils/values';
 import { coordToA1 } from './utils/coords';
 
 export const App: React.FC = () => {
+  const reviewDrafts = useRef(new Map<string, ReviewDraft>());
+  const [isExplainOpen, setIsExplainOpen] = useState(false);
+  const [reviewRevision, setReviewRevision] = useState(0);
+  const [workbookEpoch, setWorkbookEpoch] = useState(0);
   const [sheetName, setSheetName] = useState('Sheet1');
   const [selectedRow, setSelectedRow] = useState(0);
   const [selectedCol, setSelectedCol] = useState(0);
@@ -58,6 +63,7 @@ export const App: React.FC = () => {
         setTables(wb.sheets.find(s => s.name === wb.active_sheet)?.tables ?? []);
       }
       setStagedCount(staged.length);
+      setReviewRevision(n => n + 1);
     } catch {
       // ignore
     }
@@ -160,6 +166,8 @@ export const App: React.FC = () => {
   const handleNewWorkbook = async () => {
     if (confirm('Create a new workbook? Unsaved changes will be discarded.')) {
       await api.newWorkbook();
+      setWorkbookEpoch(e => e + 1);
+      reviewDrafts.current.clear();
       await refreshMetadata();
       fetchViewportData(0, 0, 40, 20);
       setStatusMsg('Created new workbook');
@@ -183,6 +191,8 @@ export const App: React.FC = () => {
     if (path) {
       try {
         await api.openWorkbook(path);
+        setWorkbookEpoch(e => e + 1);
+        reviewDrafts.current.clear();
         await refreshMetadata();
         fetchViewportData(0, 0, 40, 20);
         setStatusMsg(`Opened workbook from ${path}`);
@@ -220,6 +230,7 @@ export const App: React.FC = () => {
     <div className="flex flex-col h-screen w-screen bg-slate-100 overflow-hidden font-sans">
       {/* Top Application Toolbar */}
       <Toolbar
+        onOpenExplain={() => setIsExplainOpen(true)}
         onOpenSchemaBrowser={() => setIsSchemaBrowserOpen(true)}
         onOpenQueryEditor={() => setIsQueryEditorOpen(true)}
         onOpenInsertTable={() => setIsInsertTableOpen(true)}
@@ -245,6 +256,7 @@ export const App: React.FC = () => {
       />
 
       {/* Virtualized Worksheet Grid Canvas */}
+      <div className="flex flex-1 min-h-0 overflow-hidden">
       <Grid
         sheetName={sheetName}
         viewport={viewport}
@@ -257,6 +269,16 @@ export const App: React.FC = () => {
         onCommitCell={handleCommitCell}
         onViewportChange={handleViewportChange}
       />
+
+      {isExplainOpen && <ExplainReviewPanel
+        key={`${workbookEpoch}:${sheetName}:${selectedRow}:${selectedCol}`}
+        sheetName={sheetName} row={selectedRow} col={selectedCol}
+        revision={`${viewport?.generation ?? 0}:${reviewRevision}`}
+        drafts={reviewDrafts.current}
+        onClose={() => setIsExplainOpen(false)}
+        onNavigate={(row, col) => { setSelectedRow(row); setSelectedCol(col); }}
+      />}
+      </div>
 
       {/* Bottom Sheet Tabs & Status Bar */}
       <div className="flex items-center justify-between border-t border-slate-300 bg-white px-3 py-1 text-xs select-none shadow-inner">

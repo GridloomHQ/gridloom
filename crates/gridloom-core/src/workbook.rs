@@ -8,13 +8,14 @@ use crate::functions::EvaluationContext;
 use crate::lineage::analyze_lineage;
 use crate::parser::parse_formula;
 use crate::pivot::{compute_pivot, PivotDefinition, PivotResult};
+use crate::review::ReviewRecord;
 use crate::spill::SpillManager;
 use crate::table::{NamedSource, WorksheetTable};
 use crate::value::{CellCoord, CellRange, Value};
 use crate::virtual_view::{CellRenderData, ViewportRequest, ViewportResponse};
 use crate::writeback::StagedRepository;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -141,11 +142,20 @@ pub struct Workbook {
     pub pivots: HashMap<String, PivotDefinition>,
     pub charts: HashMap<String, ChartDefinition>,
     pub dep_graph: DependencyGraph,
+    pub reviews: Vec<ReviewRecord>,
+    pub stale_sources: BTreeSet<String>,
+    pub stale_calculation_sheets: BTreeSet<String>,
     pub file_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SerializedWorkbook {
+    #[serde(default)]
+    pub reviews: Vec<ReviewRecord>,
+    #[serde(default)]
+    pub stale_sources: BTreeSet<String>,
+    #[serde(default)]
+    pub stale_calculation_sheets: BTreeSet<String>,
     pub sheets: HashMap<String, Sheet>,
     pub active_sheet: String,
     pub connection_configs: HashMap<String, ConnectionConfig>,
@@ -171,6 +181,9 @@ impl Workbook {
             pivots: HashMap::new(),
             charts: HashMap::new(),
             dep_graph: DependencyGraph::new(),
+            reviews: Vec::new(),
+            stale_sources: BTreeSet::new(),
+            stale_calculation_sheets: BTreeSet::new(),
             file_path: None,
         }
     }
@@ -247,6 +260,13 @@ impl Workbook {
         conn_name: &str,
         sql: &str,
     ) -> Result<NamedSource, CellError> {
+        // Replacing a source would require atomic schema/range/collision migration for every table.
+        // Keep source creation distinct from refresh so changed column order cannot silently relabel data.
+        if self.named_sources.contains_key(name) {
+            return Err(CellError::Sql(format!(
+                "Data source '{name}' already exists. Refresh it or choose a different name."
+            )));
+        }
         let conn = self
             .connections
             .get(conn_name)
@@ -274,6 +294,12 @@ impl Workbook {
         };
 
         self.named_sources.insert(name.to_string(), source.clone());
+        self.stale_sources.remove(name);
+        let sheets: Vec<_> = self.sheets.keys().cloned().collect();
+        for sheet in sheets {
+            self.recalculate(&sheet)?;
+        }
+        self.invalidate_changed_reviews();
         Ok(source)
     }
 
@@ -321,6 +347,7 @@ impl Workbook {
         }
         self.sheets = sheets;
         self.named_sources.get_mut(name).unwrap().last_result = Some(result);
+        self.stale_sources.remove(name);
         let sheet_names: Vec<_> = self.sheets.keys().cloned().collect();
         for sheet_name in sheet_names {
             self.recalculate(&sheet_name)?;
@@ -372,6 +399,8 @@ impl Workbook {
         }
 
         sheet.tables.insert(table_name.to_string(), table.clone());
+        self.recalculate(sheet_name)?;
+        self.invalidate_changed_reviews();
         Ok(table)
     }
 
@@ -381,11 +410,23 @@ impl Workbook {
         coord: CellCoord,
         raw_input: String,
     ) -> Result<(), CellError> {
-        let sheet = self
-            .sheets
-            .get_mut(sheet_name)
-            .ok_or_else(|| CellError::Ref)?;
-
+        let original_sheet = self.sheets.get(sheet_name).ok_or(CellError::Ref)?.clone();
+        let original_graph = self.dep_graph.clone();
+        let sheet = self.sheets.get_mut(sheet_name).ok_or(CellError::Ref)?;
+        if sheet
+            .tables
+            .values()
+            .any(|table| table.range.contains(coord))
+        {
+            return Err(CellError::Ref);
+        }
+        if sheet
+            .spills
+            .get_spill_at(&coord)
+            .is_some_and(|spill| spill.anchor != coord)
+        {
+            return Err(CellError::Spill);
+        }
         sheet.spills.clear_anchor(&coord);
         let cell_data = CellData::new(coord, raw_input);
         sheet.cells.insert(coord.to_a1(), cell_data);
@@ -394,8 +435,13 @@ impl Workbook {
         let cell_node = DepNode::Cell(coord);
         self.dep_graph.clear_dependencies(&cell_node);
 
-        // Recalculate
-        self.recalculate(sheet_name)?;
+        // Recalculate atomically so rejected edits preserve both model and sign-offs.
+        if let Err(error) = self.recalculate(sheet_name) {
+            self.sheets.insert(sheet_name.into(), original_sheet);
+            self.dep_graph = original_graph;
+            return Err(error);
+        }
+        self.invalidate_changed_reviews();
         Ok(())
     }
 
@@ -439,6 +485,8 @@ impl Workbook {
                 .collect();
             if before == after {
                 self.dep_graph.generation += 1;
+                self.stale_calculation_sheets.remove(sheet_name);
+                self.invalidate_changed_reviews();
                 return Ok(());
             }
         }
@@ -838,15 +886,43 @@ impl Workbook {
             .connections
             .get(connection_name)
             .ok_or_else(|| CellError::Sql(format!("Connection '{}' not found", connection_name)))?;
-        self.staged.apply_writeback(conn, connection_name)
+        let record = self.staged.apply_writeback(conn, connection_name)?;
+        self.stale_sources.extend(
+            self.named_sources
+                .values()
+                .filter(|source| source.connection_name == connection_name)
+                .map(|source| source.name.clone()),
+        );
+        self.stale_calculation_sheets
+            .extend(self.sheets.keys().cloned());
+        // Cached source results have not necessarily been refreshed after the database transaction.
+        // Conservatively invalidate all local sign-offs, including direct SQL calculations.
+        for review in &mut self.reviews {
+            review.invalidated = true;
+            review.invalidation_reason = Some(
+                "Database writeback was applied. Refresh sources, recalculate and review again."
+                    .into(),
+            );
+        }
+        // Direct SQL formulas can be recalculated without replacing cached named-source results.
+        // Keep a persistent guard on any sheet that cannot be recalculated after the commit.
+        let sheets: Vec<_> = self.sheets.keys().cloned().collect();
+        for sheet in sheets {
+            let _ = self.recalculate(&sheet);
+        }
+        Ok(record)
     }
 
     /// Atomic file package save
     pub fn save_to_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), CellError> {
+        self.invalidate_changed_reviews();
         let p = path.as_ref().to_path_buf();
         let tmp_path = p.with_extension("gridloom.tmp");
 
         let serialized = SerializedWorkbook {
+            reviews: self.reviews.clone(),
+            stale_sources: self.stale_sources.clone(),
+            stale_calculation_sheets: self.stale_calculation_sheets.clone(),
             sheets: self.sheets.clone(),
             active_sheet: self.active_sheet.clone(),
             connection_configs: self.connection_configs.clone(),
@@ -892,6 +968,9 @@ impl Workbook {
             staged: serialized.staged,
             pivots: serialized.pivots,
             charts: serialized.charts,
+            reviews: serialized.reviews,
+            stale_sources: serialized.stale_sources,
+            stale_calculation_sheets: serialized.stale_calculation_sheets,
             dep_graph: DependencyGraph::new(),
             file_path: Some(p),
         };
@@ -916,6 +995,12 @@ impl Workbook {
             }
         }
 
+        // Rebuild calculated values and dependencies rather than trusting persisted caches.
+        let sheets: Vec<_> = wb.sheets.keys().cloned().collect();
+        for sheet in sheets {
+            wb.recalculate(&sheet)?;
+        }
+        wb.invalidate_changed_reviews();
         Ok(wb)
     }
 }

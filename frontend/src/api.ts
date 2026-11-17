@@ -1,5 +1,8 @@
 import {
   AuditRecord,
+  CellExplanation,
+  ReviewRecord,
+  ReviewInput,
   CellValue,
   WorkbookSummary,
   BenchmarkSuiteReport,
@@ -36,6 +39,11 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  explainCell: (sheet_name: string, row: number, col: number) =>
+    fetchJson<CellExplanation>('/api/cells/explain', { method: 'POST', body: JSON.stringify({ sheet_name, row, col }) }),
+  getReviews: () => fetchJson<ReviewRecord[]>('/api/reviews'),
+  saveReview: (data: ReviewInput) =>
+    fetchJson<ReviewRecord>('/api/reviews', { method: 'POST', body: JSON.stringify(data) }),
   getWorkbook: () => fetchJson<WorkbookSummary>('/api/workbook'),
   newWorkbook: () => fetchJson<{ status: string }>('/api/workbook/new', { method: 'POST' }),
   openWorkbook: (path: string) => fetchJson<any>('/api/workbook/open', { method: 'POST', body: JSON.stringify({ path }) }),

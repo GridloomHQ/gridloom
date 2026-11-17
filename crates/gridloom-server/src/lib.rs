@@ -30,6 +30,7 @@ pub async fn build_app(open_samples: bool) -> anyhow::Result<axum::Router> {
                 "Invoices",
                 gridloom_core::value::CellCoord::new(1, 1), // B2
             );
+            sample_data::seed_sample_financial_model(&mut workbook)?;
         }
     }
 

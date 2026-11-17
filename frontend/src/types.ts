@@ -178,3 +178,52 @@ export interface BenchmarkSuiteReport {
   passed_correctness_gate: boolean;
   passed_resource_gate: boolean | null;
 }
+
+
+export interface EvidenceReference { label: string; reference: string }
+export interface ReviewRecord {
+  id: string;
+  sheet_name: string;
+  coord: CellCoord;
+  decision: 'Reviewed' | 'Question';
+  reviewer: string;
+  note: string;
+  evidence: EvidenceReference[];
+  created_at: string;
+  snapshot: string;
+  invalidated: boolean;
+  invalidation_reason: string | null;
+}
+export interface ExplanationNode {
+  id: string;
+  kind: 'cell' | 'table' | 'source' | 'sql';
+  label: string;
+  formula: string | null;
+  value: CellValue | null;
+  depends_on: string[];
+  detail: string | null;
+  coord: CellCoord | null;
+}
+export interface CellExplanation {
+  sheet_name: string;
+  coord: CellCoord;
+  value: CellValue;
+  formula: string | null;
+  nodes: ExplanationNode[];
+  warnings: string[];
+  snapshot: string;
+  can_review: boolean;
+  review: ReviewRecord | null;
+}
+export interface ReviewInput {
+  sheet_name: string;
+  row: number;
+  col: number;
+  expected_snapshot: string;
+  decision: 'Reviewed' | 'Question';
+  reviewer: string;
+  note: string;
+  evidence: EvidenceReference[];
+}
+
+export interface ReviewDraft { reviewer: string; decision: 'Reviewed' | 'Question'; note: string; evidence: EvidenceReference[] }

@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 
 interface ToolbarProps {
+  onOpenExplain: () => void;
   onOpenSchemaBrowser: () => void;
   onOpenQueryEditor: () => void;
   onOpenInsertTable: () => void;
@@ -34,6 +35,7 @@ interface ToolbarProps {
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
+  onOpenExplain,
   onOpenSchemaBrowser,
   onOpenQueryEditor,
   onOpenInsertTable,
@@ -59,7 +61,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           </div>
           <span>Gridloom</span>
           <span className="text-[10px] px-1 py-0.2 bg-emerald-100 text-emerald-800 rounded font-semibold ml-0.5">
-            MVP
+            0.2 preview
           </span>
         </div>
 
@@ -178,6 +180,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </button>
       </div>
 
+      <button onClick={onOpenExplain} className="px-3 py-1 rounded bg-indigo-100 text-indigo-900 font-semibold hover:bg-indigo-200">
+        Explain &amp; Review
+      </button>
       {/* Analysis, Charts, Benchmarks & Audit */}
       <div className="flex items-center gap-1 pl-2">
         <button

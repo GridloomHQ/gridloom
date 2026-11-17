@@ -95,3 +95,22 @@ fn create_sample_duckdb(path: &Path) -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+/// A deliberately small, inspectable cash-reserve model for the sample workbook.
+pub fn seed_sample_financial_model(workbook: &mut gridloom_core::Workbook) -> anyhow::Result<()> {
+    use gridloom_core::CellCoord;
+    for (row, label, input) in [
+        (1, "Cash collected", "=SUMIF(Invoices[status],\"Paid\",Invoices[amount])"),
+        (2, "Invoice total", "=SUM(Invoices[amount])"),
+        (3, "Collection rate", "=IFERROR(J2/J3,0)"),
+        (5, "Monthly fixed costs", "25000"),
+        (6, "Reserve months", "3"),
+        (7, "Cash after reserve", "=J2-J6*J7"),
+    ] {
+        workbook.set_cell("Sheet1", CellCoord::new(row, 8), label.into())?;
+        workbook.set_cell("Sheet1", CellCoord::new(row, 9), input.into())?;
+    }
+    workbook.set_cell("Sheet1", CellCoord::new(9, 8), "Select J8, then Explain & Review".into())?;
+    workbook.set_cell("Sheet1", CellCoord::new(10, 8), "Illustrative assumptions, not accounting advice".into())?;
+    Ok(())
+}
