@@ -74,6 +74,7 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Build application binaries
+        id: binaries
         run: cargo build --locked -p gridloom-server -p gridloom-desktop
 
       - name: Real browser monthly-close acceptance
@@ -81,6 +82,7 @@ jobs:
         run: npm run test:browser
 
       - name: Native window-open smoke
+        if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
         run: scripts/native-window-smoke.sh
 
       - name: Upload smoke evidence
@@ -90,6 +92,7 @@ jobs:
           name: gridloom-smoke-evidence
           path: |
             target/browser-smoke/*.png
+            target/browser-smoke/*.log
             target/native-smoke/*.log
 
   build-frontend:

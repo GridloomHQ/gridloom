@@ -2,19 +2,19 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const artifacts=path.join(root,'target/browser-smoke');mkdirSync(artifacts,{recursive:true});
 const server=spawn(process.env.GRIDLOOM_SERVER||path.join(root,'target/debug/gridloom-server'),['--port','0','--no-samples'],{cwd:root,env:process.env,stdio:['ignore','pipe','pipe']});
 let log='';server.stdout.on('data',d=>log+=d);server.stderr.on('data',d=>log+=d);
-let browser;
+let browser, page;
 try{
  const base=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error(`Server timeout: ${log}`)),30000);const poll=setInterval(()=>{const m=log.match(/Server running at (http:\/\/127\.0\.0\.1:\d+)/);if(m){clearInterval(poll);clearTimeout(timer);resolve(m[1]);}},50);server.on('exit',code=>{clearInterval(poll);clearTimeout(timer);reject(new Error(`Server exited ${code}: ${log}`));});});
  browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:existsSync('/usr/bin/chromium')?{executablePath:'/usr/bin/chromium'}:{}),args:['--no-sandbox']});
  const context=await browser.newContext({viewport:{width:1440,height:1000},permissions:['clipboard-read','clipboard-write']});
- const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(base);await page.getByRole('grid',{name:'Sheet1 worksheet'}).waitFor();
  const cell=name=>page.getByRole('gridcell',{name,exact:true});
  async function edit(name,value){await cell(name).dblclick();const input=page.getByRole('textbox',{name:`Edit ${name}`,exact:true});await input.fill(value);await input.press('Enter');await page.waitForFunction(()=>document.querySelector('[role="grid"]')?.getAttribute('aria-busy')==='false');}
@@ -32,6 +32,7 @@ try{
  await modal.getByLabel('Import period',{exact:true}).fill('2026-10');
  const csv='account,name,debit,credit\n1000,Cash,10000,0\n1200,Processor clearing,5000,0\n4000,Sales,0,16000\n5000,Processor fees,1000,0';
  await modal.getByLabel('Trial balance CSV',{exact:true}).fill(csv);await modal.getByRole('button',{name:'Import and generate P&L',exact:true}).dblclick();
+ await modal.getByLabel('Mapping 1000',{exact:true}).waitFor();
  assert.equal(await modal.getByLabel('Existing close period',{exact:true}).locator('option').count(),2,'Repeated import clicks must create exactly one period');
  await modal.getByLabel('Mapping 1000',{exact:true}).selectOption('Balance sheet');await modal.getByLabel('Mapping 1200',{exact:true}).selectOption('Balance sheet');await modal.getByLabel('Mapping 4000',{exact:true}).selectOption('Revenue');await modal.getByLabel('Mapping 5000',{exact:true}).selectOption('Cost of sales');
  await modal.getByRole('button',{name:'Save account mappings',exact:true}).click();await modal.getByText('Mappings saved and P&L recalculated.',{exact:true}).waitFor();await modal.getByText('Trial balance balances',{exact:true}).waitFor();
@@ -53,4 +54,8 @@ try{
  const saved=path.join(artifacts,'acceptance.gridloom');page.once('dialog',d=>d.accept(saved));await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByText(`Saved workbook to ${saved}`,{exact:true}).waitFor();
  page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'New',exact:true}).click();await page.getByRole('grid',{name:'Sheet1 worksheet'}).waitFor();page.once('dialog',d=>d.accept(saved));await page.getByRole('button',{name:'Open',exact:true}).click();await page.getByRole('grid',{name:'Close 2026-11 v1 worksheet'}).waitFor();
  assert.equal(errors.length,0,errors.join('\n'));console.log('PASS real browser: ranges/format/fill/undo/copy, cross-sheet formula, monthly import/map/reconcile, dated support/materiality note, stale same-total mapping review, exact compare/export, rollforward, save/reopen.');
+}catch(error){
+ writeFileSync(path.join(artifacts,'server.log'),log);
+ if(page)await page.screenshot({path:path.join(artifacts,'failure.png'),fullPage:true}).catch(()=>{});
+ throw error;
 }finally{if(browser)await browser.close();server.kill('SIGTERM');}
