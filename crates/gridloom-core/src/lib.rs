@@ -8,6 +8,7 @@ pub mod functions;
 pub mod lineage;
 pub mod parser;
 pub mod pivot;
+pub mod review;
 pub mod spill;
 pub mod table;
 pub mod value;

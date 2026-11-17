@@ -29,6 +29,22 @@ The database remains in its original format. Editing an eligible source-backed t
 
 ---
 
+## 0.2 Preview: Explain & Review
+
+Select a populated cell and click **Explain & Review**. The sidebar shows the current cached value, formula, transitive cell/range/spill dependencies, and named-table/query boundaries. In the sample workbook, **J8** is a small cash-reserve model: change the fixed-cost assumption in **J6** to see its downstream review become stale.
+
+- **Record review** saves a self-reported reviewer label, note and optional evidence references against a content snapshot.
+- **Circle up a question** records an unresolved question on the same cell. Earlier records remain in its review history.
+- Changes to an upstream input, formula or observed source result invalidate prior records, even if the displayed total is unchanged. Restoring the old input does not silently restore a sign-off. Unrelated cell edits do not invalidate an ordinary cell-only model.
+- A changed snapshot is rejected if submitted from an outdated sidebar. Review history and evidence references are saved inside the `.gridloom` file when you click **Save**. Older files without review records still open.
+- Pending database patches block review because staged overlays do not feed formula calculations. Applied writeback conservatively invalidates all prior records; affected named sources must be refreshed before their totals can be reviewed again.
+
+**Boundaries:** This is a local review notebook, not audit assurance or authenticated multi-user approval. Evidence references are text, not uploaded or verified documents, and external document edits are not monitored. SQL explanations stop at the query and cached result, including joins and aggregates: they do not identify contributing database rows. External database changes are only observed on refresh/recalculation. All formula branches are conservatively included. Traces beyond 256 nodes or 64 levels, blank cells and error-containing calculations cannot be reviewed. Table/source dependencies bind the entire cached result, so changes outside the exact referenced column can conservatively invalidate a review.
+
+**Acceptance example:** Calculate a P&L total with `=SUMIF(TB[mapping],"P&L",TB[amount])`, add a trial-balance evidence reference and record a review. Change a contributing account's mapping in the source, then refresh. The total is recalculated and the prior review is marked **Needs re-review**, retaining its original note and evidence reference.
+
+---
+
 ## Architecture Overview
 
 ```
