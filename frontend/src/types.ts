@@ -254,3 +254,8 @@ export interface ClosePeriod { id: string; period: string; version: number; shee
 export interface CloseQueueItem { label: string; coord: CellCoord; value: CellValue; status: string; review_id: string | null }
 export interface LiveCloseAccount { row: number; imported_account: string; account: string; name: string; mapping: string; debit: string | null; credit: string | null; identity_matches_import: boolean }
 export interface CloseStatus { period: ClosePeriod; live_accounts: LiveCloseAccount[]; debits: string; credits: string; difference: string; balanced: boolean; unmapped_accounts: string[]; queue: CloseQueueItem[]; ready_for_close: boolean; warnings: string[] }
+export interface ReviewPack {
+  format: 'gridloom-review-pack'; version: number; exported_at: string;
+  status: CloseStatus; worksheet: unknown; reviews: ReviewRecord[];
+  explanations: CellExplanation[]; limitations: string[];
+}

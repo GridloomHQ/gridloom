@@ -1,5 +1,5 @@
 import {
-  CellCoord, CellRange, CellStyle, EvidenceUpload, ReviewComparison, SourceDrilldown, ClosePeriod, CloseStatus,
+  ReviewPack, CellCoord, CellRange, CellStyle, EvidenceUpload, ReviewComparison, SourceDrilldown, ClosePeriod, CloseStatus,
   AuditRecord,
   CellExplanation,
   ReviewRecord,
@@ -58,7 +58,7 @@ export const api = {
   mapCloseAccounts: (request: {period_id:string,mappings:Record<string,string>}) => fetchJson<ClosePeriod>('/api/close/map', {method:'POST',body:JSON.stringify(request)}),
   getCloseStatus: (id: string) => fetchJson<CloseStatus>(`/api/close/${encodeURIComponent(id)}/status`),
   rollforwardClose: (request: {source_period_id:string,period:string,csv:string}) => fetchJson<ClosePeriod>('/api/close/rollforward', {method:'POST',body:JSON.stringify(request)}),
-  exportReviewPack: (id: string) => fetchJson<Record<string, unknown>>(`/api/close/${encodeURIComponent(id)}/pack`),
+  exportReviewPack: (id: string) => fetchJson<ReviewPack>(`/api/close/${encodeURIComponent(id)}/pack`),
   recordAttachedReview: (request: {review:ReviewInput,attachments:EvidenceUpload[]}) => fetchJson<ReviewRecord>('/api/reviews/attached', {method:'POST',body:JSON.stringify(request)}),
   getReviewComparison: (id: string, after?: string) => fetchJson<ReviewComparison>(`/api/reviews/${encodeURIComponent(id)}/compare${after ? `?after=${encodeURIComponent(after)}` : ''}`),
   getSourceDrilldown: (name: string, offset = 0, limit = 50) => fetchJson<SourceDrilldown>(`/api/sources/${encodeURIComponent(name)}/drilldown?offset=${offset}&limit=${limit}`),

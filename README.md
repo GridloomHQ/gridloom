@@ -31,7 +31,7 @@ The database remains in its original format. Editing an eligible source-backed t
 
 ## 0.3 Preview: Monthly Close & Captured Review Evidence
 
-**Monthly close** imports a trial-balance CSV, maps accounts, generates an explained P&L, checks debit-credit reconciliation and exposes a six-line review queue. Attach retained support files, record local reviews or questions, compare exact before/after inputs, roll mappings into a new period and export a self-contained JSON review pack.
+**Monthly close** imports a trial-balance CSV, maps accounts, generates an explained P&L, checks debit-credit reconciliation and exposes a six-line review queue. Attach retained support files, record local reviews or questions, compare exact before/after inputs, roll mappings into a new period and export a self-contained JSON review pack, conventional P&L CSV or a print-friendly readable HTML summary.
 
 The worksheet now supports range selection/copy/paste, formula fill, persisted number/bold/italic/fill formatting, bounded undo/redo, multiple sheets and cross-sheet formulas. Reviewed calculations retain their full observed inputs and cached source results, not just a digest. Evidence replacement retains earlier embedded file versions. Valid direct SQL projections can expose cached primary-keyed source rows; ambiguous, joined and aggregate queries cannot claim transaction provenance.
 

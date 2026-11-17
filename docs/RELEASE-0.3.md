@@ -13,7 +13,7 @@ This release implements a local monthly P&L working-paper workflow, not a hosted
 6. Compare an old review with current inputs or another saved review. Exact JSON-pointer changes preserve before and after values, including cached SQL results.
 7. Save the `.gridloom` file. Reopen it to retain the imported data, mappings, review history, captured input snapshots and embedded evidence.
 8. Roll forward by supplying a later month's NEW trial balance. Only valid account mappings carry forward, not balances or approvals. Prior period worksheets remain intact.
-9. Export a JSON review pack containing source CSV, current working paper, reconciliation, queue, explanations, retained review snapshots and evidence bytes.
+9. Export a JSON review pack containing source CSV, current working paper, reconciliation, queue, explanations, retained review snapshots and evidence bytes. Download a conventional P&L CSV or a print-friendly readable HTML summary for review. Those summaries carry current calculation snapshot IDs, export timestamps and import identity; keep the companion JSON for full captured inputs and evidence bytes. HTML support references are passive text, never opened or fetched. CSV preserves exact decimal characters, but spreadsheet importers may round numeric cells, so import as text when exact preservation is required. No currency is inferred.
 
 ## Spreadsheet tools
 
@@ -40,3 +40,5 @@ The server binds loopback and rejects foreign browser origins and non-loopback H
 `scripts/package-linux.sh server` builds a relocatable server/browser tarball with frontend assets, DuckDB library, launcher, dependency list and SHA-256 manifest. `scripts/package-linux.sh desktop` additionally requires GTK3/WebKitGTK4.1 development packages at build time and runtime libraries on the destination. Distribution/system C/C++ libraries are not bundled. This is not an AppImage, signed installer or universal cross-distribution binary.
 
 The launcher works from any working directory; `GRIDLOOM_FRONTEND_DIR` locates static assets. Tests include Rust core/API suites, frontend utility tests and a real Chromium monthly-close smoke test. Native window-open smoke is separate and does not establish full interactive Wry/WebKit coverage. See the release verification notes for what actually ran.
+
+Do not round-trip a 0.3 workbook through an older Gridloom version: older applications may ignore and then discard newer review, attachment or close fields.

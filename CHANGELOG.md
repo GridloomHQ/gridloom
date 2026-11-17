@@ -3,6 +3,7 @@
 ## 0.3.0 (preview)
 
 - Monthly trial-balance CSV import, account mappings, generated P&L, live reconciliation/review queue, period rollforward and JSON review packs.
+- Readable passive HTML close summaries and exact-decimal P&L CSV, with export time/current snapshot identifiers and injection-safe text handling.
 - Full retained review inputs and precise before/after comparison; embedded hashed support with immutable replacement versions.
 - Conservative cached source-row drilldown for direct keyed SQL projections.
 - Atomic range edits/copy/paste/fill, persisted formatting, bounded worksheet undo/redo, multi-sheet/cross-sheet formulas.

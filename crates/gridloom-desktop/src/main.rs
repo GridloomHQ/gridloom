@@ -113,11 +113,13 @@ fn main() -> anyhow::Result<()> {
             .with_title("Gridloom — SQL-Connected Worksheet")
             .with_inner_size(LogicalSize::new(1280.0, 800.0))
             .build(&event_loop)?;
+        println!("Gridloom native window constructed.");
 
         let webview_url = format!("http://127.0.0.1:{}", actual_port);
         let _webview = WebViewBuilder::new()
             .with_url(&webview_url)
             .build(&window)?;
+        println!("Gridloom native webview initialized.");
 
         event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Wait;
