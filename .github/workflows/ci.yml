@@ -129,7 +129,7 @@ jobs:
     permissions:
       contents: read
     env:
-      GRIDLOOM_PACKAGE_DIR: ${{ runner.temp }}/gridloom-packages
+      GRIDLOOM_PACKAGE_DIR: /tmp/gridloom-packages-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
         with:
