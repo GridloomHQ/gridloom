@@ -52,6 +52,18 @@ The shortcut targets one reference, not an entire formula or range. Quoted strin
 
 Large clear/format/fill actions are rejected before constructing or sending oversized changes. Clipboard parsing bounds the number of fields while reading, not only after building the whole matrix. The existing 10,000-cell operation limit remains; a small paste is not rejected merely because the current selection is large.
 
+## 0.5.6: Trustworthy lookup thresholds
+
+XLOOKUP now gives an exact match priority before choosing the nearest smaller (`-1`) or larger (`1`) value, including on unsorted lookup vectors. Forward and reverse linear search resolve duplicate matches in their respective directions. Horizontal lookup can return a matching column from a multi-row array; vertical lookup can return a row from multiple columns. Lookup and return dimensions must align rather than silently producing a blank.
+
+This release explicitly supports match modes `0`, `-1`, `1` and search modes `1`, `-1`. Wildcard and binary-search modes are not implemented and now return `#VALUE!` rather than silently using different behavior. Modes must be numeric supported integers. Lookup errors are not a missing-match fallback; selected return errors remain errors. VLOOKUP also returns `#REF!` for a requested output column outside the table.
+
+Integer/Decimal comparisons remain exact. Float-only comparisons use finite IEEE floating-point values. Mixed Float and Integer/Decimal comparisons are allowed only when the Float's exact binary value can be represented in the Decimal domain; otherwise `#NUM!` is returned instead of risking a false match. For example, binary Float `0.1` cannot be compared as if it were exact Decimal `0.1`. This conservative contract is not complete Excel coercion or function parity.
+
+Previously saved calculation caches are rebuilt when a workbook opens. A corrected result can change dependent values and invalidate an earlier captured review. Inspect and re-review affected working papers rather than relying on an old displayed result.
+
+The exact-first/nearest and directional-search design follows [Microsoft's XLOOKUP documentation](https://support.microsoft.com/en-us/excel/functions/xlookup-function). MATCH and VLOOKUP approximate searches still require their documented sorted input contracts; this release is not a general lookup-function rewrite.
+
 ## Keyboard editing
 
 - Enter / Shift+Enter: move down / up.

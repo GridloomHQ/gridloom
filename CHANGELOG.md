@@ -1,3 +1,9 @@
+# 0.5.6
+
+- Correct XLOOKUP exact-first nearest matching, directional ties and row/column result alignment.
+- Reject unsupported lookup modes and mismatched shapes instead of silently substituting results.
+- Preserve lookup errors rather than treating them as missing matches; reject out-of-range VLOOKUP output columns.
+
 # 0.5.5
 
 - F4 cycles relative, absolute and mixed references in formula drafts, in both cell and formula-bar editors.

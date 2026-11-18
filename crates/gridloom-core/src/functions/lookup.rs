@@ -129,13 +129,16 @@ pub fn vlookup(args: &[Value]) -> Result<Value, CellError> {
         return Err(CellError::Value);
     }
     let c_idx = (col_index - 1) as usize;
+    if table.first().is_some_and(|row| c_idx >= row.len()) {
+        return Err(CellError::Ref);
+    }
 
     if !range_lookup {
         // Exact match
         for row in &table {
             if let Some(first) = row.first() {
                 if first == lookup_val {
-                    return Ok(row.get(c_idx).cloned().unwrap_or(Value::Blank));
+                    return row.get(c_idx).cloned().ok_or(CellError::Ref);
                 }
             }
         }
@@ -153,79 +156,199 @@ pub fn vlookup(args: &[Value]) -> Result<Value, CellError> {
             }
         }
         if let Some(row) = best_row {
-            Ok(row.get(c_idx).cloned().unwrap_or(Value::Blank))
+            row.get(c_idx).cloned().ok_or(CellError::Ref)
         } else {
             Err(CellError::NA)
         }
     }
 }
 
-pub fn xlookup(args: &[Value]) -> Result<Value, CellError> {
-    if args.len() < 3 {
-        return Err(CellError::Value);
+// XLOOKUP never widens exact accounting values to f64 for comparison.
+// A mixed Float comparison is permitted only when its exact binary rational
+// has an exactly representable Decimal (not merely an f64 roundtrip).
+fn exact_float_decimal(value: f64) -> Result<Decimal, CellError> {
+    if !value.is_finite() {
+        return Err(CellError::Num);
     }
-    let lookup_val = &args[0];
-    let lookup_array = to_matrix(&args[1]);
-    let return_array = to_matrix(&args[2]);
-    let if_not_found = if args.len() > 3 {
-        Some(&args[3])
+    if value == 0.0 {
+        return Ok(Decimal::ZERO);
+    }
+    let bits = value.to_bits();
+    let exponent = ((bits >> 52) & 0x7ff) as i32;
+    let mut mantissa = (bits & ((1u64 << 52) - 1)) as i128;
+    let mut power = if exponent == 0 {
+        -1074
     } else {
-        None
+        exponent - 1023 - 52
     };
-    let match_mode = if args.len() > 4 {
-        args[4].to_i64()?
+    if exponent != 0 {
+        mantissa += 1i128 << 52;
+    }
+    while power < 0 && mantissa % 2 == 0 {
+        mantissa /= 2;
+        power += 1;
+    }
+    let (mantissa, scale) = if power >= 0 {
+        (
+            mantissa
+                .checked_mul(2i128.checked_pow(power as u32).ok_or(CellError::Num)?)
+                .ok_or(CellError::Num)?,
+            0,
+        )
     } else {
-        0
+        let scale = (-power) as u32;
+        if scale > 28 {
+            return Err(CellError::Num);
+        }
+        (
+            mantissa
+                .checked_mul(5i128.checked_pow(scale).ok_or(CellError::Num)?)
+                .ok_or(CellError::Num)?,
+            scale,
+        )
     };
-    let search_mode = if args.len() > 5 {
-        args[5].to_i64()?
-    } else {
-        1
-    };
-
-    let flat_lookup: Vec<Value> = lookup_array.into_iter().flatten().collect();
-
-    let indices: Vec<usize> = if search_mode == -1 {
-        (0..flat_lookup.len()).rev().collect()
-    } else {
-        (0..flat_lookup.len()).collect()
-    };
-
-    let mut found_idx = None;
-    for idx in indices {
-        let item = &flat_lookup[idx];
-        let matched = match match_mode {
-            0 => item == lookup_val,
-            -1 => item <= lookup_val,
-            1 => item >= lookup_val,
-            _ => item == lookup_val,
+    Decimal::try_from_i128_with_scale(if bits >> 63 != 0 { -mantissa } else { mantissa }, scale)
+        .map_err(|_| CellError::Num)
+}
+fn xlookup_compare(a: &Value, b: &Value) -> Result<Option<std::cmp::Ordering>, CellError> {
+    use std::cmp::Ordering;
+    for value in [a, b] {
+        match value {
+            Value::Error(e) => return Err(e.clone()),
+            Value::Float(n) if !n.is_finite() => return Err(CellError::Num),
+            Value::Array(_) => return Err(CellError::Value),
+            _ => {}
+        }
+    }
+    match (a, b) {
+        (Value::Float(a), Value::Integer(b)) => {
+            Ok(exact_float_decimal(*a)?.partial_cmp(&Decimal::from(*b)))
+        }
+        (Value::Integer(a), Value::Float(b)) => {
+            Ok(Decimal::from(*a).partial_cmp(&exact_float_decimal(*b)?))
+        }
+        (Value::Float(a), Value::Decimal(b)) => Ok(exact_float_decimal(*a)?.partial_cmp(b)),
+        (Value::Decimal(a), Value::Float(b)) => Ok(a.partial_cmp(&exact_float_decimal(*b)?)),
+        (Value::Blank, Value::Blank)
+        | (Value::Null, Value::Null)
+        | (Value::EmptyText, Value::EmptyText) => Ok(Some(Ordering::Equal)),
+        _ => Ok(a.partial_cmp(b)),
+    }
+}
+fn xlookup_mode(value: &Value, allowed: &[i64]) -> Result<i64, CellError> {
+    if let Value::Error(e) = value {
+        return Err(e.clone());
+    }
+    // Compare against the small exact allowed integers rather than truncating decimals.
+    for mode in allowed {
+        let matched = match value {
+            Value::Integer(n) => n == mode,
+            Value::Decimal(n) => *n == Decimal::from(*mode),
+            Value::Float(n) => n.is_finite() && *n == *mode as f64,
+            _ => false,
         };
         if matched {
-            found_idx = Some(idx);
+            return Ok(*mode);
+        }
+    }
+    Err(CellError::Value)
+}
+pub fn xlookup(args: &[Value]) -> Result<Value, CellError> {
+    use std::cmp::Ordering;
+    if !(3..=6).contains(&args.len()) {
+        return Err(CellError::Value);
+    }
+    let lookup_value = &args[0];
+    xlookup_compare(lookup_value, lookup_value)?;
+    for value in [&args[1], &args[2]] {
+        if let Value::Error(e) = value {
+            return Err(e.clone());
+        }
+    }
+    let lookup = to_matrix(&args[1]);
+    let returns = to_matrix(&args[2]);
+    let lookup_cols = lookup.first().map_or(0, Vec::len);
+    let return_cols = returns.first().map_or(0, Vec::len);
+    if lookup.is_empty()
+        || lookup_cols == 0
+        || returns.is_empty()
+        || return_cols == 0
+        || lookup.iter().any(|r| r.len() != lookup_cols)
+        || returns.iter().any(|r| r.len() != return_cols)
+        || (lookup.len() > 1 && lookup_cols > 1)
+    {
+        return Err(CellError::Value);
+    }
+    // A scalar lookup can project either a one-row or one-column result.
+    let horizontal = lookup_cols > 1 || (lookup.len() == 1 && returns.len() > 1);
+    if (horizontal && return_cols != lookup_cols) || (!horizontal && returns.len() != lookup.len())
+    {
+        return Err(CellError::Value);
+    }
+    let values: Vec<&Value> = lookup.iter().flatten().collect();
+    let match_mode = args
+        .get(4)
+        .map(|v| xlookup_mode(v, &[-1, 0, 1]))
+        .transpose()?
+        .unwrap_or(0);
+    let search_mode = args
+        .get(5)
+        .map(|v| xlookup_mode(v, &[-1, 1]))
+        .transpose()?
+        .unwrap_or(1);
+    let indices: Vec<usize> = if search_mode == -1 {
+        (0..values.len()).rev().collect()
+    } else {
+        (0..values.len()).collect()
+    };
+    let mut found = None;
+    for &index in &indices {
+        if xlookup_compare(values[index], lookup_value)? == Some(Ordering::Equal) {
+            found = Some(index);
             break;
         }
     }
-
-    if let Some(idx) = found_idx {
-        // Return element or row/col from return_array
-        if return_array.len() == 1 {
-            // 1D row
-            Ok(return_array[0].get(idx).cloned().unwrap_or(Value::Blank))
-        } else if return_array.first().map_or(0, |r| r.len()) == 1 {
-            // 1D column
-            Ok(return_array.get(idx).and_then(|r| r.first()).cloned().unwrap_or(Value::Blank))
-        } else {
-            // Multi-column or 2D
-            if let Some(r) = return_array.get(idx) {
-                Ok(Value::Array(vec![r.clone()]))
+    if found.is_none() && match_mode != 0 {
+        for &index in &indices {
+            let order = xlookup_compare(values[index], lookup_value)?;
+            let eligible = if match_mode == -1 {
+                order == Some(Ordering::Less)
             } else {
-                Err(CellError::NA)
+                order == Some(Ordering::Greater)
+            };
+            if eligible {
+                let better = match found {
+                    None => true,
+                    Some(best) => {
+                        xlookup_compare(values[index], values[best])?
+                            == Some(if match_mode == -1 {
+                                Ordering::Greater
+                            } else {
+                                Ordering::Less
+                            })
+                    }
+                };
+                if better {
+                    found = Some(index);
+                }
             }
         }
-    } else if let Some(fallback) = if_not_found {
-        Ok(fallback.clone())
+    }
+    let Some(index) = found else {
+        return args.get(3).cloned().ok_or(CellError::NA);
+    };
+    if horizontal {
+        if returns.len() == 1 {
+            Ok(returns[0][index].clone())
+        } else {
+            Ok(Value::Array(
+                returns.iter().map(|row| vec![row[index].clone()]).collect(),
+            ))
+        }
+    } else if return_cols == 1 {
+        Ok(returns[index][0].clone())
     } else {
-        Err(CellError::NA)
+        Ok(Value::Array(vec![returns[index].clone()]))
     }
 }
 
