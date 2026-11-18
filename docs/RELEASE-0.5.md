@@ -127,3 +127,14 @@ These fixes are scoped to these two functions. They do not establish full Excel 
 For structurally valid inputs, cell errors propagate rather than becoming zero, even when another factor is zero. Numeric Float inputs outside the existing Decimal conversion domain return `#NUM!`. Checked multiplication and accumulation return `#NUM!` on overflow rather than crashing. Calculation remains sequential fixed-precision Decimal arithmetic with its existing rounding and tiny-result underflow behavior; it is not an arbitrary-precision dot product.
 
 Existing Gridloom coercions are deliberately retained: numeric text, booleans and date/time serials can contribute numerically; ordinary text, blanks and NULL contribute zero. These coercions differ from Excel's nonnumeric array-entry rules. Shape validation happens before numeric evaluation. Changed results on reopening saved workbooks invalidate previous review snapshots through the existing review mechanism.
+
+
+## 0.5.12: Exact multiple rounding
+
+`CEILING.MATH` and `FLOOR.MATH` no longer divide before deciding how to round. Exact remainders preserve tiny nonzero values and avoid quotient overflow when significance is very small. Final multiples that cannot fit the Decimal domain return `#NUM!` instead of a panic or a rounded substitute.
+
+Existing argument rules remain: omitted or blank significance means 1, negative significance uses its magnitude, and zero significance returns zero. CEILING rounds positive values upward and negative values toward zero by default; nonzero mode reverses the negative direction. FLOOR rounds positive values downward and negative values away from zero by default; nonzero mode reverses the negative direction. Mode uses the existing integer coercion, so fractional numeric modes truncate toward zero. This follows the direction conventions of [CEILING.MATH](https://support.microsoft.com/en-us/excel/functions/ceiling-math-function) and [FLOOR.MATH](https://support.microsoft.com/en-us/excel/functions/floor-math-function), without claiming complete Excel compatibility or changing global numeric coercion.
+
+Already exact multiples remain unchanged. Existing Float-to-Decimal conversion remains approximate where applicable; this fix concerns calculation after that conversion. As with the other calculation fixes, reopening old saved results triggers recalculation and invalidates changed review snapshots.
+
+The existing `CEILING` and `FLOOR` aliases continue to use these same handlers; this does not reproduce Excel's separate legacy alias semantics.

@@ -1,3 +1,8 @@
+# 0.5.12
+
+- CEILING.MATH and FLOOR.MATH round exact remainders rather than a potentially rounded or overflowing quotient.
+- Tiny nonzero inputs retain the correct rounding direction; unrepresentable final multiples return `#NUM!`.
+
 # 0.5.11
 
 - SUMPRODUCT validates matching two-dimensional shapes rather than only flattened cell counts.

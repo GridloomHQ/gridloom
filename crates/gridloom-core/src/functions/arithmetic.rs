@@ -111,26 +111,34 @@ pub fn mod_fn(args: &[Value]) -> Result<Value, CellError> {
     }
     // MOD follows the divisor's sign. Decimal checked_add can silently round this
     // correction; align exact coefficients instead and reject an unrepresentable sum.
-    let remainder = remainder.normalize();
-    let divisor = d.normalize();
-    let scale = remainder.scale().max(divisor.scale());
+    exact_decimal_add(remainder, d).map(Value::Decimal)
+}
+
+/// Exact normalized coefficient addition; never silently rescales the sum.
+/// Equal scales sum in at most 97 bits. At unequal normalized scales, the finer
+/// coefficient is not divisible by ten, so an overflowing aligned coefficient
+/// cannot be rescued by trimming zeros; the other <=96-bit term cannot cancel
+/// its magnitude enough to yield a representable result. Normalize first to
+/// avoid false rejection from redundant fractional trailing zeros.
+fn exact_decimal_add(left: Decimal, right: Decimal) -> Result<Decimal, CellError> {
+    let left = left.normalize();
+    let right = right.normalize();
+    let scale = left.scale().max(right.scale());
     let align = |value: Decimal| {
         value
             .mantissa()
             .checked_mul(10i128.pow(scale - value.scale()))
             .ok_or(CellError::Num)
     };
-    let mut coefficient = align(remainder)?
-        .checked_add(align(divisor)?)
+    let mut coefficient = align(left)?
+        .checked_add(align(right)?)
         .ok_or(CellError::Num)?;
     let mut scale = scale;
     while scale > 0 && coefficient % 10 == 0 {
         coefficient /= 10;
         scale -= 1;
     }
-    Decimal::try_from_i128_with_scale(coefficient, scale)
-        .map(Value::Decimal)
-        .map_err(|_| CellError::Num)
+    Decimal::try_from_i128_with_scale(coefficient, scale).map_err(|_| CellError::Num)
 }
 
 pub fn power(args: &[Value]) -> Result<Value, CellError> {
@@ -254,50 +262,61 @@ pub fn trunc(args: &[Value]) -> Result<Value, CellError> {
     round_decimal(args, DecimalRounding::TowardZero)
 }
 
-pub fn ceiling_math(args: &[Value]) -> Result<Value, CellError> {
-    if args.is_empty() {
-        return Err(CellError::Value);
-    }
-    let n = args[0].to_decimal()?;
-    let sig = if args.len() > 1 && !args[1].is_blank() {
+fn round_multiple(args: &[Value], ceiling: bool) -> Result<Value, CellError> {
+    let n = args.first().ok_or(CellError::Value)?.to_decimal()?;
+    let significance = if args.len() > 1 && !args[1].is_blank() {
         args[1].to_decimal()?.abs()
     } else {
         Decimal::ONE
     };
-    if sig.is_zero() {
+    if significance.is_zero() {
         return Ok(Value::Decimal(Decimal::ZERO));
     }
     let mode = if args.len() > 2 { args[2].to_i64()? } else { 0 };
-    let div = n / sig;
-    let mult = if n < Decimal::ZERO && mode != 0 {
-        div.floor() // towards zero
+    let remainder = n.checked_rem(significance).ok_or(CellError::Num)?;
+    if remainder.is_zero() {
+        return Ok(Value::Decimal(n));
+    }
+    let away = if n.is_sign_negative() {
+        if ceiling {
+            mode != 0
+        } else {
+            mode == 0
+        }
     } else {
-        div.ceil()
+        ceiling
     };
-    Ok(Value::Decimal(mult * sig))
+    let sign = if n.is_sign_negative() {
+        -Decimal::ONE
+    } else {
+        Decimal::ONE
+    };
+    if n.abs() < significance {
+        // Avoid constructing significance-minus-tiny, which can be unrepresentable
+        // even though the correct final result is simply zero or significance.
+        return Ok(Value::Decimal(if away {
+            significance * sign
+        } else {
+            Decimal::ZERO
+        }));
+    }
+    // With |n| >= significance, significance and |remainder| at their common
+    // scale fit the 96-bit coefficient domain; their positive difference is exact.
+    // Add only this adjustment, not the possibly unrepresentable truncated multiple.
+    let adjustment = if away {
+        exact_decimal_add(significance, -remainder.abs())? * sign
+    } else {
+        -remainder
+    };
+    exact_decimal_add(n, adjustment).map(Value::Decimal)
+}
+
+pub fn ceiling_math(args: &[Value]) -> Result<Value, CellError> {
+    round_multiple(args, true)
 }
 
 pub fn floor_math(args: &[Value]) -> Result<Value, CellError> {
-    if args.is_empty() {
-        return Err(CellError::Value);
-    }
-    let n = args[0].to_decimal()?;
-    let sig = if args.len() > 1 && !args[1].is_blank() {
-        args[1].to_decimal()?.abs()
-    } else {
-        Decimal::ONE
-    };
-    if sig.is_zero() {
-        return Ok(Value::Decimal(Decimal::ZERO));
-    }
-    let mode = if args.len() > 2 { args[2].to_i64()? } else { 0 };
-    let div = n / sig;
-    let mult = if n < Decimal::ZERO && mode != 0 {
-        div.ceil() // towards zero
-    } else {
-        div.floor()
-    };
-    Ok(Value::Decimal(mult * sig))
+    round_multiple(args, false)
 }
 
 pub fn sumproduct(args: &[Value]) -> Result<Value, CellError> {
