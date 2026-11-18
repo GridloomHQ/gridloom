@@ -52,9 +52,9 @@ try {
    if(bounds.start_row>100){viewportStarted.resolve();await viewportResume.promise;}
    await route.continue();
  };
- await page.route('**/api/cells/viewport',delayedViewport);await go('D200');await viewportStarted.promise;
+ await page.route('**/api/cells/viewport-panes',delayedViewport);await go('D200');await viewportStarted.promise;
  await grid().focus();await grid().press('F2');assert.equal(await page.getByRole('textbox',{name:'Edit D200',exact:true}).count(),0);
- viewportResume.resolve();await cell('D200').filter({hasText:'existing distant value'}).waitFor();await page.unroute('**/api/cells/viewport',delayedViewport);
+ viewportResume.resolve();await cell('D200').filter({hasText:'existing distant value'}).waitFor();await page.unroute('**/api/cells/viewport-panes',delayedViewport);
  await grid().press('F2');input=page.getByRole('textbox',{name:'Edit D200',exact:true});assert.equal(await input.inputValue(),'existing distant value');await input.press('Escape');await go('A1');
  await edit('B1','=A1*2');await edit('C1','needle');await edit('D1','Needle extra');
  // Add a second sheet through the UI and seed a matching literal.
@@ -101,7 +101,39 @@ try {
  page.once('dialog',d=>d.accept(widthSave));await page.getByRole('button',{name:'Open',exact:true}).click();await page.getByText(`Opened workbook from ${widthSave}`,{exact:true}).waitFor();await idle();await expectWidth(300);
  await page.getByRole('button',{name:'Reset width',exact:true}).click();await idle();await expectWidth(110);assert.equal(await cell('A1').innerText(),'14');
  await go('Z200');await page.waitForFunction(()=>!document.querySelector('input[aria-label="Formula input"]')?.disabled);await edit('Z200','horizontal navigation works');await selected('Z201');await go('Z200');await cell('Z200').filter({hasText:'horizontal navigation works'}).waitFor();
+ await go('Z1');await page.waitForFunction(()=>!document.querySelector('input[aria-label="Formula input"]')?.disabled);await edit('Z1','frozen top label');
+ await go('A200');await page.waitForFunction(()=>!document.querySelector('input[aria-label="Formula input"]')?.disabled);await edit('A200','frozen left label');await go('Z200');
+ // Frozen origin cells remain bounded strips, not one giant origin-to-target fetch.
+ const viewportRequests=[];const observeViewport=request=>{if(request.url().endsWith('/api/cells/viewport-panes'))viewportRequests.push(request.postDataJSON());};page.on('request',observeViewport);
+ const freezeTop=page.getByLabel('Freeze top row',{exact:true}),freezeLeft=page.getByLabel('Freeze first column',{exact:true});
+ await freezeTop.click();await idle();await freezeLeft.click();await idle();await go('Z200');
+ await cell('A1').filter({hasText:'14'}).waitFor();await cell('Z200').filter({hasText:'horizontal navigation works'}).waitFor();await cell('Z1').filter({hasText:'frozen top label'}).waitFor();await cell('A200').filter({hasText:'frozen left label'}).waitFor();
+ const viewportBox=await grid().boundingBox(),frozenBox=await cell('A1').boundingBox();assert(viewportBox&&frozenBox);
+ assert.equal(frozenBox.x,viewportBox.x+48);assert.equal(frozenBox.y,viewportBox.y+26);
+ const frozenScroll=await grid().evaluate(el=>({left:el.scrollLeft,top:el.scrollTop}));assert(frozenScroll.left>0&&frozenScroll.top>0);
+ await cell('A1').dblclick();input=page.getByRole('textbox',{name:'Edit A1',exact:true});assert.equal(await input.inputValue(),'14');
+ const frozenEditor=await input.boundingBox();assert(frozenEditor);assert.equal(frozenEditor.x,frozenBox.x);assert.equal(frozenEditor.y,frozenBox.y);assert.deepEqual(await grid().evaluate(el=>({left:el.scrollLeft,top:el.scrollTop})),frozenScroll);
+ await input.fill('16');await input.press('Tab');await selected('B1');await idle();await cell('A1').filter({hasText:'16'}).waitFor();
+ await go('B2');const b2=await cell('B2').boundingBox();assert(b2);assert(b2.x>=viewportBox.x+48+110);assert(b2.y>=viewportBox.y+52);
+ // Resizing frozen A preserves alignment; scrolling still pins its header and cells.
+ await go('A1');await widthField.fill('180');await page.getByRole('button',{name:'Set width',exact:true}).click();await idle();await go('Z200');await cell('A1').filter({hasText:'16'}).waitFor();assert.equal((await cell('A1').boundingBox()).width,180);
+ await page.getByRole('button',{name:'Search Other',exact:true}).click();await page.getByRole('grid',{name:'Search Other worksheet'}).waitFor();await idle();assert.equal(await freezeTop.isChecked(),false);assert.equal(await freezeLeft.isChecked(),false);
+ await page.getByRole('button',{name:'Sheet1',exact:true}).click();await page.getByRole('grid',{name:'Sheet1 worksheet'}).waitFor();await idle();assert.equal(await freezeTop.isChecked(),true);assert.equal(await freezeLeft.isChecked(),true);
+ const freezeSave=path.join(artifacts,'frozen-panes.gridloom');page.once('dialog',d=>d.accept(freezeSave));await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByText(`Saved workbook to ${freezeSave}`,{exact:true}).waitFor();
+ await freezeTop.click();await idle();await freezeLeft.click();await idle();page.once('dialog',d=>d.accept(freezeSave));await page.getByRole('button',{name:'Open',exact:true}).click();await page.getByText(`Opened workbook from ${freezeSave}`,{exact:true}).waitFor();await idle();assert.equal(await freezeTop.isChecked(),true);assert.equal(await freezeLeft.isChecked(),true);
+ await go('Z200');await cell('A1').filter({hasText:'16'}).waitFor();
+ await freezeTop.click();await idle();assert.equal(await freezeLeft.isChecked(),true);await cell('A200').filter({hasText:'frozen left label'}).waitFor();assert.equal(await cell('Z1').count(),0);
+ await freezeTop.click();await idle();await freezeLeft.click();await idle();await cell('Z1').filter({hasText:'frozen top label'}).waitFor();assert.equal(await cell('A200').count(),0);
+ await freezeLeft.click();await idle();
+ const rejectFreeze=route=>route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:'Synthetic freeze failure'})});await page.route('**/api/sheets/freeze',rejectFreeze);
+ await freezeTop.click();await page.getByText(/Error:.*Synthetic freeze failure/).waitFor();await idle();assert.equal(await freezeTop.isChecked(),true);assert.equal(await freezeLeft.isChecked(),true);await page.unroute('**/api/sheets/freeze',rejectFreeze);
+ page.off('request',observeViewport);
+ assert(viewportRequests.some(r=>r.start_row>100&&r.start_col>0&&r.freeze_top_row&&r.freeze_first_column));
+ const composite=await page.request.post(`${base}/api/cells/viewport-panes`,{data:{sheet_name:'Sheet1',start_row:199,end_row:210,start_col:25,end_col:30,overscan:5,freeze_top_row:true,freeze_first_column:true}});assert(composite.ok());const panes=await composite.json();
+ assert.equal(panes.loaded_ranges.length,4);assert(panes.loaded_ranges.some(r=>r.start_row===0&&r.end_row===0));assert(panes.loaded_ranges.some(r=>r.start_col===0&&r.end_col===0));
+ for(const r of panes.loaded_ranges){assert(r.end_row-r.start_row<100);assert(r.end_col-r.start_col<100);}
+ for(const r of viewportRequests){assert(r.end_row-r.start_row<100,JSON.stringify(r));assert(r.end_col-r.start_col<100,JSON.stringify(r));}
  await page.screenshot({path:path.join(artifacts,'usability.png'),fullPage:true});assert.deepEqual(errors,[]);
- console.log('PASS keyboard commit/navigation, Escape, failed retry, duplicate delayed commit, Go to, Find values/formulas/exact/workbook, stale query and close/reopen.');
+ console.log('PASS keyboard commit/navigation, Escape, failed retry, duplicate delayed commit, Go to, Find values/formulas/exact/workbook, stale query and close/reopen, persisted column widths, frozen panes and atomic bounded viewport.');
 }catch(error){writeFileSync(path.join(artifacts,'server.log'),log);if(page)await page.screenshot({path:path.join(artifacts,'failure.png'),fullPage:true}).catch(()=>{});throw error;}
 finally{if(browser)await browser.close();server.kill('SIGTERM');}

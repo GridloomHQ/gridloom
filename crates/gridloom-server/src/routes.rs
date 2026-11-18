@@ -33,6 +33,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/sheets/select", post(select_sheet))
         .route("/api/sheets/rename", post(rename_sheet))
         .route("/api/sheets/column-width", post(set_column_width))
+        .route("/api/sheets/freeze", post(set_freeze_panes))
         .route("/api/ranges/edit", post(edit_range))
         .route("/api/ranges/read", post(read_range))
         .route("/api/ranges/capture", post(capture_range))
@@ -68,6 +69,7 @@ pub fn create_router(state: AppState) -> Router {
         // Cells & Virtual Viewport
         .route("/api/cells/set", post(set_cell))
         .route("/api/cells/viewport", post(get_viewport))
+        .route("/api/cells/viewport-panes", post(get_viewport_panes))
         .route("/api/cells/find", post(find_cells))
         .route("/api/cells/explain", post(explain_cell))
         .route("/api/cells/dependencies", post(navigate_dependencies))
@@ -109,6 +111,8 @@ async fn health_handler() -> impl IntoResponse {
 struct SheetSummary {
     name: String,
     column_widths: std::collections::HashMap<u32, u16>,
+    freeze_top_row: bool,
+    freeze_first_column: bool,
     tables: Vec<gridloom_core::table::WorksheetTable>,
 }
 
@@ -132,6 +136,8 @@ async fn get_workbook_summary(State(state): State<AppState>) -> impl IntoRespons
             .map(|s| SheetSummary {
                 name: s.name.clone(),
                 column_widths: s.column_widths.clone(),
+                freeze_top_row: s.freeze_top_row,
+                freeze_first_column: s.freeze_first_column,
                 tables: s.tables.values().cloned().collect(),
             })
             .collect(),
@@ -1030,4 +1036,32 @@ async fn set_column_width(
         .set_column_width(&req.sheet_name, req.column, req.width)
         .map_err(bad_request)?;
     Ok(Json(serde_json::json!({"status":"resized"})))
+}
+
+#[derive(Deserialize)]
+struct FreezePanesRequest {
+    sheet_name: String,
+    freeze_top_row: bool,
+    freeze_first_column: bool,
+}
+async fn set_freeze_panes(
+    State(state): State<AppState>,
+    Json(req): Json<FreezePanesRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    state
+        .workbook
+        .write()
+        .await
+        .set_freeze_panes(&req.sheet_name, req.freeze_top_row, req.freeze_first_column)
+        .map_err(bad_request)?;
+    Ok(Json(serde_json::json!({"status":"updated"})))
+}
+
+async fn get_viewport_panes(
+    State(state): State<AppState>,
+    Json(req): Json<gridloom_core::virtual_view::ViewportPanesRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let wb = state.workbook.read().await;
+    let response = wb.get_viewport_panes(&req).map_err(bad_request)?;
+    Ok(Json(response))
 }

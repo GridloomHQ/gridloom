@@ -1,3 +1,4 @@
+import {isCellLoaded} from './utils/frozenViewport';
 import { FindPanel, FindMatch } from './components/FindPanel';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { MonthlyClosePanel } from './components/MonthlyClosePanel';
@@ -49,6 +50,10 @@ export const App: React.FC = () => {
   const viewport = storedViewport?.sheet_name === sheetName ? storedViewport : null;
   const [stagedCount, setStagedCount] = useState(0);
   const [sheetWidths,setSheetWidths]=useState<Record<string,Record<number,number>>>({});
+  const [sheetFreeze,setSheetFreeze]=useState<Record<string,{top:boolean;left:boolean}>>({});
+  const freezeTopRow=sheetFreeze[sheetName]?.top??false,freezeFirstColumn=sheetFreeze[sheetName]?.left??false;
+  const viewportConfigRef=useRef('');
+  viewportConfigRef.current=`${sheetName}:${freezeTopRow}:${freezeFirstColumn}`;
   const [widthDraft,setWidthDraft]=useState('110');
   const columnWidths=sheetWidths[sheetName]??{};
   useEffect(()=>setWidthDraft(String(columnWidths[selectedCol]??110)),[sheetName,selectedCol,sheetWidths]);
@@ -89,6 +94,7 @@ export const App: React.FC = () => {
       if (wb) {
         setSheetName(wb.active_sheet);
         setSheets(wb.sheets.map(s => s.name));
+        setSheetFreeze(Object.fromEntries(wb.sheets.map(s=>[s.name,{top:s.freeze_top_row??false,left:s.freeze_first_column??false}])));
         setSheetWidths(Object.fromEntries(wb.sheets.map(s=>[s.name,s.column_widths??{}])));
         setTables(wb.sheets.find(s => s.name === wb.active_sheet)?.tables ?? []);
       }
@@ -101,14 +107,16 @@ export const App: React.FC = () => {
 
   // Fetch viewport cells
   const fetchViewportData = useCallback(async (startR: number, startC: number, endR: number, endC: number) => {
+    const config=`${sheetName}:${freezeTopRow}:${freezeFirstColumn}`;
+    if(config!==viewportConfigRef.current)return;
     try {
       const request = ++viewportSequence.current;
-      const data = await api.getViewport(sheetName, startR, startC, endR, endC, 5);
-      if (request === viewportSequence.current && data.sheet_name === activeSheetRef.current) setViewport(data);
+      const data = await api.getViewportPanes(sheetName,startR,startC,endR,endC,freezeTopRow,freezeFirstColumn);
+      if (request === viewportSequence.current && data.sheet_name === activeSheetRef.current && config === viewportConfigRef.current) setViewport(data);
     } catch (err: any) {
       console.error('Failed to fetch viewport:', err);
     }
-  }, [sheetName]);
+  }, [sheetName,freezeTopRow,freezeFirstColumn]);
 
   useEffect(() => { void refreshMetadata(); }, [refreshMetadata]);
   useEffect(() => {
@@ -315,7 +323,7 @@ export const App: React.FC = () => {
 
   const activeKey = coordToA1(selectedRow, selectedCol);
   const activeCellData = viewport?.cells[activeKey];
-  const selectedCellLoaded = !!viewport && selectedRow >= viewport.start_row && selectedRow <= viewport.end_row && selectedCol >= viewport.start_col && selectedCol <= viewport.end_col;
+  const selectedCellLoaded = isCellLoaded(viewport,selectedRow,selectedCol);
 
   const findNavigate = (match:FindMatch) => {
     if(mutationLock.current)return;
@@ -358,6 +366,8 @@ export const App: React.FC = () => {
           <label htmlFor="column-width">Column {colIndexToName(selectedCol)} width</label><input id="column-width" aria-label="Column width in pixels" type="number" min="48" max="600" step="1" disabled={busy} value={widthDraft} onChange={e=>setWidthDraft(e.target.value)} className="w-16 border rounded p-1"/>
           <span>px</span><button disabled={busy} className="border rounded px-2 py-1">Set width</button><button type="button" disabled={busy} onClick={()=>resizeColumn(selectedCol,null)} className="border rounded px-2 py-1">Reset width</button>
         </form>
+        <label className="flex items-center gap-1"><input type="checkbox" checked={freezeTopRow} disabled={busy} onChange={e=>void mutate('Updated frozen panes',()=>api.setFreeze(sheetName,e.target.checked,freezeFirstColumn),true)}/>Freeze top row</label>
+        <label className="flex items-center gap-1"><input type="checkbox" checked={freezeFirstColumn} disabled={busy} onChange={e=>void mutate('Updated frozen panes',()=>api.setFreeze(sheetName,freezeTopRow,e.target.checked),true)}/>Freeze first column</label>
       </div>
       {/* Formula Bar */}
       <FormulaBar key={`${workbookEpoch}:${sheetName}`}
@@ -374,6 +384,7 @@ export const App: React.FC = () => {
       <div className="flex flex-1 min-h-0 overflow-hidden">
       <Grid key={workbookEpoch}
         sheetName={sheetName}
+        freezeTopRow={freezeTopRow} freezeFirstColumn={freezeFirstColumn}
         columnWidths={columnWidths} onColumnResize={resizeColumn}
         viewport={viewport}
         selectedRow={selectedRow}

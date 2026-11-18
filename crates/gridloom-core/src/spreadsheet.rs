@@ -111,6 +111,18 @@ impl Workbook {
         }
         Ok(())
     }
+    /// Freeze only presentation; never changes cells, calculations, review state or history.
+    pub fn set_freeze_panes(
+        &mut self,
+        name: &str,
+        freeze_top_row: bool,
+        freeze_first_column: bool,
+    ) -> Result<(), CellError> {
+        let sheet = self.sheets.get_mut(name).ok_or(CellError::Ref)?;
+        sheet.freeze_top_row = freeze_top_row;
+        sheet.freeze_first_column = freeze_first_column;
+        Ok(())
+    }
     pub fn clear_edit_history(&mut self) {
         self.edit_history = Default::default();
     }

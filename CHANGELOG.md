@@ -1,3 +1,8 @@
+# 0.5.2
+
+- Per-sheet frozen first row and first column, independently toggled and persisted.
+- Bounded pane reads under one server lock preserve virtualization and consistent staged values.
+
 # 0.5.1
 
 - Per-sheet column widths, numeric sizing, drag resize with cancel, and reset.

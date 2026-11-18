@@ -94,6 +94,10 @@ pub struct Sheet {
     /// Sparse, presentation-only column widths in CSS pixels.
     #[serde(default)]
     pub column_widths: HashMap<u32, u16>,
+    #[serde(default)]
+    pub freeze_top_row: bool,
+    #[serde(default)]
+    pub freeze_first_column: bool,
 }
 
 impl Sheet {
@@ -106,6 +110,8 @@ impl Sheet {
             max_rows: 1000,
             max_cols: 100,
             column_widths: HashMap::new(),
+            freeze_top_row: false,
+            freeze_first_column: false,
         }
     }
 

@@ -20,6 +20,12 @@ Drag a column header boundary, or set the selected column’s width in pixels be
 
 The design follows the familiar [explicit width and drag sizing pattern](https://support.microsoft.com/en-us/excel/change-column-width-or-row-height), but uses pixels rather than Excel character-width units.
 
+## 0.5.2: Keep the first row and column visible
+
+Toggle **Freeze top row** and **Freeze first column** independently. The first row and/or column stays pinned while the rest of the worksheet scrolls. Settings are per-sheet and saved in the workbook. Frozen cells remain selectable, editable and available to existing clipboard and dependency highlighting. Column resizing still applies.
+
+This bounded first version does not freeze arbitrary numbers of rows or columns, split windows, hide data or change calculations. Frozen strips are read as separate bounded regions within one server read lock rather than one huge rectangle spanning the origin and a distant viewport. All panes observe the same workbook and staged-edit state.
+
 ## Keyboard editing
 
 - Enter / Shift+Enter: move down / up.
@@ -29,10 +35,10 @@ The design follows the familiar [explicit width and drag sizing pattern](https:/
 - Home: first column on this row. Ctrl/Command+Home: A1.
 - Page Up / Page Down: approximately one visible page. Shift extends selection for arrow, Home and page navigation.
 
-Existing copy/paste, formula fill, undo/redo and evidence workflows remain available. This release does not claim Excel file compatibility, full keyboard parity, frozen panes, arbitrary row insertion, sorting, autosave or authenticated review identities.
+Existing copy/paste, formula fill, undo/redo and evidence workflows remain available. This release does not claim Excel file compatibility, full keyboard parity, arbitrary multi-row/multi-column frozen panes, arbitrary row insertion, sorting, autosave or authenticated review identities.
 
 ## Product research and next priorities
 
 Official Excel documentation establishes [Find scope and values/formulas choices](https://support.microsoft.com/en-gb/excel/get-started/find-or-replace-text-and-numbers-on-a-worksheet), [Enter/Tab editing conventions](https://support.microsoft.com/en-us/excel/edit-cell-contents), and [frozen headings](https://support.microsoft.com/en-us/excel/get-started/freeze-panes-to-lock-rows-and-columns). These are useful behavioral references, not a claim of implementation parity.
 
-The next candidates are freeze panes, then safe range sort/filter and explicit data-validation rules. Structural edits, sorting and replace must preserve formula references and invalidate captured reviews correctly. Recovery/autosave needs a clear distinction between a draft, a saved working paper and staged external writeback. XBRL/IFRS remains an add-on concern.
+The next candidates are safe range sort/filter and explicit data-validation rules. Structural edits, sorting and replace must preserve formula references and invalidate captured reviews correctly. Recovery/autosave needs a clear distinction between a draft, a saved working paper and staged external writeback. XBRL/IFRS remains an add-on concern.
