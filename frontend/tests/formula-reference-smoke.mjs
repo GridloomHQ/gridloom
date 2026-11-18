@@ -17,7 +17,7 @@ try {
  const seed=async(row,col,raw_input)=>{const response=await page.request.post(`${base}/api/cells/set`,{data:{sheet_name:'Sheet1',row,col,raw_input}});assert(response.ok(),await response.text());};
  await seed(0,0,'2');await seed(1,0,'3');await seed(2,0,'4');await seed(0,3,'10');
  await page.goto(base);const grid=()=>page.getByRole('grid');const cell=name=>page.getByRole('gridcell',{name,exact:true});const formula=page.getByRole('textbox',{name:'Formula input',exact:true});const idle=()=>page.waitForFunction(()=>document.querySelector('[role="grid"]')?.getAttribute('aria-busy')==='false');
- const setCaret=async(input,start,end=start)=>input.evaluate((el,{start,end})=>el.setSelectionRange(start,end),{start,end});
+ const setCaret=async(input,start,end=start)=>{await input.focus();await input.evaluate((el,{start,end})=>el.setSelectionRange(start,end),{start,end});assert.deepEqual(await input.evaluate(el=>({start:el.selectionStart,end:el.selectionEnd,focused:document.activeElement===el})),{start,end,focused:true});};
  const exactValue=async(input,value)=>{await page.waitForFunction(({el,value})=>el.value===value,{el:await input.elementHandle(),value});assert.equal(await input.inputValue(),value);};
  const raw=async(name)=>{const response=await page.request.post(`${base}/api/cells/viewport`,{data:{sheet_name:'Sheet1',start_row:0,start_col:0,end_row:3,end_col:4,overscan:0}});return(await response.json()).cells[name];};
  await grid().waitFor();let writes=0;page.on('request',r=>{if(r.url().endsWith('/api/cells/set'))writes++;});
