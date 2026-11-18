@@ -109,3 +109,12 @@ Toggle **Show formulas** to display formula text in worksheet cells rather than 
 This is a presentation-only view: no recalculation, database refresh, source writeback or review invalidation. Copying, Find’s explicit value/input modes, selection summaries and exports retain their existing behavior. Columns are not automatically widened; resize a column or use the formula bar to inspect a long formula. Finish or cancel an open draft before changing this view.
 
 The feature follows the familiar auditing pattern described in [Microsoft’s Show formulas guidance](https://support.microsoft.com/en-us/excel/show-and-print-formulas), without claiming printing support or identical keyboard/formatting behavior.
+
+
+## 0.5.10: Safer products and remainders
+
+`PRODUCT` returns `#NUM!` on Decimal multiplication overflow instead of panicking. Numeric Float inputs that cannot be converted to the existing Decimal domain are rejected rather than silently ignored. This remains a sequential fixed-precision calculation: the existing Decimal multiplication rounding and tiny-result underflow behavior are unchanged. It is not arbitrary-precision multiplication or a promise that all intermediate products are exactly representable. Text, blank and boolean handling is unchanged.
+
+`MOD` uses a remainder directly rather than constructing a potentially overflowing or rounded division result. Nonzero results have the divisor's sign, following the [documented spreadsheet convention](https://support.microsoft.com/en-us/excel/functions/mod-function). A zero divisor still returns `#DIV/0!`. When sign correction would require an exact remainder that cannot fit the Decimal domain, it returns `#NUM!` rather than a rounded value that can equal the divisor.
+
+These fixes are scoped to these two functions. They do not establish full Excel compatibility or complete the audit of other numeric functions. Existing workbooks recalculate on open; corrected results invalidate prior review evidence through the existing snapshot checks.

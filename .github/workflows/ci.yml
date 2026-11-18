@@ -115,6 +115,10 @@ jobs:
         working-directory: frontend
         run: node tests/rounding-smoke.mjs
 
+      - name: Real browser product and modulo correctness
+        working-directory: frontend
+        run: npm run test:product-mod
+
       - name: Real browser formula inspection view
         working-directory: frontend
         run: node tests/show-formulas-smoke.mjs
@@ -139,6 +143,7 @@ jobs:
             target/lookup-smoke/*
             target/function-completion-smoke/*
             target/rounding-smoke/*
+            target/product-mod-smoke/*
             target/show-formulas-smoke/*
 
   build-frontend:

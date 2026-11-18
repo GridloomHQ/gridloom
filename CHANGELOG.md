@@ -1,3 +1,8 @@
+# 0.5.10
+
+- PRODUCT reports numeric overflow instead of panicking, and rejects unconvertible numeric inputs rather than silently omitting them.
+- MOD computes a remainder without a rounded quotient, retaining the divisor-sign convention and rejecting an unrepresentable exact result.
+
 # 0.5.9
 
 - Cell drafts retain their original ownership and cannot appear under or submit to a newly navigated cell.

@@ -50,18 +50,17 @@ pub fn product(args: &[Value]) -> Result<Value, CellError> {
     for val in flat {
         match val {
             Value::Integer(i) => {
-                prod *= Decimal::from(i);
+                prod = prod.checked_mul(Decimal::from(i)).ok_or(CellError::Num)?;
                 count += 1;
             }
             Value::Decimal(d) => {
-                prod *= d;
+                prod = prod.checked_mul(d).ok_or(CellError::Num)?;
                 count += 1;
             }
             Value::Float(f) => {
-                if let Some(d) = Decimal::from_f64(f) {
-                    prod *= d;
-                    count += 1;
-                }
+                let d = Decimal::from_f64(f).ok_or(CellError::Num)?;
+                prod = prod.checked_mul(d).ok_or(CellError::Num)?;
+                count += 1;
             }
             Value::Error(e) => return Err(e),
             _ => {}
@@ -105,11 +104,33 @@ pub fn mod_fn(args: &[Value]) -> Result<Value, CellError> {
     if d.is_zero() {
         return Err(CellError::Div0);
     }
-    // Excel MOD(n, d) = n - d * INT(n / d)
-    let div = n / d;
-    let floor_div = div.floor();
-    let res = n - d * floor_div;
-    Ok(Value::Decimal(res))
+    // Truncating remainder avoids an overflowing or precision-losing quotient.
+    let remainder = n.checked_rem(d).ok_or(CellError::Num)?;
+    if remainder.is_zero() || remainder.is_sign_negative() == d.is_sign_negative() {
+        return Ok(Value::Decimal(remainder));
+    }
+    // MOD follows the divisor's sign. Decimal checked_add can silently round this
+    // correction; align exact coefficients instead and reject an unrepresentable sum.
+    let remainder = remainder.normalize();
+    let divisor = d.normalize();
+    let scale = remainder.scale().max(divisor.scale());
+    let align = |value: Decimal| {
+        value
+            .mantissa()
+            .checked_mul(10i128.pow(scale - value.scale()))
+            .ok_or(CellError::Num)
+    };
+    let mut coefficient = align(remainder)?
+        .checked_add(align(divisor)?)
+        .ok_or(CellError::Num)?;
+    let mut scale = scale;
+    while scale > 0 && coefficient % 10 == 0 {
+        coefficient /= 10;
+        scale -= 1;
+    }
+    Decimal::try_from_i128_with_scale(coefficient, scale)
+        .map(Value::Decimal)
+        .map_err(|_| CellError::Num)
 }
 
 pub fn power(args: &[Value]) -> Result<Value, CellError> {

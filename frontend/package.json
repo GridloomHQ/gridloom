@@ -1,7 +1,7 @@
 {
   "name": "gridloom-frontend",
   "private": true,
-  "version": "0.5.9",
+  "version": "0.5.10",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,8 @@
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "test:summary": "node tests/selection-summary-smoke.mjs",
     "test:usability": "node tests/usability-smoke.mjs",
-    "test:browser": "node tests/browser-smoke.mjs"
+    "test:browser": "node tests/browser-smoke.mjs",
+    "test:product-mod": "node tests/product-mod-smoke.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",
