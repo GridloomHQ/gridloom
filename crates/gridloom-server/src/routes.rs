@@ -35,6 +35,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/sheets/rename", post(rename_sheet))
         .route("/api/sheets/column-width", post(set_column_width))
         .route("/api/sheets/freeze", post(set_freeze_panes))
+        .route("/api/sheets/show-formulas", post(set_show_formulas))
         .route("/api/ranges/edit", post(edit_range))
         .route("/api/ranges/read", post(read_range))
         .route("/api/ranges/summary", post(selection_summary))
@@ -114,6 +115,7 @@ struct SheetSummary {
     name: String,
     column_widths: std::collections::HashMap<u32, u16>,
     freeze_top_row: bool,
+    show_formulas: bool,
     freeze_first_column: bool,
     tables: Vec<gridloom_core::table::WorksheetTable>,
 }
@@ -139,6 +141,7 @@ async fn get_workbook_summary(State(state): State<AppState>) -> impl IntoRespons
                 name: s.name.clone(),
                 column_widths: s.column_widths.clone(),
                 freeze_top_row: s.freeze_top_row,
+                show_formulas: s.show_formulas,
                 freeze_first_column: s.freeze_first_column,
                 tables: s.tables.values().cloned().collect(),
             })
@@ -1055,6 +1058,24 @@ async fn set_freeze_panes(
         .write()
         .await
         .set_freeze_panes(&req.sheet_name, req.freeze_top_row, req.freeze_first_column)
+        .map_err(bad_request)?;
+    Ok(Json(serde_json::json!({"status":"updated"})))
+}
+
+#[derive(Deserialize)]
+struct ShowFormulasRequest {
+    sheet_name: String,
+    show_formulas: bool,
+}
+async fn set_show_formulas(
+    State(state): State<AppState>,
+    Json(req): Json<ShowFormulasRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    state
+        .workbook
+        .write()
+        .await
+        .set_show_formulas(&req.sheet_name, req.show_formulas)
         .map_err(bad_request)?;
     Ok(Json(serde_json::json!({"status":"updated"})))
 }

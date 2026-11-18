@@ -113,6 +113,10 @@ jobs:
         working-directory: frontend
         run: node tests/rounding-smoke.mjs
 
+      - name: Real browser formula inspection view
+        working-directory: frontend
+        run: node tests/show-formulas-smoke.mjs
+
       - name: Native window-open smoke
         if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
         run: scripts/native-window-smoke.sh
@@ -133,6 +137,7 @@ jobs:
             target/lookup-smoke/*
             target/function-completion-smoke/*
             target/rounding-smoke/*
+            target/show-formulas-smoke/*
 
   build-frontend:
     name: Frontend TypeScript & Vite Build

@@ -1,3 +1,8 @@
+# 0.5.9
+
+- Show formulas is a per-sheet saved view for inspecting calculation logic directly in the grid.
+- Calculated values remain available in tooltips; summaries, copying, searches and exports retain their existing behavior.
+
 # 0.5.8
 
 - Exact mantissa-based ROUND, ROUNDUP, ROUNDDOWN and TRUNC avoid extreme-precision overflow, wrapping and underflow.

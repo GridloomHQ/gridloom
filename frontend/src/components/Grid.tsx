@@ -8,6 +8,7 @@ import { columnGeometry, clampColumnWidth } from '../utils/columnGeometry';
 import { paneIndices, paneOffset, paneLayer, revealAxis } from '../utils/frozenPanes';
 import { isCellLoaded } from '../utils/frozenViewport';
 import {cycleReference} from '../utils/referenceCycle';
+import {cellPresentation} from '../utils/cellPresentation';
 
 interface GridProps {
   sheetName: string; viewport: ViewportResponse | null; selectedRow: number; selectedCol: number;
@@ -21,6 +22,7 @@ interface GridProps {
   onClear: () => void;
   onDraftChange:(active:boolean)=>void;
   columnWidths: Record<number,number>;
+  showFormulas:boolean;
   freezeTopRow:boolean; freezeFirstColumn:boolean;
   onColumnResize?: (column:number,width:number) => void;
 }
@@ -162,7 +164,7 @@ export const Grid: React.FC<GridProps> = (props) => {
   };
   const rows=paneIndices(startRow,endRow,props.freezeTopRow),cols=paneIndices(startCol,endCol,props.freezeFirstColumn);
 
-  return <div ref={container} role="grid" aria-label={`${sheetName} worksheet`} aria-busy={busy} tabIndex={0}
+  return <div ref={container} role="grid" data-show-formulas={props.showFormulas} aria-label={`${sheetName} worksheet`} aria-busy={busy} tabIndex={0}
     onScroll={e=>setScroll({top:e.currentTarget.scrollTop,left:e.currentTarget.scrollLeft})} onKeyDown={onKeyDown}
     onCopy={e=>{if(!editing.current)props.onCopy(e);}} onPaste={e=>{if(!editing.current&&!busy)props.onPaste(e);}}
     className="relative flex-1 overflow-auto outline-none bg-white select-none">
@@ -170,6 +172,7 @@ export const Grid: React.FC<GridProps> = (props) => {
       {rows.map(r=>cols.map(c=>{
         const key=coordToA1(r,c),cell=viewport?.cells[key],active=r===selectedRow&&c===selectedCol,selected=containsCell(selection,r,c);
         const style=cell?.style;
+        const presentation=cellPresentation(cell,props.showFormulas);
         const traced = traceRange && containsCell(traceRange, r, c) ? highlight?.direction : undefined;
         return <div key={key} role="gridcell" aria-label={key} aria-selected={selected} data-dependency-highlight={traced}
           onMouseDown={e=>{if(e.button!==0||busy||committing.current)return;e.preventDefault();if(editing.current){void finish(true,{row:r,col:c,extend:e.shiftKey});return;}dragging.current=true;onSelectCell(r,c,e.shiftKey);container.current?.focus();}}
@@ -177,7 +180,7 @@ export const Grid: React.FC<GridProps> = (props) => {
           onDoubleClick={()=>{if(active)begin();}}
           style={{position:'absolute',left:cellLeft(c),top:cellTop(r),zIndex:paneLayer(r,c,props.freezeTopRow,props.freezeFirstColumn),width:geometry.width(c),height:H,backgroundColor:traced==='upstream'?'#ccfbf1':traced==='downstream'?'#ede9fe':cell?.is_staged?'#fffbeb':selected?'#eff6ff':style?.fill??(cell?.is_table_header?'#f1f5f9':'#ffffff'),fontWeight:style?.bold||cell?.is_table_header?'bold':undefined,fontStyle:style?.italic?'italic':undefined}}
           className={`border-r border-b border-slate-200 px-1.5 flex items-center text-xs overflow-hidden cursor-cell ${active?'ring-2 ring-inset ring-blue-500':''} ${cell?.is_error?'text-rose-700':''} ${cell?.is_table_header?'bg-slate-100':''}`}
-          title={traced ? (traced === 'upstream' ? 'Upstream dependency' : 'Downstream dependent') + (cell?.display_text ? ': ' + cell.display_text : '') : cell?.display_text}>{cell?.is_staged&&<span className="text-amber-600 mr-1">●</span>}<span className="truncate">{cell?.display_text??''}</span></div>;
+          title={traced ? (traced === 'upstream' ? 'Upstream dependency' : 'Downstream dependent') + (presentation.title ? ': ' + presentation.title : '') : presentation.title}>{cell?.is_staged&&<span className="text-amber-600 mr-1">●</span>}<span className="truncate">{presentation.text}</span></div>;
       }))}
       {cols.map(c=><div key={`c${c}`} role="columnheader" aria-label={colIndexToName(c)} style={{position:'absolute',top:scroll.top,left:cellLeft(c),width:geometry.width(c),height:H,zIndex:props.freezeFirstColumn&&c===0?35:30}} className="bg-slate-100 border-r border-b border-slate-300 text-center text-xs py-1">{colIndexToName(c)}
         {props.onColumnResize&&<button type="button" aria-label={`Resize column ${colIndexToName(c)}`} title="Drag to resize column (Escape cancels)" disabled={busy}

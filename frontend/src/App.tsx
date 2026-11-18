@@ -57,6 +57,8 @@ export const App: React.FC = () => {
   const viewport = storedViewport?.sheet_name === sheetName ? storedViewport : null;
   const [stagedCount, setStagedCount] = useState(0);
   const [sheetWidths,setSheetWidths]=useState<Record<string,Record<number,number>>>({});
+  const [sheetShowFormulas,setSheetShowFormulas]=useState<Record<string,boolean>>({});
+  const showFormulas=sheetShowFormulas[sheetName]??false;
   const [sheetFreeze,setSheetFreeze]=useState<Record<string,{top:boolean;left:boolean}>>({});
   const freezeTopRow=sheetFreeze[sheetName]?.top??false,freezeFirstColumn=sheetFreeze[sheetName]?.left??false;
   const viewportConfigRef=useRef('');
@@ -102,6 +104,7 @@ export const App: React.FC = () => {
         setFilePath(wb.file_path);
         setSheetName(wb.active_sheet);
         setSheets(wb.sheets.map(s => s.name));
+        setSheetShowFormulas(Object.fromEntries(wb.sheets.map(s=>[s.name,s.show_formulas??false])));
         setSheetFreeze(Object.fromEntries(wb.sheets.map(s=>[s.name,{top:s.freeze_top_row??false,left:s.freeze_first_column??false}])));
         setSheetWidths(Object.fromEntries(wb.sheets.map(s=>[s.name,s.column_widths??{}])));
         setTables(wb.sheets.find(s => s.name === wb.active_sheet)?.tables ?? []);
@@ -398,6 +401,10 @@ export const App: React.FC = () => {
           <label htmlFor="column-width">Column {colIndexToName(selectedCol)} width</label><input id="column-width" aria-label="Column width in pixels" type="number" min="48" max="600" step="1" disabled={busy} value={widthDraft} onChange={e=>setWidthDraft(e.target.value)} className="w-16 border rounded p-1"/>
           <span>px</span><button disabled={busy} className="border rounded px-2 py-1">Set width</button><button type="button" disabled={busy} onClick={()=>resizeColumn(selectedCol,null)} className="border rounded px-2 py-1">Reset width</button>
         </form>
+        <label className="flex items-center gap-1" onMouseDown={e=>e.preventDefault()} title={gridDraft||formulaDraft?'Finish or cancel the current cell edit before changing formula view.':'Show formula text without changing values, clipboard, Find or exports.'}>
+          <input type="checkbox" checked={showFormulas} disabled={busy||apiPending>0||gridDraft||formulaDraft}
+            onChange={e=>{if(gridDraft||formulaDraft||mutationLock.current||getPendingMutations()>0)return;void mutate('Updated formula view',()=>api.setShowFormulas(sheetName,e.target.checked),true);}}/>Show formulas
+        </label>
         <label className="flex items-center gap-1"><input type="checkbox" checked={freezeTopRow} disabled={busy} onChange={e=>void mutate('Updated frozen panes',()=>api.setFreeze(sheetName,e.target.checked,freezeFirstColumn),true)}/>Freeze top row</label>
         <label className="flex items-center gap-1"><input type="checkbox" checked={freezeFirstColumn} disabled={busy} onChange={e=>void mutate('Updated frozen panes',()=>api.setFreeze(sheetName,freezeTopRow,e.target.checked),true)}/>Freeze first column</label>
       </div>
@@ -416,6 +423,7 @@ export const App: React.FC = () => {
       <div className="flex flex-1 min-h-0 overflow-hidden">
       <Grid onDraftChange={setGridDraft} key={workbookEpoch}
         sheetName={sheetName}
+        showFormulas={showFormulas}
         freezeTopRow={freezeTopRow} freezeFirstColumn={freezeFirstColumn}
         columnWidths={columnWidths} onColumnResize={resizeColumn}
         viewport={viewport}

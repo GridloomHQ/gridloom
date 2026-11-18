@@ -123,6 +123,12 @@ impl Workbook {
         sheet.freeze_first_column = freeze_first_column;
         Ok(())
     }
+    /// Presentation-only formula visibility; leaves calculation and review state unchanged.
+    pub fn set_show_formulas(&mut self, name: &str, show_formulas: bool) -> Result<(), CellError> {
+        let sheet = self.sheets.get_mut(name).ok_or(CellError::Ref)?;
+        sheet.show_formulas = show_formulas;
+        Ok(())
+    }
     pub fn clear_edit_history(&mut self) {
         self.edit_history = Default::default();
     }

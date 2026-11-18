@@ -115,6 +115,8 @@ pub struct Sheet {
     pub freeze_top_row: bool,
     #[serde(default)]
     pub freeze_first_column: bool,
+    #[serde(default)]
+    pub show_formulas: bool,
 }
 
 impl Sheet {
@@ -129,6 +131,7 @@ impl Sheet {
             column_widths: HashMap::new(),
             freeze_top_row: false,
             freeze_first_column: false,
+            show_formulas: false,
         }
     }
 

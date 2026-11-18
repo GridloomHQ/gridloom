@@ -100,3 +100,12 @@ The interaction follows the explicit, nested-formula completion pattern document
 Saved workbooks are recalculated on open. Previously wrong cached formula results may therefore change, and existing review invalidation safeguards remain in force; old evidence is not silently treated as approval of a corrected number. These fixes are limited to the four named rounding functions, not a complete numerical audit.
 
 The retained tie behavior follows [Rust Decimal’s nearest-even rounding](https://docs.rs/rust_decimal/latest/rust_decimal/enum.RoundingStrategy.html). Directional rounding follows the familiar [away-from-zero](https://support.microsoft.com/en-us/excel/functions/roundup-function) and [toward-zero](https://support.microsoft.com/en-us/excel/functions/rounddown-function) definitions.
+
+
+## 0.5.9: Inspect formulas across the worksheet
+
+Toggle **Show formulas** to display formula text in worksheet cells rather than their calculated results. Literal inputs and source/spill cells without their own formulas retain their ordinary values. Formula-cell tooltips retain the calculated value. The choice is per-sheet and saved in the workbook; existing files default to normal results view. Frozen rows and columns use the same display mode.
+
+This is a presentation-only view: no recalculation, database refresh, source writeback or review invalidation. Copying, Find’s explicit value/input modes, selection summaries and exports retain their existing behavior. Columns are not automatically widened; resize a column or use the formula bar to inspect a long formula. Finish or cancel an open draft before changing this view.
+
+The feature follows the familiar auditing pattern described in [Microsoft’s Show formulas guidance](https://support.microsoft.com/en-us/excel/show-and-print-formulas), without claiming printing support or identical keyboard/formatting behavior.
