@@ -1,3 +1,9 @@
+# 0.5.7
+
+- Formula-bar autocomplete uses the engine’s authoritative catalogue of supported functions and aliases.
+- Complete dotted or nested function names at the caret without replacing surrounding formula text.
+- Explicit acceptance changes only the draft; quoted text, sheet/table qualifiers and cell references are excluded.
+
 # 0.5.6
 
 - Correct XLOOKUP exact-first nearest matching, directional ties and row/column result alignment.

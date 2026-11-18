@@ -56,6 +56,7 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  functionCatalog:()=>fetchJson<{functions:string[]}>('/api/functions'),
   rangeSummary: (sheet_name:string,range:CellRange) => fetchJson<RangeSummary>('/api/ranges/summary',{method:'POST',body:JSON.stringify({sheet_name,...wireRange(range)})}),
   setFreeze: (sheet_name:string,freeze_top_row:boolean,freeze_first_column:boolean) => fetchJson('/api/sheets/freeze',{method:'POST',body:JSON.stringify({sheet_name,freeze_top_row,freeze_first_column})}),
   setColumnWidth: (sheet_name:string,column:number,width:number|null) => fetchJson('/api/sheets/column-width',{method:'POST',body:JSON.stringify({sheet_name,column,width})}),

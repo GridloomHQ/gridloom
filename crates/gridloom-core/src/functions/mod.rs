@@ -37,13 +37,27 @@ pub trait EvaluationContext {
     ) -> Result<Value, CellError>;
 }
 
-pub fn call_function<C: EvaluationContext + ?Sized>(
-    name: &str,
-    args: &[Value],
-    ctx: &C,
-) -> Result<Value, CellError> {
-    let upper = name.to_uppercase();
-    match upper.as_str() {
+// Keep advertised names and the evaluator dispatch in a single declaration.
+// The argument identifiers are passed explicitly to preserve macro hygiene.
+macro_rules! define_functions {
+    (($args:ident, $ctx:ident) { $($name:literal $(| $alias:literal)* => $body:expr,)* }) => {
+        pub const FUNCTION_NAMES: &[&str] = &[$($name, $($alias,)*)*];
+
+        pub fn call_function<C: EvaluationContext + ?Sized>(
+            name: &str,
+            $args: &[Value],
+            $ctx: &C,
+        ) -> Result<Value, CellError> {
+            let upper = name.to_uppercase();
+            match upper.as_str() {
+                $($name $(| $alias)* => $body,)*
+                _ => Err(CellError::Name),
+            }
+        }
+    };
+}
+
+define_functions! { (args, ctx) {
         // Arithmetic
         "SUM" => arithmetic::sum(args),
         "SUMIF" => arithmetic::sumif(args),
@@ -153,7 +167,7 @@ pub fn call_function<C: EvaluationContext + ?Sized>(
             let sql = args[1].to_string_repr();
             let params = &args[2..];
             ctx.execute_sql_value(&conn_name, &sql, params)
-        }
+        },
         "SQLTABLE" => {
             if args.len() < 2 {
                 return Err(CellError::Value);
@@ -162,8 +176,5 @@ pub fn call_function<C: EvaluationContext + ?Sized>(
             let sql = args[1].to_string_repr();
             let params = &args[2..];
             ctx.execute_sql_table(&conn_name, &sql, params)
-        }
-
-        _ => Err(CellError::Name),
-    }
-}
+        },
+}}

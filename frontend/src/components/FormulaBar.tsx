@@ -4,6 +4,8 @@ import { Check, X } from 'lucide-react';
 import { CellRenderData } from '../types';
 import { a1ToCoord, coordToA1 } from '../utils/coords';
 import {cycleReference} from '../utils/referenceCycle';
+import {api} from '../api';
+import {functionCompletion,applyFunctionCompletion,FunctionCompletion} from '../utils/functionCompletion';
 
 interface FormulaBarProps {
   disabled?: boolean;
@@ -16,35 +18,6 @@ interface FormulaBarProps {
   onGoTo: (row:number,col:number) => void;
   maxRows:number; maxCols:number;
 }
-
-const COMMON_FUNCTIONS = [
-  'SUM',
-  'SUMIF',
-  'SUMIFS',
-  'AVERAGE',
-  'COUNT',
-  'COUNTA',
-  'MIN',
-  'MAX',
-  'IF',
-  'IFS',
-  'XLOOKUP',
-  'VLOOKUP',
-  'INDEX',
-  'MATCH',
-  'FILTER',
-  'SORT',
-  'UNIQUE',
-  'SEQUENCE',
-  'SQLVALUE',
-  'SQLTABLE',
-  'CONCAT',
-  'TEXTJOIN',
-  'DATE',
-  'TODAY',
-  'PMT',
-  'NPV',
-];
 
 export const FormulaBar: React.FC<FormulaBarProps> = ({
   disabled = false,
@@ -59,7 +32,13 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
   useEffect(()=>{setAddress(coordA1);setAddressError('');},[coordA1]);
   const [inputValue, setInputValue] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [filterSuggestions, setFilterSuggestions] = useState<string[]>([]);
+  const [functionNames,setFunctionNames]=useState<string[]>([]);
+  const [completion,setCompletion]=useState<FunctionCompletion|null>(null);
+  const [suggestionIndex,setSuggestionIndex]=useState(0);
+  const filterSuggestions=completion?functionNames.filter(name=>name.startsWith(completion.prefix)):[];
+  const suggestionsVisible=showSuggestions&&filterSuggestions.length>0;
+  useEffect(()=>{let current=true;api.functionCatalog().then(data=>{if(current)setFunctionNames(data.functions);}).catch(()=>{});return()=>{current=false;};},[]);
+  useEffect(()=>{if(suggestionsVisible)document.getElementById(`formula-function-${suggestionIndex}`)?.scrollIntoView({block:'nearest'});},[suggestionsVisible,suggestionIndex]);
   const inputRef = useRef<HTMLInputElement>(null);
   const referenceSelection=useRef<{start:number;end:number}|null>(null);
   useLayoutEffect(()=>{const selection=referenceSelection.current;referenceSelection.current=null;if(selection&&inputRef.current)inputRef.current.setSelectionRange(selection.start,selection.end);},[inputValue]);
@@ -81,27 +60,28 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
     if (!dirty.current) setInputValue(editableCellInput(activeCellData));
   }, [activeCellData, currentIdentity,onDraftChange]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    referenceSelection.current=null;
-    dirty.current = true;onDraftChange(true);
-    const val = e.target.value;
-    setInputValue(val);
-
-    if (val.startsWith('=')) {
-      const match = val.match(/=([A-Z_]*)$/i);
-      if (match) {
-        const query = match[1].toUpperCase();
-        const filtered = COMMON_FUNCTIONS.filter((fn) => fn.startsWith(query));
-        setFilterSuggestions(filtered);
-        setShowSuggestions(filtered.length > 0);
-        return;
-      }
-    }
-    setShowSuggestions(false);
+  const updateCompletion=(value:string,start:number|null,end:number|null)=>{
+    const context=functionCompletion(value,start??0,end??start??0);
+    setCompletion(context);setSuggestionIndex(0);setShowSuggestions(!!context);
   };
-
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    referenceSelection.current=null;dirty.current=true;onDraftChange(true);
+    setInputValue(e.target.value);updateCompletion(e.target.value,e.target.selectionStart,e.target.selectionEnd);
+  };
+  const selectSuggestion = (fnName: string) => {
+    if(disabled||committing.current||!completion||!functionNames.includes(fnName))return;
+    const result=applyFunctionCompletion(inputValue,completion,fnName);
+    dirty.current=true;onDraftChange(true);setInputValue(result.value);setShowSuggestions(false);setCompletion(null);
+    referenceSelection.current={start:result.caret,end:result.caret};inputRef.current?.focus();if(result.value===inputValue){inputRef.current?.setSelectionRange(result.caret,result.caret);referenceSelection.current=null;}
+  };
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if(e.nativeEvent.isComposing)return;
+    if(e.ctrlKey||e.metaKey||e.altKey||e.shiftKey)return;
+    if(suggestionsVisible&&!disabled&&!committing.current){
+      if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();setSuggestionIndex(i=>(i+(e.key==='ArrowDown'?1:-1)+filterSuggestions.length)%filterSuggestions.length);return;}
+      if(e.key==='Tab'||e.key==='Enter'){e.preventDefault();selectSuggestion(filterSuggestions[Math.min(suggestionIndex,filterSuggestions.length-1)]);return;}
+      if(e.key==='Escape'){e.preventDefault();setShowSuggestions(false);return;}
+    }
     if(e.key==='F4'&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey){
       e.preventDefault();if(disabled||committing.current)return;
       const result=cycleReference(inputValue,e.currentTarget.selectionStart??0,e.currentTarget.selectionEnd??0);
@@ -111,14 +91,6 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
       e.preventDefault(); commit();
     } else if (e.key === 'Escape') {
       e.preventDefault(); reset();
-    }
-  };
-
-  const selectSuggestion = (fnName: string) => {
-    dirty.current = true;onDraftChange(true); setInputValue(`=${fnName}(`);
-    setShowSuggestions(false);
-    if (inputRef.current) {
-      inputRef.current.focus();
     }
   };
 
@@ -188,24 +160,29 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
         <input
           disabled={disabled}
           aria-label="Formula input"
-          title="F4 cycles a formula reference: relative, absolute, row-locked, column-locked"
+          title="Function suggestions: Up/Down to choose, Tab/Enter to accept, Escape to dismiss. F4 cycles reference locks."
           ref={inputRef}
           type="text"
           value={inputValue}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
+          onSelect={e=>{if(!disabled)updateCompletion(e.currentTarget.value,e.currentTarget.selectionStart,e.currentTarget.selectionEnd);}}
+          onBlur={()=>setShowSuggestions(false)}
+          aria-autocomplete="list" aria-controls={suggestionsVisible?'formula-function-suggestions':undefined}
+          aria-activedescendant={suggestionsVisible?`formula-function-${suggestionIndex}`:undefined}
           placeholder="Enter value or formula (e.g. =SUM(A1:A10) or =SQLVALUE(&quot;LocalDB&quot;, &quot;SELECT sum(amount) FROM invoices&quot;))"
           className="w-full px-2 py-1 text-xs font-mono text-slate-800 bg-transparent border-0 focus:outline-none focus:ring-0"
         />
 
         {/* Autocomplete Dropdown */}
-        {showSuggestions && filterSuggestions.length > 0 && (
-          <div className="absolute left-0 top-full mt-1 w-64 max-h-48 overflow-y-auto bg-white border border-slate-200 rounded shadow-lg z-50 py-1">
-            {filterSuggestions.map((fn) => (
+        {suggestionsVisible && (
+          <div id="formula-function-suggestions" role="listbox" aria-label="Function suggestions" className="absolute left-0 top-full mt-1 w-64 max-h-48 overflow-y-auto bg-white border border-slate-200 rounded shadow-lg z-50 py-1">
+            {filterSuggestions.map((fn,index) => (
               <button disabled={disabled}
-                key={fn}
+                key={fn} id={`formula-function-${index}`} role="option" aria-label={fn} aria-selected={index===suggestionIndex}
+                onMouseDown={e=>e.preventDefault()}
                 onClick={() => selectSuggestion(fn)}
-                className="w-full text-left px-3 py-1 text-xs hover:bg-emerald-50 hover:text-emerald-700 font-mono flex items-center justify-between"
+                className={`w-full text-left px-3 py-1 text-xs hover:bg-emerald-50 hover:text-emerald-700 font-mono flex items-center justify-between ${index===suggestionIndex?'bg-emerald-50':''}`}
               >
                 <span className="font-bold">{fn}</span>
                 <span className="text-[10px] text-slate-400">function</span>

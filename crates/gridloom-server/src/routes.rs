@@ -24,6 +24,7 @@ pub fn create_router(state: AppState) -> Router {
     Router::new()
         // Health
         .route("/api/health", get(health_handler))
+        .route("/api/functions", get(list_functions))
         // Workbook
         .route("/api/workbook", get(get_workbook_summary))
         .route("/api/workbook/new", post(new_workbook))
@@ -1073,4 +1074,10 @@ async fn selection_summary(
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let wb = state.workbook.read().await;
     Ok(Json(wb.selection_summary(&req).map_err(bad_request)?))
+}
+
+async fn list_functions() -> impl IntoResponse {
+    let mut functions = gridloom_core::functions::FUNCTION_NAMES.to_vec();
+    functions.sort_unstable();
+    Json(serde_json::json!({"functions": functions}))
 }

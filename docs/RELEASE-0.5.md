@@ -80,3 +80,12 @@ Existing copy/paste, formula fill, undo/redo and evidence workflows remain avail
 Official Excel documentation establishes [Find scope and values/formulas choices](https://support.microsoft.com/en-gb/excel/get-started/find-or-replace-text-and-numbers-on-a-worksheet), [Enter/Tab editing conventions](https://support.microsoft.com/en-us/excel/edit-cell-contents), and [frozen headings](https://support.microsoft.com/en-us/excel/get-started/freeze-panes-to-lock-rows-and-columns). These are useful behavioral references, not a claim of implementation parity.
 
 The next candidates are safe range sort/filter and explicit data-validation rules. Structural edits, sorting and replace must preserve formula references and invalidate captured reviews correctly. Recovery/autosave needs a clear distinction between a draft, a saved working paper and staged external writeback. XBRL/IFRS remains an add-on concern.
+
+
+## 0.5.7: Discover the functions actually supported
+
+The formula bar now suggests all 95 names and aliases accepted by this engine, from an authoritative read-only catalogue shared with function dispatch. Type a function prefix at the caret, including dotted names such as `STDEV.S` or a nested function. Up/Down chooses an item; Tab/Enter or a click accepts it into the draft. Acceptance does not submit the formula. Escape dismisses suggestions first; another Escape cancels the draft.
+
+Completion preserves the rest of the formula and excludes quoted text, sheet/table qualifiers, structured references and cell references. Existing F4 reference locking and failed-commit draft retention remain available. If the catalogue cannot load, manual entry still works. This is formula-bar function-name completion, not in-cell completion, argument validation, named-range completion or a claim of Excel function compatibility.
+
+The interaction follows the explicit, nested-formula completion pattern documented in [Microsoft’s Formula AutoComplete guidance](https://support.microsoft.com/en-us/excel/use-formula-autocomplete), while advertising only Gridloom’s own supported function names.

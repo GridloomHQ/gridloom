@@ -105,6 +105,10 @@ jobs:
         working-directory: ./frontend
         run: node tests/lookup-smoke.mjs
 
+      - name: Real browser function completion
+        working-directory: frontend
+        run: node tests/function-completion-smoke.mjs
+
       - name: Native window-open smoke
         if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
         run: scripts/native-window-smoke.sh
@@ -123,6 +127,7 @@ jobs:
             target/save-smoke/*
             target/formula-reference-smoke/*
             target/lookup-smoke/*
+            target/function-completion-smoke/*
 
   build-frontend:
     name: Frontend TypeScript & Vite Build
