@@ -118,3 +118,12 @@ The feature follows the familiar auditing pattern described in [Microsoft’s Sh
 `MOD` uses a remainder directly rather than constructing a potentially overflowing or rounded division result. Nonzero results have the divisor's sign, following the [documented spreadsheet convention](https://support.microsoft.com/en-us/excel/functions/mod-function). A zero divisor still returns `#DIV/0!`. When sign correction would require an exact remainder that cannot fit the Decimal domain, it returns `#NUM!` rather than a rounded value that can equal the divisor.
 
 These fixes are scoped to these two functions. They do not establish full Excel compatibility or complete the audit of other numeric functions. Existing workbooks recalculate on open; corrected results invalidate prior review evidence through the existing snapshot checks.
+
+
+## 0.5.11: Reliable SUMPRODUCT shape and error handling
+
+`SUMPRODUCT` requires nonempty rectangular arrays with matching row and column counts. A row and a column with the same cell count are not interchangeable. Scalars are treated as 1×1, not broadcast over a range; empty, ragged and nested arrays are rejected with `#VALUE!`. This follows the [documented matching-dimensions principle](https://support.microsoft.com/en-us/excel/functions/sumproduct-function), not a claim of complete Excel compatibility.
+
+For structurally valid inputs, cell errors propagate rather than becoming zero, even when another factor is zero. Numeric Float inputs outside the existing Decimal conversion domain return `#NUM!`. Checked multiplication and accumulation return `#NUM!` on overflow rather than crashing. Calculation remains sequential fixed-precision Decimal arithmetic with its existing rounding and tiny-result underflow behavior; it is not an arbitrary-precision dot product.
+
+Existing Gridloom coercions are deliberately retained: numeric text, booleans and date/time serials can contribute numerically; ordinary text, blanks and NULL contribute zero. These coercions differ from Excel's nonnumeric array-entry rules. Shape validation happens before numeric evaluation. Changed results on reopening saved workbooks invalidate previous review snapshots through the existing review mechanism.

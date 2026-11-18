@@ -119,6 +119,10 @@ jobs:
         working-directory: frontend
         run: npm run test:product-mod
 
+      - name: Real browser SUMPRODUCT correctness
+        working-directory: frontend
+        run: npm run test:sumproduct
+
       - name: Real browser formula inspection view
         working-directory: frontend
         run: node tests/show-formulas-smoke.mjs
@@ -144,6 +148,7 @@ jobs:
             target/function-completion-smoke/*
             target/rounding-smoke/*
             target/product-mod-smoke/*
+            target/sumproduct-smoke/*
             target/show-formulas-smoke/*
 
   build-frontend:

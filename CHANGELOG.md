@@ -1,3 +1,9 @@
+# 0.5.11
+
+- SUMPRODUCT validates matching two-dimensional shapes rather than only flattened cell counts.
+- Calculation errors and unconvertible numeric inputs are no longer silently replaced with zero.
+- Product and accumulation overflow return `#NUM!` instead of panicking.
+
 # 0.5.10
 
 - PRODUCT reports numeric overflow instead of panicking, and rejects unconvertible numeric inputs rather than silently omitting them.

@@ -304,38 +304,52 @@ pub fn sumproduct(args: &[Value]) -> Result<Value, CellError> {
     if args.is_empty() {
         return Err(CellError::Value);
     }
-    let mut flat_arrays: Vec<Vec<Decimal>> = Vec::new();
+    // Scalars are 1x1; equal flattened lengths are not equal worksheet shapes.
+    let mut shape = None;
     for arg in args {
-        let mut list = Vec::new();
-        match arg {
+        let dimensions = match arg {
             Value::Array(rows) => {
-                for r in rows {
-                    for cell in r {
-                        list.push(cell.to_decimal().unwrap_or(Decimal::ZERO));
-                    }
+                let width = rows.first().map(Vec::len).ok_or(CellError::Value)?;
+                if width == 0 || rows.iter().any(|row| row.len() != width) {
+                    return Err(CellError::Value);
                 }
+                (rows.len(), width)
             }
-            other => {
-                list.push(other.to_decimal().unwrap_or(Decimal::ZERO));
-            }
-        }
-        flat_arrays.push(list);
-    }
-
-    let len = flat_arrays[0].len();
-    for arr in &flat_arrays {
-        if arr.len() != len {
+            _ => (1, 1),
+        };
+        if shape.is_some_and(|expected| expected != dimensions) {
             return Err(CellError::Value);
         }
+        shape = Some(dimensions);
     }
-
-    let mut sum = Decimal::ZERO;
-    for i in 0..len {
-        let mut prod = Decimal::ONE;
-        for arr in &flat_arrays {
-            prod *= arr[i];
+    // Preserve existing coercions, but never erase errors or invalid numeric inputs.
+    let convert = |cell: &Value| -> Result<Decimal, CellError> {
+        match cell {
+            Value::Error(error) => Err(error.clone()),
+            Value::Float(_) => cell.to_decimal(),
+            Value::Array(_) => Err(CellError::Value),
+            _ => Ok(cell.to_decimal().unwrap_or(Decimal::ZERO)),
         }
-        sum += prod;
+    };
+    let mut arrays = Vec::with_capacity(args.len());
+    for arg in args {
+        let values = match arg {
+            Value::Array(rows) => rows
+                .iter()
+                .flatten()
+                .map(&convert)
+                .collect::<Result<Vec<_>, _>>()?,
+            scalar => vec![convert(scalar)?],
+        };
+        arrays.push(values);
+    }
+    let mut sum = Decimal::ZERO;
+    for index in 0..arrays[0].len() {
+        let mut product = Decimal::ONE;
+        for array in &arrays {
+            product = product.checked_mul(array[index]).ok_or(CellError::Num)?;
+        }
+        sum = sum.checked_add(product).ok_or(CellError::Num)?;
     }
     Ok(Value::Decimal(sum))
 }
