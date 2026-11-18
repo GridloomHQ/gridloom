@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useLayoutEffect } from 'react';
 import { ViewportResponse, DependencyHighlight } from '../types';
 import { editableCellInput } from '../utils/cellInput';
 import { colIndexToName, coordToA1 } from '../utils/coords';
@@ -7,6 +7,7 @@ import { gridNavigation, NavigationKey } from '../utils/gridNavigation';
 import { columnGeometry, clampColumnWidth } from '../utils/columnGeometry';
 import { paneIndices, paneOffset, paneLayer, revealAxis } from '../utils/frozenPanes';
 import { isCellLoaded } from '../utils/frozenViewport';
+import {cycleReference} from '../utils/referenceCycle';
 
 interface GridProps {
   sheetName: string; viewport: ViewportResponse | null; selectedRow: number; selectedCol: number;
@@ -33,6 +34,8 @@ export const Grid: React.FC<GridProps> = (props) => {
   useEffect(()=>{props.onDraftChange(edit!==null);},[edit!==null,props.onDraftChange]);
   useEffect(()=>()=>props.onDraftChange(false),[props.onDraftChange]);
   const editor = useRef<HTMLInputElement>(null);
+  const referenceSelection=useRef<{start:number;end:number}|null>(null);
+  useLayoutEffect(()=>{const selection=referenceSelection.current;referenceSelection.current=null;if(selection&&editor.current)editor.current.setSelectionRange(selection.start,selection.end);},[edit]);
   const editing = useRef(false);
   const dragging = useRef(false);
   const committing = useRef(false);
@@ -137,6 +140,11 @@ export const Grid: React.FC<GridProps> = (props) => {
     // Composition Enter confirms the IME candidate, not the spreadsheet edit.
     if (e.nativeEvent.isComposing) return;
     if (editing.current) {
+      if(e.key==='F4'&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey){
+        e.preventDefault();if(busy||committing.current||edit===null||!editor.current)return;
+        const result=cycleReference(edit,editor.current.selectionStart??0,editor.current.selectionEnd??0);
+        if(result){failedInput.current=null;referenceSelection.current={start:result.selectionStart,end:result.selectionEnd};setEdit(result.value);}return;
+      }
       if(e.key==='Escape'){e.preventDefault();void finish(false);}
       else if(e.key==='Enter'||e.key==='Tab'){
         e.preventDefault();
@@ -181,7 +189,7 @@ export const Grid: React.FC<GridProps> = (props) => {
       {rows.map(r=><div key={`r${r}`} aria-hidden style={{position:'absolute',left:scroll.left,top:cellTop(r),width:LEFT,height:H,zIndex:props.freezeTopRow&&r===0?35:30}} className="bg-slate-100 border-r border-b border-slate-300 text-center text-xs py-1">{r+1}</div>)}
       <div aria-hidden style={{position:'absolute',top:scroll.top,left:scroll.left,width:LEFT,height:H,zIndex:40}} className="bg-slate-200 border-r border-b border-slate-300"/>
       {resizePreview&&<div aria-hidden style={{position:'absolute',pointerEvents:'none',left:cellLeft(resizePreview.column)+resizePreview.width,top:scroll.top,width:2,height:size.height,zIndex:45,background:'#2563eb'}}/>}
-      {edit!==null&&<input ref={editor} aria-label={`Edit ${coordToA1(selectedRow,selectedCol)}`} value={edit} onChange={e=>{failedInput.current=null;setEdit(e.target.value);}} onBlur={()=>{void finish(true);}} readOnly={busy} style={{position:'absolute',left:cellLeft(selectedCol),top:cellTop(selectedRow),width:Math.max(geometry.width(selectedCol),160),height:H,zIndex:paneLayer(selectedRow,selectedCol,props.freezeTopRow,props.freezeFirstColumn)+5}} className="px-1 text-xs border-2 border-blue-600 bg-white outline-none"/>}
+      {edit!==null&&<input ref={editor} aria-label={`Edit ${coordToA1(selectedRow,selectedCol)}`} value={edit} title="F4 cycles a formula reference: relative, absolute, row-locked, column-locked" onChange={e=>{referenceSelection.current=null;failedInput.current=null;setEdit(e.target.value);}} onBlur={()=>{void finish(true);}} readOnly={busy} style={{position:'absolute',left:cellLeft(selectedCol),top:cellTop(selectedRow),width:Math.max(geometry.width(selectedCol),160),height:H,zIndex:paneLayer(selectedRow,selectedCol,props.freezeTopRow,props.freezeFirstColumn)+5}} className="px-1 text-xs border-2 border-blue-600 bg-white outline-none"/>}
     </div>
   </div>;
 };

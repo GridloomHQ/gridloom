@@ -1,8 +1,9 @@
 import { editableCellInput } from '../utils/cellInput';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { Check, X } from 'lucide-react';
 import { CellRenderData } from '../types';
 import { a1ToCoord, coordToA1 } from '../utils/coords';
+import {cycleReference} from '../utils/referenceCycle';
 
 interface FormulaBarProps {
   disabled?: boolean;
@@ -60,6 +61,8 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [filterSuggestions, setFilterSuggestions] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const referenceSelection=useRef<{start:number;end:number}|null>(null);
+  useLayoutEffect(()=>{const selection=referenceSelection.current;referenceSelection.current=null;if(selection&&inputRef.current)inputRef.current.setSelectionRange(selection.start,selection.end);},[inputValue]);
   const dirty = useRef(false);
   const identity = useRef(`${sheetName}:${coordA1}`);
   const currentIdentity=`${sheetName}:${coordA1}`;
@@ -79,6 +82,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
   }, [activeCellData, currentIdentity,onDraftChange]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    referenceSelection.current=null;
     dirty.current = true;onDraftChange(true);
     const val = e.target.value;
     setInputValue(val);
@@ -97,6 +101,12 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if(e.nativeEvent.isComposing)return;
+    if(e.key==='F4'&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey){
+      e.preventDefault();if(disabled||committing.current)return;
+      const result=cycleReference(inputValue,e.currentTarget.selectionStart??0,e.currentTarget.selectionEnd??0);
+      if(result){dirty.current=true;onDraftChange(true);referenceSelection.current={start:result.selectionStart,end:result.selectionEnd};setInputValue(result.value);setShowSuggestions(false);}return;
+    }
     if (e.key === 'Enter') {
       e.preventDefault(); commit();
     } else if (e.key === 'Escape') {
@@ -178,6 +188,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
         <input
           disabled={disabled}
           aria-label="Formula input"
+          title="F4 cycles a formula reference: relative, absolute, row-locked, column-locked"
           ref={inputRef}
           type="text"
           value={inputValue}

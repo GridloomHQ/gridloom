@@ -1,5 +1,19 @@
 export interface GridPoint { row: number; col: number }
 export interface GridRange { start: GridPoint; end: GridPoint }
+export const MAX_RANGE_CELLS = 10_000;
+// Validate before creating matrices or issuing bulk-write requests.
+export function boundedRangeDimensions(range: GridRange, limit = MAX_RANGE_CELLS): { rows: number; columns: number; count: number } {
+  if (!Number.isSafeInteger(limit) || limit < 1) throw new Error('Invalid range limit');
+  for (const coordinate of [range.start.row, range.start.col, range.end.row, range.end.col]) {
+    if (!Number.isSafeInteger(coordinate) || coordinate < 0 || coordinate > 0xffffffff) throw new Error('Selection has invalid coordinates');
+  }
+  const rows = range.end.row - range.start.row + 1;
+  const columns = range.end.col - range.start.col + 1;
+  if (rows < 1 || columns < 1) throw new Error('Selection bounds must be ordered');
+  // Division checks the limit without multiplying arbitrarily large dimensions.
+  if (rows > Math.floor(limit / columns)) throw new Error(`Select at most ${limit.toLocaleString('en-US')} cells for this operation`);
+  return { rows, columns, count: rows * columns };
+}
 export function normalizedRange(a: GridPoint, b: GridPoint): GridRange {
   return { start: { row: Math.min(a.row, b.row), col: Math.min(a.col, b.col) }, end: { row: Math.max(a.row, b.row), col: Math.max(a.col, b.col) } };
 }
@@ -13,18 +27,23 @@ export function encodeTsv(rows: string[][]): string {
 export function decodeTsv(text: string): string[][] {
   if (text.length > 8 * 1024 * 1024) throw new Error('Paste at most 8 MiB of text at a time');
   const rows: string[][] = []; let row: string[] = []; let field = ''; let quoted = false;
+  let fieldCount = 0;
+  const appendField = () => {
+    if (++fieldCount > MAX_RANGE_CELLS) throw new Error('Paste at most 10,000 cells at a time');
+    row.push(field); field = '';
+  };
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
     if (char === '"' && (quoted || field === '')) {
       if (quoted && text[i + 1] === '"') { field += '"'; i++; } else quoted = !quoted;
     } else if (!quoted && (char === '\t' || char === '\n' || char === '\r')) {
-      row.push(field); field = '';
+      appendField();
       if (row.length > 10000 || rows.length >= 10000) throw new Error('Paste at most 10,000 cells at a time');
       if (char !== '\t') { rows.push(row); row = []; if (char === '\r' && text[i + 1] === '\n') i++; }
     } else field += char;
   }
   if (quoted) throw new Error('Clipboard contains an unterminated quoted field');
-  if (field !== '' || row.length || !rows.length) { row.push(field); rows.push(row); }
+  if (field !== '' || row.length || !rows.length) { appendField(); rows.push(row); }
   const width = rows.reduce((max, r) => Math.max(max, r.length), 0);
   if (rows.length * width > 10000) throw new Error('Paste at most 10,000 cells at a time');
   return rows.map(r => [...r, ...Array(width - r.length).fill('')]);

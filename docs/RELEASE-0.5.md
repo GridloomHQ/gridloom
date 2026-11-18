@@ -44,6 +44,14 @@ Each save writes through a uniquely created temporary file beside the destinatio
 
 The explicit Save/Save As distinction follows [familiar workbook saving conventions](https://support.microsoft.com/en-us/excel/save-a-workbook). File synchronization and replacement use the documented [Rust file synchronization](https://doc.rust-lang.org/std/fs/struct.File.html#method.sync_all) and [rename](https://doc.rust-lang.org/std/fs/fn.rename.html) behavior.
 
+## 0.5.5: Lock formula assumptions with F4
+
+While editing a formula, place the caret in one cell reference or select that exact reference and press **F4**. The reference cycles `A1 → $A$1 → A$1 → $A1 → A1`. This makes it quicker to reuse fixed assumptions and mixed row/column references in financial models. It works in the cell editor and formula bar; only the draft changes until you commit. Escape cancels, and a failed commit retains the draft.
+
+The shortcut targets one reference, not an entire formula or range. Quoted strings, SQL text, structured table references, function names and ambiguous selections are not rewritten. It is not a general formula parser or an Excel-parity claim. The behavior follows [relative, absolute and mixed reference conventions](https://support.microsoft.com/en-us/excel/switch-between-relative-absolute-and-mixed-references).
+
+Large clear/format/fill actions are rejected before constructing or sending oversized changes. Clipboard parsing bounds the number of fields while reading, not only after building the whole matrix. The existing 10,000-cell operation limit remains; a small paste is not rejected merely because the current selection is large.
+
 ## Keyboard editing
 
 - Enter / Shift+Enter: move down / up.

@@ -97,6 +97,10 @@ jobs:
         working-directory: ./frontend
         run: node tests/save-smoke.mjs
 
+      - name: Real browser formula reference locks
+        working-directory: ./frontend
+        run: node tests/formula-reference-smoke.mjs
+
       - name: Native window-open smoke
         if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
         run: scripts/native-window-smoke.sh
@@ -113,6 +117,7 @@ jobs:
             target/usability-smoke/*
             target/selection-summary-smoke/*
             target/save-smoke/*
+            target/formula-reference-smoke/*
 
   build-frontend:
     name: Frontend TypeScript & Vite Build

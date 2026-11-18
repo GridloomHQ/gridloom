@@ -1,3 +1,8 @@
+# 0.5.5
+
+- F4 cycles relative, absolute and mixed references in formula drafts, in both cell and formula-bar editors.
+- Oversized range operations and delimiter-heavy clipboard input are bounded before large allocations.
+
 # 0.5.4
 
 - Save reuses the current path; Save As and Ctrl/Command+S provide familiar explicit saving.

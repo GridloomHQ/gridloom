@@ -3,7 +3,7 @@ import {isCellLoaded} from './utils/frozenViewport';
 import { FindPanel, FindMatch } from './components/FindPanel';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { MonthlyClosePanel } from './components/MonthlyClosePanel';
-import { normalizedRange, encodeTsv, decodeTsv, GridRange } from './utils/selection';
+import { normalizedRange, encodeTsv, decodeTsv, boundedRangeDimensions, GridRange } from './utils/selection';
 import { displayValue } from './utils/values';
 import { ExplainReviewPanel } from './components/ExplainReviewPanel';
 import { OpenQuestions } from './components/OpenQuestions';
@@ -234,7 +234,17 @@ export const App: React.FC = () => {
     if(width!==null&&(!Number.isInteger(width)||width<48||width>600)){setStatusMsg('Column width must be a whole number from 48 to 600 pixels.');return;}
     void mutate(`Resized column ${colIndexToName(column)}`,()=>api.setColumnWidth(sheetName,column,width),true);
   };
+  const boundedSelection = () => {
+    try { return boundedRangeDimensions(selection); }
+    catch(error) { setStatusMsg(error instanceof Error ? error.message : 'Selection is too large'); return null; }
+  };
+  const handleClear = () => {
+    const dimensions=boundedSelection(); if(!dimensions)return;
+    void mutate('Cleared selection',()=>api.editRange(sheetName,selection.start.row,selection.start.col,
+      Array.from({length:dimensions.rows},()=>Array(dimensions.columns).fill(''))));
+  };
   const handleApplyFormat = (format:string) => {
+    if(!boundedSelection())return;
     const style=viewport?.cells[coordToA1(selectedRow,selectedCol)]?.style ?? {bold:false,italic:false,fill:null,number_format:null};
     let attribute: string, value: string;
     if(format==='Bold'){attribute='bold';value=String(!style.bold);}
@@ -257,8 +267,8 @@ export const App: React.FC = () => {
       :api.editRange(sheetName,selectedRow,selectedCol,decodeTsv(text)),true);
   };
   const handlePaste = (event:React.ClipboardEvent) => {event.preventDefault();pasteText(event.clipboardData.getData('text/plain'));};
-  const handleFillDown = () => void mutate('Filled selection down',()=>api.fillRange(sheetName,{start:selection.start,end:{row:selection.start.row,col:selection.end.col}},selection));
-  const handleFillRight = () => void mutate('Filled selection right',()=>api.fillRange(sheetName,{start:selection.start,end:{row:selection.end.row,col:selection.start.col}},selection));
+  const handleFillDown = () => {if(!boundedSelection())return;void mutate('Filled selection down',()=>api.fillRange(sheetName,{start:selection.start,end:{row:selection.start.row,col:selection.end.col}},selection));};
+  const handleFillRight = () => {if(!boundedSelection())return;void mutate('Filled selection right',()=>api.fillRange(sheetName,{start:selection.start,end:{row:selection.end.row,col:selection.start.col}},selection));};
   const changeSheet = (name:string) => void mutate(`Selected ${name}`,async()=>{await api.selectSheet(name);setViewport(null);selectCell(0,0);clearDependencyTrace();},true);
   const moveToExplanation = (row: number, col: number, targetSheet: string, after: () => void) => {
     if (mutationLock.current) return;
@@ -418,7 +428,7 @@ export const App: React.FC = () => {
         onUndo={() => void mutate('Undid worksheet edit',api.undo)}
         onRedo={() => void mutate('Redid worksheet edit',api.redo)}
         onFillDown={handleFillDown}
-        onClear={() => void mutate('Cleared selection',()=>api.editRange(sheetName,selection.start.row,selection.start.col,Array.from({length:selection.end.row-selection.start.row+1},()=>Array(selection.end.col-selection.start.col+1).fill(''))))}
+        onClear={handleClear}
         onCommitCell={handleCommitCell}
         onViewportChange={handleViewportChange}
       />
