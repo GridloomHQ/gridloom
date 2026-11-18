@@ -34,6 +34,16 @@ Results remain strings end to end so large integers do not pass through JavaScri
 
 This is a read-only convenience, not a posted journal or recorded review. It does not refresh connected data or recalculate the workbook. Results clear when the selection changes; delayed responses cannot overwrite a newer selection or workbook. The familiar behavior is informed by [Excel's status-bar summaries](https://support.microsoft.com/en-us/excel/view-summary-data-on-the-status-bar).
 
+## 0.5.4: Deliberate, safer saving
+
+**Save** uses the current workbook path after a successful open or save. **Save As** chooses another path. Ctrl/Command+S uses the same explicit save flow. New and Open ask whether to save the current workbook, discard it, or cancel. A canceled filename or failed save must not continue to replace the workbook.
+
+Saving writes committed workbook content, including staged source edits, to a `.gridloom` file on the machine running the server. It does **not** apply those edits to a source database. Unsubmitted cell or working-paper drafts are not silently submitted by Save: finish or cancel them and close open work panels first. The same conservative guard applies before New/Open, including before the discard choice. This is not autosave, a universal dirty/clean indicator, recovery after a crash, multi-client conflict protection, or a native-window-close guard. Save before closing the application.
+
+Each save writes through a uniquely created temporary file beside the destination, flushes and synchronizes it, then replaces the destination. It does not reuse or truncate an unrelated fixed `.gridloom.tmp` file. Failures before replacement leave the previous saved file intact. Filesystem and operating-system behavior still determine durability; directory synchronization on Unix is best-effort after replacement, with any failure logged as a durability warning rather than falsely reporting that the save did not occur.
+
+The explicit Save/Save As distinction follows [familiar workbook saving conventions](https://support.microsoft.com/en-us/excel/save-a-workbook). File synchronization and replacement use the documented [Rust file synchronization](https://doc.rust-lang.org/std/fs/struct.File.html#method.sync_all) and [rename](https://doc.rust-lang.org/std/fs/fn.rename.html) behavior.
+
 ## Keyboard editing
 
 - Enter / Shift+Enter: move down / up.

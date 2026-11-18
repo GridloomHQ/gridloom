@@ -9,7 +9,9 @@ interface FormulaBarProps {
   selectedRow: number;
   selectedCol: number;
   activeCellData?: CellRenderData;
-  onCommit: (rawInput: string) => void;
+  onCommit: (rawInput: string) => Promise<boolean>;
+  onDraftChange:(active:boolean)=>void;
+  sheetName:string;
   onGoTo: (row:number,col:number) => void;
   maxRows:number; maxCols:number;
 }
@@ -48,7 +50,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
   selectedRow,
   selectedCol,
   activeCellData,
-  onCommit, onGoTo, maxRows, maxCols,
+  onCommit, onGoTo, maxRows, maxCols, onDraftChange,sheetName,
 }) => {
   const [address,setAddress]=useState('');
   const [addressError,setAddressError]=useState('');
@@ -59,17 +61,25 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
   const [filterSuggestions, setFilterSuggestions] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const dirty = useRef(false);
-  const identity = useRef(coordA1);
-  const reset = () => { dirty.current = false; setInputValue(editableCellInput(activeCellData)); setShowSuggestions(false); };
-  const commit = () => { dirty.current = false; setShowSuggestions(false); onCommit(inputValue); };
+  const identity = useRef(`${sheetName}:${coordA1}`);
+  const currentIdentity=`${sheetName}:${coordA1}`;
+  const latestIdentity=useRef(currentIdentity);latestIdentity.current=currentIdentity;
+  const committing=useRef(false);
+  useEffect(()=>()=>onDraftChange(false),[onDraftChange]);
+  const reset = () => { dirty.current = false; onDraftChange(false);setInputValue(editableCellInput(activeCellData)); setShowSuggestions(false); };
+  const commit = async () => {
+    if(committing.current||disabled)return;committing.current=true;const target=currentIdentity, submitted=inputValue;
+    try {const success=await onCommit(submitted);if(success&&latestIdentity.current===target){dirty.current=false;onDraftChange(false);setShowSuggestions(false);}}
+    finally {committing.current=false;}
+  };
 
   useEffect(() => {
-    if (identity.current !== coordA1) { dirty.current = false; identity.current = coordA1; setShowSuggestions(false); }
+    if (identity.current !== currentIdentity) { dirty.current = false; identity.current = currentIdentity;onDraftChange(false); setShowSuggestions(false); }
     if (!dirty.current) setInputValue(editableCellInput(activeCellData));
-  }, [activeCellData, coordA1]);
+  }, [activeCellData, currentIdentity,onDraftChange]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    dirty.current = true;
+    dirty.current = true;onDraftChange(true);
     const val = e.target.value;
     setInputValue(val);
 
@@ -95,7 +105,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
   };
 
   const selectSuggestion = (fnName: string) => {
-    dirty.current = true; setInputValue(`=${fnName}(`);
+    dirty.current = true;onDraftChange(true); setInputValue(`=${fnName}(`);
     setShowSuggestions(false);
     if (inputRef.current) {
       inputRef.current.focus();

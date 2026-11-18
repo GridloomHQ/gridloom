@@ -18,7 +18,8 @@ import { PivotBuilderModal } from './components/PivotBuilderModal';
 import { ChartModal } from './components/ChartModal';
 import { AuditLogModal } from './components/AuditLogModal';
 import { BenchmarkModal } from './components/BenchmarkModal';
-import { api } from './api';
+import { api,getPendingMutations,subscribeMutations } from './api';
+import {saveBlocker} from './utils/saveGuard';
 import { ViewportResponse, WorksheetTable, ReviewDraft, DependencyHighlight } from './types';
 import { parseEdit } from './utils/values';
 import { colIndexToName, coordToA1 } from './utils/coords';
@@ -29,6 +30,11 @@ export const App: React.FC = () => {
   const [sheets, setSheets] = useState<string[]>(['Sheet1']);
   const [anchor, setAnchor] = useState({row: 0, col: 0});
   const [busy, setBusy] = useState(false);
+  const [gridDraft,setGridDraft]=useState(false),[formulaDraft,setFormulaDraft]=useState(false);
+  const [filePath,setFilePath]=useState<string|null>(null);
+  const [replacement,setReplacement]=useState<'new'|'open'|null>(null);
+  const [apiPending,setApiPending]=useState(getPendingMutations());
+  useEffect(()=>subscribeMutations(()=>setApiPending(getPendingMutations())),[]);
   const mutationLock = useRef(false);
   const viewportSequence = useRef(0);
   const metadataSequence = useRef(0);
@@ -93,6 +99,7 @@ export const App: React.FC = () => {
       ]);
       if(request!==metadataSequence.current)return;
       if (wb) {
+        setFilePath(wb.file_path);
         setSheetName(wb.active_sheet);
         setSheets(wb.sheets.map(s => s.name));
         setSheetFreeze(Object.fromEntries(wb.sheets.map(s=>[s.name,{top:s.freeze_top_row??false,left:s.freeze_first_column??false}])));
@@ -277,37 +284,41 @@ export const App: React.FC = () => {
   const addSheet = () => {const name=prompt('New worksheet name:',`Sheet${sheets.length+1}`);if(name)void mutate(`Added ${name}`,async()=>{await api.addSheet(name);await api.selectSheet(name);selectCell(0,0);clearDependencyTrace();});};
   const renameSheet = () => {const name=prompt('Rename worksheet:',sheetName);if(name&&name!==sheetName)void mutate(`Renamed to ${name}`,()=>api.renameSheet(sheetName,name));};
 
-  const handleNewWorkbook = async () => {
-    if (mutationLock.current || !confirm('Create a new workbook? Unsaved changes will be discarded.')) return;
-    await mutate('Created new workbook', async () => {
-      await api.newWorkbook();
-      viewportSequence.current++; setViewport(null); selectCell(0, 0);
-      setWorkbookEpoch(e => e + 1); reviewDrafts.current.clear(); clearDependencyTrace();
+  const draftProblem=()=>saveBlocker(gridDraft,formulaDraft,
+    isCloseOpen||isExplainOpen||isQuestionsOpen||isSchemaBrowserOpen||isQueryEditorOpen||isInsertTableOpen||isStagedReviewOpen||isPivotsOpen||isChartsOpen||isAuditLogOpen||isBenchmarksOpen,
+    reviewDrafts.current.values());
+  const readyForFileAction=()=>{
+    const problem=draftProblem();if(problem){setStatusMsg(problem);return false;}
+    if(mutationLock.current||getPendingMutations()>0){setStatusMsg('Wait for the current operation to finish before saving or replacing the workbook.');return false;}
+    return true;
+  };
+  const handleSaveWorkbook=async(saveAs=false):Promise<boolean>=>{
+    if(!readyForFileAction())return false;
+    const path=saveAs||!filePath?prompt('Save committed workbook content to:',filePath??'my_workbook.gridloom'):filePath;
+    if(!path?.trim())return false;
+    if(!readyForFileAction())return false;
+    mutationLock.current=true;setBusy(true);
+    try {await api.saveWorkbook(path);metadataSequence.current++;setFilePath(path);setStatusMsg(`Saved workbook to ${path}`);return true;}
+    catch(err:any){setStatusMsg(`Failed to save: ${err.message}`);return false;}
+    finally{mutationLock.current=false;setBusy(false);}
+  };
+  const requestReplacement=(kind:'new'|'open')=>{if(readyForFileAction())setReplacement(kind);};
+  const continueReplacement=async(save:boolean)=>{
+    if(!replacement||!readyForFileAction())return;
+    const kind=replacement;
+    if(save&&!await handleSaveWorkbook())return;
+    const path=kind==='open'?prompt('Enter path of .gridloom file to open:',filePath??'my_workbook.gridloom'):null;
+    if(kind==='open'&&!path?.trim())return;
+    if(!readyForFileAction())return;
+    setReplacement(null);
+    await mutate(kind==='new'?'Created new workbook':`Opened workbook from ${path}`,async()=>{
+      if(kind==='new')await api.newWorkbook();else await api.openWorkbook(path!);
+      viewportSequence.current++;setViewport(null);selectCell(0,0);
+      setWorkbookEpoch(e=>e+1);reviewDrafts.current.clear();clearDependencyTrace();
     });
   };
-
-  const handleSaveWorkbook = async () => {
-    const path = prompt('Enter save path:', 'my_workbook.gridloom');
-    if (path) {
-      try {
-        await api.saveWorkbook(path);
-        setStatusMsg(`Saved workbook to ${path}`);
-      } catch (err: any) {
-        alert(`Failed to save: ${err.message}`);
-      }
-    }
-  };
-
-  const handleOpenWorkbook = async () => {
-    if (mutationLock.current) return;
-    const path = prompt('Enter path of .gridloom file to open. Unsaved changes will be discarded:', 'my_workbook.gridloom');
-    if (!path) return;
-    await mutate(`Opened workbook from ${path}`, async () => {
-      await api.openWorkbook(path);
-      viewportSequence.current++; setViewport(null); selectCell(0, 0);
-      setWorkbookEpoch(e => e + 1); reviewDrafts.current.clear(); clearDependencyTrace();
-    });
-  };
+  const handleNewWorkbook=()=>requestReplacement('new');
+  const handleOpenWorkbook=()=>requestReplacement('open');
 
   const handleRefreshAll = async () => {
     await mutate('All sources refreshed successfully', async () => {
@@ -335,7 +346,16 @@ export const App: React.FC = () => {
     },true);
   };
   return (
-    <div onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f' && (e.target as HTMLElement).closest('[role="grid"]')){e.preventDefault();setIsFindOpen(true);}}} className="flex flex-col h-screen w-screen bg-slate-100 overflow-hidden font-sans">
+    <div onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&!e.altKey){e.preventDefault();if(!replacement)void handleSaveWorkbook(e.shiftKey);return;}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f' && (e.target as HTMLElement).closest('[role="grid"]')){e.preventDefault();setIsFindOpen(true);}}} className="flex flex-col h-screen w-screen bg-slate-100 overflow-hidden font-sans">
+      {replacement&&<div className="fixed inset-0 z-[100] bg-black/30 flex items-center justify-center" role="dialog" aria-modal="true" aria-label="Replace current workbook?" onKeyDown={e=>{e.stopPropagation();if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s')e.preventDefault();if(e.key==='Escape'&&!busy)setReplacement(null);
+          if(e.key==='Tab'){const buttons=Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const first=buttons[0],last=buttons[buttons.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}}}>
+        <div className="bg-white rounded shadow-xl p-5 max-w-lg space-y-3">
+          <h2 className="font-semibold">Replace current workbook?</h2>
+          <p>This always asks before replacing the workbook. Choose whether to save its current committed content first. Unsubmitted cell, review and dialog drafts are not saved. Saving does not apply staged database edits.</p>
+          <div className="flex gap-2"><button disabled={busy||apiPending>0} onClick={()=>void continueReplacement(true)}>Save and continue</button><button disabled={busy||apiPending>0} onClick={()=>void continueReplacement(false)}>Discard and continue</button><button autoFocus disabled={busy} onClick={()=>setReplacement(null)}>Cancel</button></div>
+        </div>
+      </div>}
+      <div className="contents" inert={replacement?true:undefined}>
       {/* Top Application Toolbar */}
       <Toolbar
         busy={busy}
@@ -355,7 +375,8 @@ export const App: React.FC = () => {
         onOpenAuditLog={() => setIsAuditLogOpen(true)}
         onOpenBenchmarks={() => setIsBenchmarksOpen(true)}
         onNewWorkbook={handleNewWorkbook}
-        onSaveWorkbook={handleSaveWorkbook}
+        onSaveWorkbook={()=>void handleSaveWorkbook()}
+        onSaveAsWorkbook={()=>void handleSaveWorkbook(true)}
         onOpenWorkbook={handleOpenWorkbook}
         onRefreshAll={handleRefreshAll}
         onApplyFormat={handleApplyFormat}
@@ -371,7 +392,7 @@ export const App: React.FC = () => {
         <label className="flex items-center gap-1"><input type="checkbox" checked={freezeFirstColumn} disabled={busy} onChange={e=>void mutate('Updated frozen panes',()=>api.setFreeze(sheetName,freezeTopRow,e.target.checked),true)}/>Freeze first column</label>
       </div>
       {/* Formula Bar */}
-      <FormulaBar key={`${workbookEpoch}:${sheetName}`}
+      <FormulaBar sheetName={sheetName} onDraftChange={setFormulaDraft} key={`${workbookEpoch}:${sheetName}`}
         disabled={busy || !selectedCellLoaded}
         selectedRow={selectedRow}
         selectedCol={selectedCol}
@@ -383,7 +404,7 @@ export const App: React.FC = () => {
 
       {/* Virtualized Worksheet Grid Canvas */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
-      <Grid key={workbookEpoch}
+      <Grid onDraftChange={setGridDraft} key={workbookEpoch}
         sheetName={sheetName}
         freezeTopRow={freezeTopRow} freezeFirstColumn={freezeFirstColumn}
         columnWidths={columnWidths} onColumnResize={resizeColumn}
@@ -511,6 +532,7 @@ export const App: React.FC = () => {
         isOpen={isBenchmarksOpen}
         onClose={() => setIsBenchmarksOpen(false)}
       />
+      </div>
     </div>
   );
 };

@@ -57,8 +57,9 @@ try{
  await modal.getByText('Import trial balance / roll forward',{exact:true}).click();await modal.getByLabel('Import period',{exact:true}).fill('2026-11');await modal.getByLabel('Trial balance CSV',{exact:true}).fill(csv);await modal.getByRole('button',{name:'Roll forward selected period',exact:true}).click();await modal.getByText('Reconciliation · 2026-11',{exact:true}).waitFor();
  await page.screenshot({path:path.join(artifacts,'monthly-close-rollforward.png'),fullPage:true});
  await modal.getByRole('button',{name:'Close monthly close',exact:true}).click();
+ if(await page.getByRole('button',{name:'Close explanation',exact:true}).count())await page.getByRole('button',{name:'Close explanation',exact:true}).click();
  const saved=path.join(artifacts,'acceptance.gridloom');page.once('dialog',d=>d.accept(saved));await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByText(`Saved workbook to ${saved}`,{exact:true}).waitFor();
- page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'New',exact:true}).click();await page.getByRole('grid',{name:'Sheet1 worksheet'}).waitFor();page.once('dialog',d=>d.accept(saved));await page.getByRole('button',{name:'Open',exact:true}).click();await page.getByRole('grid',{name:'Close 2026-11 v1 worksheet'}).waitFor();
+ await page.getByRole('button',{name:'New',exact:true}).click();await page.getByRole('button',{name:'Discard and continue',exact:true}).click();await page.getByRole('grid',{name:'Sheet1 worksheet'}).waitFor();page.once('dialog',d=>d.accept(saved));await page.getByRole('button',{name:'Open',exact:true}).click();await page.getByRole('button',{name:'Discard and continue',exact:true}).click();await page.getByRole('grid',{name:'Close 2026-11 v1 worksheet'}).waitFor();
  // 0.4 acceptance: custom working paper and end-to-end question/adjustment flow.
  await page.getByRole('button',{name:'Monthly close',exact:true}).click();
  await modal.getByLabel('Import period',{exact:true}).fill('2026-12');

@@ -32,6 +32,7 @@ interface ToolbarProps {
   onOpenBenchmarks: () => void;
   onNewWorkbook: () => void;
   onSaveWorkbook: () => void;
+  onSaveAsWorkbook: () => void;
   onOpenWorkbook: () => void;
   onRefreshAll: () => void;
   onApplyFormat: (format: string) => void;
@@ -51,7 +52,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onOpenAuditLog,
   onOpenBenchmarks,
   onNewWorkbook,
-  onSaveWorkbook,
+  onSaveWorkbook, onSaveAsWorkbook,
   onOpenWorkbook,
   onRefreshAll,
   onApplyFormat,
@@ -72,7 +73,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
 
         <button disabled={busy}
-          onClick={onNewWorkbook}
+          onMouseDown={e=>e.preventDefault()} onClick={onNewWorkbook}
           title="New Workbook"
           className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 text-slate-700 transition-colors"
         >
@@ -81,7 +82,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </button>
 
         <button disabled={busy}
-          onClick={onOpenWorkbook}
+          onMouseDown={e=>e.preventDefault()} onClick={onOpenWorkbook}
           title="Open Workbook (.gridloom)"
           className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 text-slate-700 transition-colors"
         >
@@ -90,13 +91,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </button>
 
         <button disabled={busy}
-          onClick={onSaveWorkbook}
+          onMouseDown={e=>e.preventDefault()} onClick={onSaveWorkbook}
           title="Save Workbook"
           className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 text-slate-700 transition-colors"
         >
           <Save className="w-3.5 h-3.5 text-slate-500" />
           <span>Save</span>
         </button>
+        <button disabled={busy} onMouseDown={e=>e.preventDefault()} onClick={onSaveAsWorkbook} className="px-2 py-1 rounded hover:bg-slate-100">Save As</button>
       </div>
 
       {/* SQL & Database Controls */}

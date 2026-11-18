@@ -16,9 +16,26 @@ use crate::virtual_view::{CellRenderData, ViewportRequest, ViewportResponse};
 use crate::writeback::StagedRepository;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
+
+/// Owns only the unique temporary path created by this save attempt.
+struct SaveTemp {
+    path: PathBuf,
+    committed: bool,
+}
+impl Drop for SaveTemp {
+    fn drop(&mut self) {
+        if !self.committed {
+            if let Err(error) = fs::remove_file(&self.path) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!(path = %self.path.display(), %error, "Unable to remove failed-save temporary file");
+                }
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CellData {
@@ -940,7 +957,14 @@ impl Workbook {
     pub fn save_to_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), CellError> {
         self.invalidate_changed_reviews();
         let p = path.as_ref().to_path_buf();
-        let tmp_path = p.with_extension("gridloom.tmp");
+        let parent = p
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        p.file_name()
+            .ok_or_else(|| CellError::Sql("Save path must name a file".into()))?;
+        // Bounded name length also permits destinations near a filesystem's filename limit.
+        let tmp_path = parent.join(format!(".gridloom-save-{}.tmp", uuid::Uuid::new_v4()));
 
         let serialized = SerializedWorkbook {
             reviews: self.reviews.clone(),
@@ -956,8 +980,41 @@ impl Workbook {
             charts: self.charts.clone(),
         };
 
-        let file = File::create(&tmp_path)
-            .map_err(|e| CellError::Sql(format!("Failed to create save file: {}", e)))?;
+        // create_new rejects pre-existing files and symlinks instead of truncating them.
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options
+            .open(&tmp_path)
+            .map_err(|e| CellError::Sql(format!("Failed to create save temporary file: {}", e)))?;
+        let mut temporary = SaveTemp {
+            path: tmp_path.clone(),
+            committed: false,
+        };
+        #[cfg(unix)]
+        {
+            // Preserve existing regular-file permission bits; new workbooks remain private.
+            // Do not follow a destination symlink or copy its target's permissions.
+            match fs::symlink_metadata(&p) {
+                Ok(metadata) if metadata.is_file() => {
+                    file.set_permissions(metadata.permissions()).map_err(|e| {
+                        CellError::Sql(format!("Failed to preserve workbook permissions: {}", e))
+                    })?
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(CellError::Sql(format!(
+                        "Failed to inspect workbook permissions: {}",
+                        error
+                    )))
+                }
+            }
+        }
         let mut writer = BufWriter::new(file);
         serde_json::to_writer_pretty(&mut writer, &serialized)
             .map_err(|e| CellError::Sql(format!("Failed to serialize workbook: {}", e)))?;
@@ -965,11 +1022,24 @@ impl Workbook {
         writer
             .flush()
             .map_err(|e| CellError::Sql(format!("Failed to flush workbook: {}", e)))?;
+        writer.get_ref().sync_all().map_err(|e| {
+            CellError::Sql(format!(
+                "Failed to sync save file before replacement: {}",
+                e
+            ))
+        })?;
         drop(writer);
-        // Atomic replace
+        // Same-directory rename is the commit point. Failures before this preserve the target.
         fs::rename(&tmp_path, &p)
             .map_err(|e| CellError::Sql(format!("Failed to commit atomic save: {}", e)))?;
-
+        temporary.committed = true;
+        // The replacement is already committed. A directory-sync failure must not be
+        // reported as a failed save (which would falsely imply the old file remains).
+        // Best effort on Unix; this is not a full power-loss/crash recovery guarantee.
+        #[cfg(unix)]
+        if let Err(error) = File::open(parent).and_then(|directory| directory.sync_all()) {
+            tracing::warn!(path = %parent.display(), %error, "Workbook replaced; directory durability could not be confirmed");
+        }
         self.file_path = Some(p);
         Ok(())
     }

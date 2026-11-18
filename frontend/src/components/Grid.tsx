@@ -18,6 +18,7 @@ interface GridProps {
   onPaste: (event: React.ClipboardEvent) => void;
   onUndo: () => void; onRedo: () => void; onFillDown: () => void;
   onClear: () => void;
+  onDraftChange:(active:boolean)=>void;
   columnWidths: Record<number,number>;
   freezeTopRow:boolean; freezeFirstColumn:boolean;
   onColumnResize?: (column:number,width:number) => void;
@@ -29,6 +30,8 @@ export const Grid: React.FC<GridProps> = (props) => {
   const [scroll, setScroll] = useState({top:0,left:0});
   const [size, setSize] = useState({width:1000,height:600});
   const [edit, setEdit] = useState<string | null>(null);
+  useEffect(()=>{props.onDraftChange(edit!==null);},[edit!==null,props.onDraftChange]);
+  useEffect(()=>()=>props.onDraftChange(false),[props.onDraftChange]);
   const editor = useRef<HTMLInputElement>(null);
   const editing = useRef(false);
   const dragging = useRef(false);

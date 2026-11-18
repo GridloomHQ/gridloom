@@ -54,7 +54,7 @@ try {
  await staleSummary(()=>go('B1'),()=>expectMetric(sum,'9007199254740993'));
  await staleSummary(async()=>{page.once('dialog',d=>d.accept('Empty summary sheet'));await page.getByRole('button',{name:'Add worksheet',exact:true}).click();await page.getByRole('grid',{name:'Empty summary sheet worksheet'}).waitFor();},()=>expectMetric(numbers,'0'));
  await page.getByRole('button',{name:'Sheet1',exact:true}).click();await page.getByRole('grid',{name:'Sheet1 worksheet'}).waitFor();await idle();await go('B1');await expectMetric(sum,'9007199254740993');
- await staleSummary(async()=>{page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'New',exact:true}).click();await page.getByRole('grid',{name:'Sheet1 worksheet'}).waitFor();await idle();},()=>expectMetric(numbers,'0'));
+ await staleSummary(async()=>{await page.getByRole('button',{name:'New',exact:true}).click();await page.getByRole('button',{name:'Discard and continue',exact:true}).click();await page.getByRole('grid',{name:'Sheet1 worksheet'}).waitFor();await idle();},()=>expectMetric(numbers,'0'));
  // Selection bounds alone exercise the cap; no huge seed or backend request needed.
  let summaryRequests=0;const countRequest=request=>{if(request.url().endsWith('/api/ranges/summary'))summaryRequests++;};
  await go('K1000');await grid().focus();await grid().press('Control+Shift+Home');await summary.getByText('Summary unavailable: select at most 10,000 cells (11000 selected).',{exact:true}).waitFor();

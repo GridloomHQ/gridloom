@@ -1,3 +1,9 @@
+# 0.5.4
+
+- Save reuses the current path; Save As and Ctrl/Command+S provide familiar explicit saving.
+- Save/Discard/Cancel replacement prompts and local-draft guards reduce accidental workbook loss.
+- Unique same-directory temporary saves avoid clobbering unrelated temporary files.
+
 # 0.5.3
 
 - Read-only selection Sum/Average/Numbers with exact strings and explicit approximate, rounded or unavailable results.
