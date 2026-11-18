@@ -1,209 +1,165 @@
-# Gridloom 🧵
+# Gridloom
 
 [![CI](https://github.com/lhemerly/gridloom/actions/workflows/ci.yml/badge.svg)](https://github.com/lhemerly/gridloom/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-1.95%2B-orange.svg)](https://www.rust-lang.org/)
-[![SQLite](https://img.shields.io/badge/SQLite-Native-003B57.svg)](https://www.sqlite.org/)
-[![DuckDB](https://img.shields.io/badge/DuckDB-Native-FFF000.svg)](https://duckdb.org/)
 
-> **Local-first desktop workbook combining SQL-connected data with an Excel-like worksheet.**
+**A local-first spreadsheet for following the numbers, not just calculating them.**
 
-Connect an existing **SQLite** or **DuckDB** database, name a SQL query result as a worksheet data source, and work with it alongside ordinary cells, formulas, pivots, and charts.
+Gridloom combines a familiar worksheet with SQL-connected data and accounting working papers. Build a calculation, trace its inputs, ask a question about a number, and retain the evidence behind a review. It runs on your computer, either in a browser backed by a local server or in a native desktop window.
 
-The database remains in its original format. Editing an eligible source-backed table creates staged changes; **nothing writes back until the user reviews and confirms them**.
+It is aimed at accounting and financial models where understanding **where a number came from** matters as much as the result. Gridloom is an early-stage application, not a drop-in replacement for Excel or an audited accounting system.
 
----
+## What you can do
 
-## Key Features
+### Work in a spreadsheet
 
-- 🔌 **Native SQLite & DuckDB**: Direct connection without foreign server daemons or cloud accounts.
-- 🛡️ **Read-Only Capability Boundary**: Mutating queries (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ATTACH`, extension loads) are strictly blocked at the AST parser security layer.
-- 📐 **AST Lineage Analyzer**: Staged writeback requires conservative single-table lineage, direct column mappings, and declared primary keys. Aggregated or joined views are safely marked read-only.
-- 📝 **Safe Staged Writeback**: Edits are queued with original and proposed values. The review interface performs NULL-safe optimistic concurrency conflict checks. Applying executes in a single database transaction; conflicts or errors safely roll back the entire changeset without data loss.
-- 🧮 **70+ Formula Catalog**: Complete tested implementations across Arithmetic, Statistics, Logic, Text, Dates, Lookup/Arrays, Financial, and SQL formulas (`SQLVALUE`, `SQLTABLE`).
-- 🌊 **Dynamic Array Spills**: Excel-style dynamic spilling with automatic result region reservation and `#SPILL!` collision detection.
-- 🏷️ **Structured References**: Reference table columns directly with `Table[Column]` and `Table[@Column]` syntax.
-- 📊 **Pivots & Visual Charts**: Interactive pivot table generation (Sum, Count, Average, Min, Max) and responsive SVG charts (Column, Bar, Line, Pie, Scatter).
-- ⚡ **High-Performance Virtualized Grid**: Renders a bounded viewport; query results are currently fully materialized in memory.
-- 💾 **Atomic File Package**: Workbooks save connections, layouts, formulas, and pending changes with atomic replacement (`.gridloom`).
+- Use multiple sheets, cross-sheet formulas, named table references and dynamic array spills.
+- Select, copy and paste ranges; fill formulas; format numbers and cells; undo and redo supported cell operations.
+- Find cached values or formula inputs, jump to a cell, resize columns, freeze the first row or column, and show formulas directly in the grid.
+- Get selection totals, complete supported function names in the formula bar, and cycle relative/absolute references with F4.
+- Build pivot tables and column, bar, line, pie or scatter charts.
+- Save and reopen `.gridloom` workbooks, including layouts, calculations and pending source edits.
 
----
+The formula engine includes arithmetic, statistics, logic, text, date, lookup and financial functions, plus `SQLVALUE` and `SQLTABLE`. Examples include `SUMIFS`, `SUMPRODUCT`, `XLOOKUP`, `FILTER`, `PMT` and `NPV`. The formula bar's suggestions and the local `/api/functions` endpoint expose the engine's supported function names and aliases.
 
-## 0.5: Worksheet Discovery & Navigation
+### Bring SQL data into the worksheet
 
-Search cached values or formula inputs across the workbook, jump to a cell by address, and use failure-safe Enter/Tab editing and Home/Page navigation. [Behavior, limits and next priorities](docs/RELEASE-0.5.md).
+Connect an existing **SQLite** or **DuckDB** file, run a read-only query, and insert its result as a named table. Keep ordinary cells and formulas alongside it:
 
-## 0.4 Preview: Accounting Working Papers
-
-Import a trial balance, define your report and follow the cells behind each number. Circle up uncertain items even while sign-off is blocked. Post a supported adjustment without replacing the import, see which reported values and reviews changed, and export the full working paper.
-
-[Work through a 0.4 example and see its limits](docs/RELEASE-0.4.md).
-
-## 0.3 Preview: Monthly Close & Captured Review Evidence
-
-**Monthly close** imports a trial-balance CSV, maps accounts, generates an explained P&L, checks debit-credit reconciliation and exposes a six-line review queue. Attach retained support files, record local reviews or questions, compare exact before/after inputs, roll mappings into a new period and export a self-contained JSON review pack, conventional P&L CSV or a print-friendly readable HTML summary.
-
-The worksheet now supports range selection/copy/paste, formula fill, persisted number/bold/italic/fill formatting, bounded undo/redo, multiple sheets and cross-sheet formulas. Reviewed calculations retain their full observed inputs and cached source results, not just a digest. Evidence replacement retains earlier embedded file versions. Valid direct SQL projections can expose cached primary-keyed source rows; ambiguous, joined and aggregate queries cannot claim transaction provenance.
-
-See [the complete workflow and trust boundaries](docs/RELEASE-0.3.md) for CSV examples, clipboard/history limits, snapshot limits and verified CI package download instructions. Main-branch CI builds Linux server/desktop tarballs with exact source identities, checksums and relocation smoke; they are not signed installers.
-
-**Important:** reviewer labels remain self-reported, not authenticated signatures. A review pack is a local working paper, not audit assurance, an external database backup or proof of ledger completeness. Files are unencrypted. Source refreshes observe external changes; they are not monitored automatically. Trusted multi-user review identities and interactive native coverage remain separate release gaps, not implied capabilities.
-
----
-
-## Architecture Overview
-
-```
-                      ┌────────────────────────────────────────┐
-                      │    Gridloom Desktop App (Wry / Tao)    │
-                      │                   OR                   │
-                      │    Modern Browser (React 19 + Vite)    │
-                      └──────────────────┬─────────────────────┘
-                                         │ Viewport & REST API
-                                         ▼
-                      ┌────────────────────────────────────────┐
-                      │     gridloom-server (Axum 0.8)         │
-                      │   - Viewport virtual slicing           │
-                      │   - Staged writeback review endpoints  │
-                      │   - Automated benchmark runner         │
-                      └──────────────────┬─────────────────────┘
-                                         │
-                                         ▼
-                      ┌────────────────────────────────────────┐
-                      │       gridloom-core (Rust 2021)        │
-                      │   - Exact decimal arithmetic           │
-                      │   - Pratt AST formula parser           │
-                      │   - Kahn's DAG recalculation engine    │
-                      │   - Conservative SQL lineage analyzer  │
-                      │   - Optimistic concurrency OCC engine  │
-                      │   - Atomic .gridloom persistence       │
-                      └──────────────┬──────────────────┬──────┘
-                                     │                  │
-                                     ▼                  ▼
-                         ┌─────────────────┐  ┌─────────────────┐
-                         │  Native SQLite  │  │  Native DuckDB  │
-                         └─────────────────┘  └─────────────────┘
+```excel
+=SUM(Invoices[Amount])
+=AVERAGEIFS(Invoices[Amount], Invoices[Status], "Paid")
+=SQLVALUE("SalesDB", "SELECT SUM(amount) FROM invoices WHERE customer_name = ?", A2)
 ```
 
----
+The database stays in its original format. Eligible single-table projections with direct column mappings and declared primary keys can support staged edits. Joined, aggregated or ambiguous results remain read-only.
 
-## Core Workflow
+Editing a source-backed cell does **not** immediately change the database. **Review Edits** shows original and proposed values before an explicit apply. Applying a changeset checks for conflicting external changes and uses a database transaction; a conflict or error rolls back that changeset. Saving a workbook is separate from applying its source edits.
 
-1. **Connect Database**: Open an existing SQLite or DuckDB file, or launch with bundled sample databases (`fixtures/sample_sales.sqlite` and `fixtures/sample_analytics.duckdb`).
-2. **Compose SQL**: Run read-only queries with live writeback eligibility checks.
-3. **Insert Table**: Name the source (e.g. `Invoices`) and insert it as an anchor-positioned worksheet table.
-4. **Calculations & Structured References**: Write formulas outside occupied table bounds:
-   ```excel
-   =SUM(Invoices[Amount])
-   =AVERAGEIFS(Invoices[Amount], Invoices[Status], "Paid")
-   =SQLVALUE("SalesDB", "SELECT SUM(amount) FROM invoices WHERE customer_name = ?", A2)
-   ```
-5. **Stage Edits**: Double-click any qualified row to edit amounts or statuses. Changes are highlighted in amber and staged locally without touching the database.
-6. **Review & Writeback**: Inspect the pending changeset in the **Review Edits** drawer. Live conflict detection verifies database rows haven't changed externally. Confirm to execute a single atomic write transaction.
+### Explain and review a calculation
 
----
+Use **Explain & Review** to inspect a cell's formula, captured inputs and available source-row provenance. Follow upstream inputs and downstream consumers, compare observed states, and attach supporting files with retained versions.
 
-## Formula Catalog Contract
+Record a review or circle up an open question. Questions can be resolved or reopened, and changed calculation snapshots invalidate previous reviews. Source-row provenance is available only where the query's lineage can be established; it is not inferred for arbitrary SQL.
 
-Gridloom guarantees exact arithmetic precision (`rust_decimal::Decimal`), distinct SQL `NULL` semantics (separate from blank cells and zero), and Excel-compatible coercion rules.
+### Prepare accounting working papers
 
-| Family | Supported Functions |
-|---|---|
-| **Arithmetic** | `SUM`, `SUMIF`, `SUMIFS`, `SUMPRODUCT`, `PRODUCT`, `ABS`, `SIGN`, `MOD`, `POWER`, `SQRT`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `INT`, `TRUNC`, `CEILING.MATH`, `FLOOR.MATH` |
-| **Statistics** | `AVERAGE`, `AVERAGEIF`, `AVERAGEIFS`, `COUNT`, `COUNTA`, `COUNTBLANK`, `COUNTIF`, `COUNTIFS`, `MIN`, `MAX`, `MEDIAN`, `STDEV.S`, `STDEV.P`, `VAR.S`, `VAR.P` |
-| **Logic & Inspection** | `IF`, `IFS`, `AND`, `OR`, `NOT`, `IFERROR`, `IFNA`, `ISBLANK`, `ISNUMBER`, `ISTEXT`, `ISERROR`, `ISNA` |
-| **Text** | `CONCAT`, `TEXTJOIN`, `LEFT`, `RIGHT`, `MID`, `LEN`, `TRIM`, `CLEAN`, `UPPER`, `LOWER`, `SUBSTITUTE`, `REPLACE`, `FIND`, `SEARCH`, `VALUE`, `TEXT` |
-| **Dates** | `DATE`, `YEAR`, `MONTH`, `DAY`, `TODAY`, `NOW`, `EDATE`, `EOMONTH`, `DAYS`, `WEEKDAY`, `NETWORKDAYS`, `WORKDAY` |
-| **Lookup & Arrays** | `XLOOKUP`, `VLOOKUP`, `INDEX`, `MATCH`, `FILTER`, `SORT`, `UNIQUE`, `SEQUENCE`, `TRANSPOSE` |
-| **Financial** | `PMT`, `PV`, `FV`, `NPV`, `IRR` |
-| **SQL First-Class** | `SQLVALUE(connection, query, ...params)`, `SQLTABLE(connection, query, ...params)` |
+**Monthly close** provides a focused trial-balance workflow:
 
----
+1. Import a trial-balance CSV and map accounts to a report.
+2. Define entity, currency, units and report hierarchy.
+3. Generate a P&L and inspect debit/credit reconciliation and review items.
+4. Add balanced adjustment journals with rationale and supporting evidence without replacing the imported trial balance.
+5. See imported, adjusted and reported balances, roll mappings into a new period, and export a JSON review pack, P&L CSV or readable HTML summary.
 
-## Safe Staged Writeback Guarantee
+## Get started
 
-```
-  ┌──────────────┐      Edit Cell       ┌────────────────────────┐
-  │  Worksheet   │ ───────────────────► │   Staged Patch Store   │
-  │  Table Cell  │                      │ (Key, OldVal, Proposed)│
-  └──────────────┘                      └───────────┬────────────┘
-                                                    │
-                                        Open Review Modal
-                                                    │
-                                                    ▼
-                                        ┌────────────────────────┐
-                                        │ Live Conflict Check    │
-                                        │ (Reread DB base rows)  │
-                                        └───────────┬────────────┘
-                                                    │
-                                          Confirm & Apply
-                                                    │
-                                                    ▼
-                       ┌─────────────────────────────────────────────────────────┐
-                       │               Single Atomic DB Transaction              │
-                       │  1. Check NULL-safe equality: current == original       │
-                       │  2. If any mismatch or deleted row: ROLLBACK ALL        │
-                       │  3. Execute UPDATE ... WHERE id = ?                     │
-                       │  4. Write permanent Audit Trail Record                  │
-                       │  5. Commit Transaction                                  │
-                       └─────────────────────────────────────────────────────────┘
-```
+### Use a Linux package
 
----
+Open a **successful main-branch run** in [Actions → CI](https://github.com/lhemerly/gridloom/actions/workflows/ci.yml) and download its `gridloom-linux-x86_64-<commit>` artifact. Extract the downloaded ZIP to find the server/browser and desktop tarballs, their SHA-256 files and verification logs. Artifacts expire after 14 days.
 
-## V1 Performance Acceptance Protocol
-
-The benchmark runner measures four smoke-test workloads: 100 formula edits, a DuckDB aggregation over 100,000 generated rows, 200 scalar XLOOKUP evaluations over 1,000-element arrays, and a 1,581-cell viewport.
-
-Run `cargo run -p gridloom-server -- --bench` for measurements on your machine. Throughput counts actual operations; the formula workload includes recalculation and the lookup workload includes argument-array clones. Query APIs fully materialize results; viewport rendering does not bound query memory or provide database streaming.
-
-Correctness checks validate the final chain value, aggregate sums and counts, lookup answers, and viewport size. Resource smoke-test budgets are 30 seconds per workload and 1 GiB process peak RSS. Linux reads `VmHWM` from `/proc/self/status`; this is a cumulative process high-water mark, not per-workload allocations. Other hosts report unmeasured memory and an unavailable resource gate. The CLI exits unsuccessfully when either gate fails or resource measurement is unavailable. These smoke tests do not establish production-scale V1 acceptance.
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- [Rust 1.95+](https://www.rust-lang.org/tools/install)
-- [Node.js 20+](https://nodejs.org/)
-- WebKitGTK (on Linux for native window shell: `sudo apt-get install libwebkit2gtk-4.1-dev libgtk-3-dev`)
-
-### 1. Build and Run the Complete Application
+Choose the server variant for a browser interface, or desktop for a native window. From the directory containing the downloaded tarballs, substitute the actual filename below:
 
 ```bash
-# 1. Build the React frontend
+archive='gridloom-<version>-linux-x86_64-server.tar.gz'
+sha256sum -c "$archive.sha256"
+tar -xzf "$archive"
+"./${archive%.tar.gz}/gridloom" --no-samples
+```
+
+For the server variant, open the local URL printed in the terminal. Omit `--no-samples` to start with sample data.
+
+Packages include frontend assets and DuckDB, but not every system library. They are built and checked on Ubuntu 24.04 x86_64; the desktop variant needs compatible GTK3/WebKitGTK 4.1 runtime libraries. They are **not signed installers or universal Linux images**. Inspect the extracted `docs/shared-libraries.txt` and `docs/build-info.json` for dependencies and source identity. Checksums detect altered bytes, not publisher authenticity.
+
+### Build from source on Linux
+
+Use a current stable Rust toolchain, an up-to-date Node.js 22 or newer, npm, Python 3.11+, a C/C++ build toolchain, `curl` and `unzip`. CI runs on Ubuntu; other operating systems are not covered by the packaged verification path.
+
+```bash
+git clone https://github.com/lhemerly/gridloom.git
+cd gridloom
+
+# Build tools on Ubuntu/Debian.
+sudo apt-get update
+sudo apt-get install -y build-essential pkg-config curl unzip
+
+# Optional: native desktop dependencies (omit for server/browser-only builds).
+sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
+
 cd frontend
 npm ci
 npm run build
 cd ..
-
-# 2. Run the Gridloom Desktop application (or server)
-cargo run -p gridloom-server
-```
-Visit `http://127.0.0.1:3001` in your browser, or run the native desktop shell:
-```bash
-cargo run -p gridloom-desktop
 ```
 
-### 2. Run the Test Suites
+The Rust DuckDB binding also needs a matching native DuckDB library. The following uses the version encoded in the checked-in lockfile and the official Linux x86_64 release, as CI does:
 
 ```bash
-# Run all core, parser, formula, lineage, and writeback integration tests
-cargo test --workspace
-cd frontend && npm test && npm run build
-# After building gridloom-server, run against a real synthetic monthly close:
-npm run test:browser
+duckdb_version=$(python3 - <<'PY'
+import tomllib
+from pathlib import Path
+packages = tomllib.loads(Path("Cargo.lock").read_text())["package"]
+version = next(p["version"] for p in packages if p["name"] == "libduckdb-sys")
+encoded = int(version.split(".")[1])
+print(f"{encoded // 10000}.{encoded // 100 % 100}.{encoded % 100}")
+PY
+)
+export DUCKDB_LIB_DIR="$HOME/.cache/gridloom/duckdb/$duckdb_version"
+export DUCKDB_INCLUDE_DIR="$DUCKDB_LIB_DIR"
+mkdir -p "$DUCKDB_LIB_DIR"
+curl --fail --location --retry 3 \
+  "https://github.com/duckdb/duckdb/releases/download/v$duckdb_version/libduckdb-linux-amd64.zip" \
+  --output "$DUCKDB_LIB_DIR/libduckdb.zip"
+unzip -q -o "$DUCKDB_LIB_DIR/libduckdb.zip" -d "$DUCKDB_LIB_DIR"
+export LD_LIBRARY_PATH="$DUCKDB_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+cargo run --locked -p gridloom-server
 ```
 
-### 3. Run the Performance Acceptance Suite
+Open **http://127.0.0.1:3001**. For a separate native-window session, stop the server and run `cargo run --locked -p gridloom-desktop` instead. Keep the DuckDB environment variables set in the shell used to build or launch either application.
+
+For frontend development, run the server in one terminal and `cd frontend && npm run dev` in another; Vite proxies API requests to port 3001. For local packaging, use `scripts/package-linux.sh server` or `scripts/package-linux.sh desktop`.
+
+### Try a first workbook
+
+Start with the sample databases to explore SQL tables, or use **Monthly close** for a trial balance. Add a formula outside any occupied table or spill range, select its result, and open **Explain & Review**. Save the workbook before closing the application. Use **Save As** to keep a separate copy.
+
+## Important boundaries
+
+- **Not Excel compatibility.** There is no general `.xlsx` import/export or complete Excel function/coercion compatibility. For example, `ROUND` uses half-even rounding; some functions and aliases intentionally retain Gridloom-specific coercions and behavior.
+- **Fixed precision, not arbitrary precision.** Decimal values support accounting-oriented calculations, but some functions use floating-point operations or fixed-precision rounding. Numeric hardening is ongoing; this is not a guarantee that every calculation is exact.
+- **Local working papers, not assurance.** Reviewer names are self-reported, not authenticated signatures. A review pack does not prove ledger completeness, provide audit assurance or replace an external database backup.
+- **Protect the files.** Workbooks and embedded evidence are unencrypted. Connection paths refer to the machine running the server; source databases are not embedded backups. Keep the local service private rather than exposing it as a multi-user server.
+- **Save deliberately.** There is no autosave or universal native-window-close protection. Save/Discard/Cancel guards cover supported in-app replacement flows, not every way a process can exit.
+- **Know the scale.** The grid is virtualized, but SQL results are fully materialized in memory. Source refresh is explicit, not automatic monitoring. Find and bulk worksheet operations have bounded limits.
+- **Standards are not implemented.** IFRS/XBRL taxonomy validation and an add-on system are not current capabilities.
+
+## Development and verification
+
+The repository separates `gridloom-core` (Rust calculation, database and working-paper logic), `gridloom-server` (Axum API and local app hosting), `gridloom-desktop` (Wry/Tao shell), and `frontend` (React/TypeScript interface).
+
+With the source-build environment above configured, including the optional desktop dependencies for the full workspace tests:
 
 ```bash
-cargo run -p gridloom-server -- --bench
+cargo test --locked --workspace
+python3 -m unittest discover -s scripts/tests -v
+(cd frontend && npm test && npm run build)
+cargo build --locked -p gridloom-server
+(cd frontend && npx playwright install --with-deps chromium && npm run test:browser)
+cargo run --locked -p gridloom-server -- --bench
 ```
 
----
+`test:browser` exercises a synthetic monthly close. [CI](.github/workflows/ci.yml) also runs dedicated worksheet, save-safety and formula regression suites, a native window-startup smoke test, and exact-commit package integrity/relocation checks. Native startup coverage is not comprehensive interactive desktop testing.
+
+The benchmark command checks four bounded workloads and resource budgets. Linux memory measurement uses the process peak RSS; these checks are smoke tests, not a production-scale performance guarantee. On hosts without the required memory measurement, the resource gate is unavailable and the command exits unsuccessfully.
+
+## Further reading
+
+- [Monthly-close walkthrough, CSV examples and review boundaries](docs/RELEASE-0.3.md)
+- [Accounting working-paper example](docs/RELEASE-0.4.md)
+- [Detailed worksheet and formula behavior](docs/RELEASE-0.5.md)
+- [Change history](CHANGELOG.md)
 
 ## License
 
-This project is dual-licensed under either the [MIT License](LICENSE) or Apache 2.0 at your option.
+See the included [MIT license](LICENSE). The Rust package manifests additionally declare `MIT OR Apache-2.0`.
