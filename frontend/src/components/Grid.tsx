@@ -38,6 +38,9 @@ export const Grid: React.FC<GridProps> = (props) => {
   const editor = useRef<HTMLInputElement>(null);
   const referenceSelection=useRef<{start:number;end:number}|null>(null);
   useLayoutEffect(()=>{const selection=referenceSelection.current;referenceSelection.current=null;if(selection&&editor.current)editor.current.setSelectionRange(selection.start,selection.end);},[edit]);
+  // Draft text is owned by the cell where editing began, never by selection.
+  const draftTarget = useRef<{sheetName:string;selectedRow:number;selectedCol:number}|null>(null);
+  const draftMatchesSelection = draftTarget.current?.sheetName===sheetName && draftTarget.current?.selectedRow===selectedRow && draftTarget.current?.selectedCol===selectedCol;
   const editing = useRef(false);
   const dragging = useRef(false);
   const committing = useRef(false);
@@ -82,7 +85,7 @@ export const Grid: React.FC<GridProps> = (props) => {
     return()=>{resize.current=null;window.removeEventListener('mousemove',move);window.removeEventListener('mouseup',up);window.removeEventListener('keydown',key,true);window.removeEventListener('blur',cancel);};
   },[]);
   useEffect(()=>{resize.current=null;setResizePreview(null);},[sheetName,busy]);
-  useEffect(() => { editGeneration.current++;editing.current=false;failedInput.current=null;setEdit(null); },[sheetName,selectedRow,selectedCol]);
+  useLayoutEffect(() => { editGeneration.current++;editing.current=false;draftTarget.current=null;failedInput.current=null;referenceSelection.current=null;setEdit(null); },[sheetName,selectedRow,selectedCol]);
   useEffect(() => { if (edit !== null) editor.current?.focus(); }, [edit !== null]);
   useEffect(() => {
     const el=container.current;if(!el)return;
@@ -107,34 +110,37 @@ export const Grid: React.FC<GridProps> = (props) => {
     // stale/offscreen content while an address or sheet jump is still loading.
     if (!viewport || viewport.sheet_name !== sheetName || !isCellLoaded(viewport,selectedRow,selectedCol)) return;
     const cell=viewport?.cells[coordToA1(selectedRow,selectedCol)];
-    editGeneration.current++;failedInput.current=null;editing.current=true;setEdit(initial ?? editableCellInput(cell));
+    editGeneration.current++;draftTarget.current={sheetName,selectedRow,selectedCol};failedInput.current=null;editing.current=true;setEdit(initial ?? editableCellInput(cell));
   };
   const finish = async (commit: boolean, move?: ReturnType<typeof navigation>) => {
     if(!editing.current || committing.current)return;
+    const target=draftTarget.current,current=currentTarget.current;
+    // An old blur/event callback must not submit a draft after programmatic
+    // navigation, even before the selection-reset effect has run.
+    if (!target || target.sheetName!==current.sheetName || target.selectedRow!==current.selectedRow || target.selectedCol!==current.selectedCol || target.sheetName!==sheetName || target.selectedRow!==selectedRow || target.selectedCol!==selectedCol) return;
     if (!commit) {
-      editGeneration.current++;editing.current=false;setEdit(null);container.current?.focus();return;
+      editGeneration.current++;editing.current=false;draftTarget.current=null;setEdit(null);container.current?.focus();return;
     }
     if (edit === null) return;
     // A failed draft needs an explicit retry or a change, not another network
     // write every time the user focuses a navigation or error-recovery control.
     if (!move && failedInput.current === edit) return;
     const generation = editGeneration.current;
-    const target = {sheetName, selectedRow, selectedCol};
     committing.current=true;
     let success = false;
-    try { success = await onCommitCell(selectedRow,selectedCol,edit); }
+    try { success = await onCommitCell(target.selectedRow,target.selectedCol,edit); }
     catch { /* Parent reports mutation failures. Keep the draft available for retry. */ }
     finally { committing.current=false; }
-    const current = currentTarget.current;
-    if (generation !== editGeneration.current || current.sheetName !== target.sheetName) return;
-    if (current.selectedRow !== target.selectedRow || current.selectedCol !== target.selectedCol) {
-      editing.current=false;setEdit(null);return;
+    const after = currentTarget.current;
+    if (generation !== editGeneration.current || after.sheetName !== target.sheetName) return;
+    if (after.selectedRow !== target.selectedRow || after.selectedCol !== target.selectedCol) {
+      editing.current=false;draftTarget.current=null;setEdit(null);return;
     }
     // A blur may have opened a dialog or moved focus to another control. Do not
     // steal it when the network response arrives. Keyboard commits retain focus.
     const hasEditorFocus = document.activeElement === editor.current;
     if (!success) { failedInput.current=edit; if (move || hasEditorFocus) editor.current?.focus();return; }
-    editing.current=false;setEdit(null);
+    editing.current=false;draftTarget.current=null;setEdit(null);
     if (move) onSelectCell(move.row,move.col,move.extend);
     if (move || hasEditorFocus) container.current?.focus();
   };
@@ -192,7 +198,7 @@ export const Grid: React.FC<GridProps> = (props) => {
       {rows.map(r=><div key={`r${r}`} aria-hidden style={{position:'absolute',left:scroll.left,top:cellTop(r),width:LEFT,height:H,zIndex:props.freezeTopRow&&r===0?35:30}} className="bg-slate-100 border-r border-b border-slate-300 text-center text-xs py-1">{r+1}</div>)}
       <div aria-hidden style={{position:'absolute',top:scroll.top,left:scroll.left,width:LEFT,height:H,zIndex:40}} className="bg-slate-200 border-r border-b border-slate-300"/>
       {resizePreview&&<div aria-hidden style={{position:'absolute',pointerEvents:'none',left:cellLeft(resizePreview.column)+resizePreview.width,top:scroll.top,width:2,height:size.height,zIndex:45,background:'#2563eb'}}/>}
-      {edit!==null&&<input ref={editor} aria-label={`Edit ${coordToA1(selectedRow,selectedCol)}`} value={edit} title="F4 cycles a formula reference: relative, absolute, row-locked, column-locked" onChange={e=>{referenceSelection.current=null;failedInput.current=null;setEdit(e.target.value);}} onBlur={()=>{void finish(true);}} readOnly={busy} style={{position:'absolute',left:cellLeft(selectedCol),top:cellTop(selectedRow),width:Math.max(geometry.width(selectedCol),160),height:H,zIndex:paneLayer(selectedRow,selectedCol,props.freezeTopRow,props.freezeFirstColumn)+5}} className="px-1 text-xs border-2 border-blue-600 bg-white outline-none"/>}
+      {edit!==null&&draftMatchesSelection&&<input ref={editor} aria-label={`Edit ${coordToA1(selectedRow,selectedCol)}`} value={edit} title="F4 cycles a formula reference: relative, absolute, row-locked, column-locked" onChange={e=>{referenceSelection.current=null;failedInput.current=null;setEdit(e.target.value);}} onBlur={()=>{void finish(true);}} readOnly={busy} style={{position:'absolute',left:cellLeft(selectedCol),top:cellTop(selectedRow),width:Math.max(geometry.width(selectedCol),160),height:H,zIndex:paneLayer(selectedRow,selectedCol,props.freezeTopRow,props.freezeFirstColumn)+5}} className="px-1 text-xs border-2 border-blue-600 bg-white outline-none"/>}
     </div>
   </div>;
 };

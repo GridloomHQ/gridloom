@@ -1,5 +1,6 @@
 # 0.5.9
 
+- Cell drafts retain their original ownership and cannot appear under or submit to a newly navigated cell.
 - Show formulas is a per-sheet saved view for inspecting calculation logic directly in the grid.
 - Calculated values remain available in tooltips; summaries, copying, searches and exports retain their existing behavior.
 
