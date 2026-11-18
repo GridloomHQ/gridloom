@@ -1,3 +1,4 @@
+import { FindPanel, FindMatch } from './components/FindPanel';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { MonthlyClosePanel } from './components/MonthlyClosePanel';
 import { normalizedRange, encodeTsv, decodeTsv, GridRange } from './utils/selection';
@@ -21,6 +22,7 @@ import { parseEdit } from './utils/values';
 import { coordToA1 } from './utils/coords';
 
 export const App: React.FC = () => {
+  const [isFindOpen,setIsFindOpen]=useState(false);
   const [isCloseOpen, setIsCloseOpen] = useState(false);
   const [sheets, setSheets] = useState<string[]>(['Sheet1']);
   const [anchor, setAnchor] = useState({row: 0, col: 0});
@@ -113,8 +115,8 @@ export const App: React.FC = () => {
       ? prev : { startRow, startCol, endRow, endCol });
   }, []);
 
-  const handleCommitCell = async (row: number, col: number, rawInput: string) => {
-    if(mutationLock.current)return;mutationLock.current=true;setBusy(true);clipboard.current=null;
+  const handleCommitCell = async (row: number, col: number, rawInput: string): Promise<boolean> => {
+    if(mutationLock.current)return false;mutationLock.current=true;setBusy(true);clipboard.current=null;
     try {
       setStatusMsg(`Setting ${coordToA1(row, col)}...`);
       const key = coordToA1(row, col);
@@ -159,8 +161,8 @@ export const App: React.FC = () => {
 
               setStatusMsg(`Staged edit for ${tbl.name}[${targetColName}]`);
               await refreshMetadata();
-              fetchViewportData(visibleBounds.startRow, visibleBounds.startCol, visibleBounds.endRow, visibleBounds.endCol);
-              return;
+              await fetchViewportData(visibleBounds.startRow, visibleBounds.startCol, visibleBounds.endRow, visibleBounds.endCol);
+              return true;
             }
           }
         }
@@ -172,10 +174,12 @@ export const App: React.FC = () => {
       await api.setCell(sheetName, row, col, rawInput);
       setStatusMsg(`Updated ${coordToA1(row, col)}`);
       await refreshMetadata();
-      fetchViewportData(visibleBounds.startRow, visibleBounds.startCol, visibleBounds.endRow, visibleBounds.endCol);
+      await fetchViewportData(visibleBounds.startRow, visibleBounds.startCol, visibleBounds.endRow, visibleBounds.endCol);
     } catch (err: any) {
       setStatusMsg(`Error: ${err.message}`);
+      return false;
     } finally {mutationLock.current=false;setBusy(false);}
+    return true;
   };
 
   const selection = normalizedRange(anchor, {row:selectedRow, col:selectedCol});
@@ -302,9 +306,18 @@ export const App: React.FC = () => {
 
   const activeKey = coordToA1(selectedRow, selectedCol);
   const activeCellData = viewport?.cells[activeKey];
+  const selectedCellLoaded = !!viewport && selectedRow >= viewport.start_row && selectedRow <= viewport.end_row && selectedCol >= viewport.start_col && selectedCol <= viewport.end_col;
 
+  const findNavigate = (match:FindMatch) => {
+    if(mutationLock.current)return;
+    const apply=()=>{selectCell(match.coord.row,match.coord.col);clearDependencyTrace();};
+    if(match.sheet_name===sheetName)apply();
+    else void mutate(`Selected ${match.sheet_name}!${match.address}`,async()=>{
+      await api.selectSheet(match.sheet_name);setSheetName(match.sheet_name);setViewport(null);apply();
+    },true);
+  };
   return (
-    <div className="flex flex-col h-screen w-screen bg-slate-100 overflow-hidden font-sans">
+    <div onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f' && (e.target as HTMLElement).closest('[role="grid"]')){e.preventDefault();setIsFindOpen(true);}}} className="flex flex-col h-screen w-screen bg-slate-100 overflow-hidden font-sans">
       {/* Top Application Toolbar */}
       <Toolbar
         busy={busy}
@@ -331,12 +344,15 @@ export const App: React.FC = () => {
         stagedCount={stagedCount}
       />
 
+      <div className="flex items-center bg-white border-b px-3 py-1 text-xs"><button disabled={busy} onClick={()=>setIsFindOpen(true)} className="border rounded px-2 py-1">Find (Ctrl+F)</button></div>
       {/* Formula Bar */}
       <FormulaBar key={`${workbookEpoch}:${sheetName}`}
-        disabled={busy}
+        disabled={busy || !selectedCellLoaded}
         selectedRow={selectedRow}
         selectedCol={selectedCol}
         activeCellData={activeCellData}
+        maxRows={viewport?.total_rows??1000} maxCols={viewport?.total_cols??100}
+        onGoTo={(row,col)=>{clearDependencyTrace();selectCell(row,col);}}
         onCommit={(val) => handleCommitCell(selectedRow, selectedCol, val)}
       />
 
@@ -359,6 +375,7 @@ export const App: React.FC = () => {
         onViewportChange={handleViewportChange}
       />
 
+      {isFindOpen && <FindPanel key={workbookEpoch} sheetName={sheetName} revision={`${workbookEpoch}:${reviewRevision}`} busy={busy} onNavigate={findNavigate} onClose={()=>setIsFindOpen(false)}/> }
       {isExplainOpen && <ExplainReviewPanel
         key={`${workbookEpoch}:${sheetName}:${selectedRow}:${selectedCol}`}
         sheetName={sheetName} row={selectedRow} col={selectedCol}

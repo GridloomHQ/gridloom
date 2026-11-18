@@ -6,6 +6,7 @@ pub mod depgraph;
 pub mod dependency_navigation;
 pub mod error;
 pub mod evaluator;
+pub mod find;
 pub mod functions;
 pub mod lineage;
 pub mod parser;

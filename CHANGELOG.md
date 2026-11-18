@@ -1,3 +1,10 @@
+# 0.5.0
+
+- Bounded, read-only Find across cached worksheet values and formula inputs.
+- Go to cell by address and standard keyboard navigation.
+- Failed cell commits retain the draft; successful Enter/Tab commits move only after acknowledgement.
+- Dedicated real-browser usability regression checks alongside accounting acceptance.
+
 # Changelog
 
 ## 0.4.0 (preview)

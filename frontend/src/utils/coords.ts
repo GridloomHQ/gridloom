@@ -25,5 +25,6 @@ export function a1ToCoord(a1: string): { row: number; col: number } | null {
   if (!match) return null;
   const col = colNameToIndex(match[1]);
   const row = parseInt(match[2], 10) - 1;
+  if (!Number.isSafeInteger(row) || !Number.isSafeInteger(col) || row < 0 || col < 0) return null;
   return { row, col };
 }

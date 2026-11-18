@@ -2,7 +2,7 @@ import { editableCellInput } from '../utils/cellInput';
 import React, { useState, useEffect, useRef } from 'react';
 import { Check, X } from 'lucide-react';
 import { CellRenderData } from '../types';
-import { coordToA1 } from '../utils/coords';
+import { a1ToCoord, coordToA1 } from '../utils/coords';
 
 interface FormulaBarProps {
   disabled?: boolean;
@@ -10,6 +10,8 @@ interface FormulaBarProps {
   selectedCol: number;
   activeCellData?: CellRenderData;
   onCommit: (rawInput: string) => void;
+  onGoTo: (row:number,col:number) => void;
+  maxRows:number; maxCols:number;
 }
 
 const COMMON_FUNCTIONS = [
@@ -46,9 +48,12 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
   selectedRow,
   selectedCol,
   activeCellData,
-  onCommit,
+  onCommit, onGoTo, maxRows, maxCols,
 }) => {
+  const [address,setAddress]=useState('');
+  const [addressError,setAddressError]=useState('');
   const coordA1 = coordToA1(selectedRow, selectedCol);
+  useEffect(()=>{setAddress(coordA1);setAddressError('');},[coordA1]);
   const [inputValue, setInputValue] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [filterSuggestions, setFilterSuggestions] = useState<string[]>([]);
@@ -100,9 +105,16 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
   return (
     <div className="relative flex items-center border-b border-slate-200 bg-white px-3 py-1 gap-2 text-xs select-none">
       {/* Active Coord Display */}
-      <div className="w-16 text-center font-mono font-semibold text-slate-800 bg-slate-50 border border-slate-200 py-1 rounded px-1.5 truncate">
-        {coordA1}
-      </div>
+      <form onSubmit={e=>{e.preventDefault();const coord=a1ToCoord(address);
+        if(!coord || coord.row>=maxRows || coord.col>=maxCols){setAddressError('Enter a cell address inside this worksheet.');return;}
+        setAddressError('');onGoTo(coord.row,coord.col);
+      }}>
+        <input aria-label="Go to cell" title="Go to cell: enter an address, for example D200" disabled={disabled} value={address}
+          onChange={e=>{setAddress(e.target.value);setAddressError('');}}
+          onKeyDown={e=>{if(e.key==='Escape'){setAddress(coordA1);setAddressError('');}}}
+          className="w-20 text-center font-mono font-semibold text-slate-800 bg-slate-50 border border-slate-200 py-1 rounded px-1.5"/>
+        {addressError&&<span role="alert" className="absolute top-full left-0 z-50 bg-white border text-rose-700 p-2">{addressError}</span>}
+      </form>
 
       {/* Badges */}
       <div className="flex items-center gap-1">

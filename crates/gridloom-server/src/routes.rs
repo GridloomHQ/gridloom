@@ -67,6 +67,7 @@ pub fn create_router(state: AppState) -> Router {
         // Cells & Virtual Viewport
         .route("/api/cells/set", post(set_cell))
         .route("/api/cells/viewport", post(get_viewport))
+        .route("/api/cells/find", post(find_cells))
         .route("/api/cells/explain", post(explain_cell))
         .route("/api/cells/dependencies", post(navigate_dependencies))
         .route("/api/questions", get(list_open_questions))
@@ -996,4 +997,15 @@ async fn format_range_attribute(
         .format_range_attribute(&req.sheet_name, req.range, &req.attribute, &req.value)
         .map_err(bad_request)?;
     Ok(Json(serde_json::json!({"status":"formatted"})))
+}
+
+async fn find_cells(
+    State(state): State<AppState>,
+    Json(req): Json<gridloom_core::find::FindRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let wb = state.workbook.read().await;
+    let result = wb
+        .find_cells(&req)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    Ok(Json(result))
 }

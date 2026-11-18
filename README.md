@@ -29,6 +29,10 @@ The database remains in its original format. Editing an eligible source-backed t
 
 ---
 
+## 0.5: Worksheet Discovery & Navigation
+
+Search cached values or formula inputs across the workbook, jump to a cell by address, and use failure-safe Enter/Tab editing and Home/Page navigation. [Behavior, limits and next priorities](docs/RELEASE-0.5.md).
+
 ## 0.4 Preview: Accounting Working Papers
 
 Import a trial balance, define your report and follow the cells behind each number. Circle up uncertain items even while sign-off is blocked. Post a supported adjustment without replacing the import, see which reported values and reviews changed, and export the full working paper.

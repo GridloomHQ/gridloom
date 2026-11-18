@@ -1,3 +1,4 @@
+import type {FindRequest, FindResponse} from './components/FindPanel';
 import type {
   ReviewPack, CellCoord, DependencyNavigation, QuestionTransitionInput,
   ConfigureCloseInput, PostAdjustmentInput, AdjustmentImpact, CellRange, CellStyle, EvidenceUpload, DependencyTarget, ReviewComparison, SourceDrilldown, ClosePeriod, CloseStatus,
@@ -54,6 +55,7 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  findCells: (request: FindRequest) => fetchJson<FindResponse>('/api/cells/find', {method: 'POST', body: JSON.stringify(request)}),
   addSheet: (name: string) => fetchJson<{status: string}>('/api/sheets', { method: 'POST', body: JSON.stringify({name}) }),
   selectSheet: (name: string) => fetchJson<{status: string}>('/api/sheets/select', { method: 'POST', body: JSON.stringify({name}) }),
   renameSheet: (old_name: string, new_name: string) => fetchJson<{status: string}>('/api/sheets/rename', { method: 'POST', body: JSON.stringify({old_name,new_name}) }),
