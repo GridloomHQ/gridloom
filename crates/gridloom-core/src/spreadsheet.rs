@@ -90,6 +90,27 @@ fn source_is_materialized(sheet: &Sheet, coord: CellCoord) -> bool {
             .is_some_and(|s| s.anchor != coord)
 }
 impl Workbook {
+    /// Resize presentation only; never changes cells, calculations, review state or edit history.
+    pub fn set_column_width(
+        &mut self,
+        name: &str,
+        column: u32,
+        width: Option<u16>,
+    ) -> Result<(), CellError> {
+        let sheet = self.sheets.get_mut(name).ok_or(CellError::Ref)?;
+        if column >= sheet.max_cols || width.is_some_and(|value| !(48..=600).contains(&value)) {
+            return Err(CellError::Value);
+        }
+        match width {
+            Some(value) if value != 110 => {
+                sheet.column_widths.insert(column, value);
+            }
+            _ => {
+                sheet.column_widths.remove(&column);
+            }
+        }
+        Ok(())
+    }
     pub fn clear_edit_history(&mut self) {
         self.edit_history = Default::default();
     }

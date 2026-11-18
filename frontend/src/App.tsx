@@ -19,7 +19,7 @@ import { BenchmarkModal } from './components/BenchmarkModal';
 import { api } from './api';
 import { ViewportResponse, WorksheetTable, ReviewDraft, DependencyHighlight } from './types';
 import { parseEdit } from './utils/values';
-import { coordToA1 } from './utils/coords';
+import { colIndexToName, coordToA1 } from './utils/coords';
 
 export const App: React.FC = () => {
   const [isFindOpen,setIsFindOpen]=useState(false);
@@ -48,6 +48,10 @@ export const App: React.FC = () => {
   const [storedViewport, setViewport] = useState<ViewportResponse | null>(null);
   const viewport = storedViewport?.sheet_name === sheetName ? storedViewport : null;
   const [stagedCount, setStagedCount] = useState(0);
+  const [sheetWidths,setSheetWidths]=useState<Record<string,Record<number,number>>>({});
+  const [widthDraft,setWidthDraft]=useState('110');
+  const columnWidths=sheetWidths[sheetName]??{};
+  useEffect(()=>setWidthDraft(String(columnWidths[selectedCol]??110)),[sheetName,selectedCol,sheetWidths]);
   const [tables, setTables] = useState<WorksheetTable[]>([]);
 
   // Visible bounds
@@ -85,6 +89,7 @@ export const App: React.FC = () => {
       if (wb) {
         setSheetName(wb.active_sheet);
         setSheets(wb.sheets.map(s => s.name));
+        setSheetWidths(Object.fromEntries(wb.sheets.map(s=>[s.name,s.column_widths??{}])));
         setTables(wb.sheets.find(s => s.name === wb.active_sheet)?.tables ?? []);
       }
       setStagedCount(staged.length);
@@ -208,6 +213,10 @@ export const App: React.FC = () => {
       setStatusMsg(label);
     } catch(error:any){setStatusMsg(`Error: ${error.message}`);}
     finally{mutationLock.current=false;setBusy(false);}
+  };
+  const resizeColumn = (column:number,width:number|null) => {
+    if(width!==null&&(!Number.isInteger(width)||width<48||width>600)){setStatusMsg('Column width must be a whole number from 48 to 600 pixels.');return;}
+    void mutate(`Resized column ${colIndexToName(column)}`,()=>api.setColumnWidth(sheetName,column,width),true);
   };
   const handleApplyFormat = (format:string) => {
     const style=viewport?.cells[coordToA1(selectedRow,selectedCol)]?.style ?? {bold:false,italic:false,fill:null,number_format:null};
@@ -344,7 +353,12 @@ export const App: React.FC = () => {
         stagedCount={stagedCount}
       />
 
-      <div className="flex items-center bg-white border-b px-3 py-1 text-xs"><button disabled={busy} onClick={()=>setIsFindOpen(true)} className="border rounded px-2 py-1">Find (Ctrl+F)</button></div>
+      <div className="flex items-center gap-3 bg-white border-b px-3 py-1 text-xs"><button disabled={busy} onClick={()=>setIsFindOpen(true)} className="border rounded px-2 py-1">Find (Ctrl+F)</button>
+        <form className="flex items-center gap-1" onSubmit={e=>{e.preventDefault();resizeColumn(selectedCol,Number(widthDraft));}}>
+          <label htmlFor="column-width">Column {colIndexToName(selectedCol)} width</label><input id="column-width" aria-label="Column width in pixels" type="number" min="48" max="600" step="1" disabled={busy} value={widthDraft} onChange={e=>setWidthDraft(e.target.value)} className="w-16 border rounded p-1"/>
+          <span>px</span><button disabled={busy} className="border rounded px-2 py-1">Set width</button><button type="button" disabled={busy} onClick={()=>resizeColumn(selectedCol,null)} className="border rounded px-2 py-1">Reset width</button>
+        </form>
+      </div>
       {/* Formula Bar */}
       <FormulaBar key={`${workbookEpoch}:${sheetName}`}
         disabled={busy || !selectedCellLoaded}
@@ -358,8 +372,9 @@ export const App: React.FC = () => {
 
       {/* Virtualized Worksheet Grid Canvas */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
-      <Grid
+      <Grid key={workbookEpoch}
         sheetName={sheetName}
+        columnWidths={columnWidths} onColumnResize={resizeColumn}
         viewport={viewport}
         selectedRow={selectedRow}
         selectedCol={selectedCol}

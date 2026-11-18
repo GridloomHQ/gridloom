@@ -14,6 +14,12 @@ Results are sorted by sheet name, row and column. Each request examines at most 
 
 The address field beside the formula bar is now editable. Enter `D200` and press Enter to reveal and select that cell in the current worksheet. Invalid, range, cross-sheet and out-of-bounds addresses are rejected, rather than silently moving elsewhere. Escape restores the selected address.
 
+## 0.5.1: Persistent column widths
+
+Drag a column header boundary, or set the selected column’s width in pixels beside Find. Widths are per-sheet, saved with the workbook, and constrained to 48–600 px. Reset returns to 110 px. Escape cancels a drag; failed saves keep the previous width. This is presentation only: it does not recalculate cells, invalidate reviews, apply source writes or enter cell undo history. AutoFit, hidden columns and row heights are not implemented.
+
+The design follows the familiar [explicit width and drag sizing pattern](https://support.microsoft.com/en-us/excel/change-column-width-or-row-height), but uses pixels rather than Excel character-width units.
+
 ## Keyboard editing
 
 - Enter / Shift+Enter: move down / up.
@@ -29,4 +35,4 @@ Existing copy/paste, formula fill, undo/redo and evidence workflows remain avail
 
 Official Excel documentation establishes [Find scope and values/formulas choices](https://support.microsoft.com/en-gb/excel/get-started/find-or-replace-text-and-numbers-on-a-worksheet), [Enter/Tab editing conventions](https://support.microsoft.com/en-us/excel/edit-cell-contents), and [frozen headings](https://support.microsoft.com/en-us/excel/get-started/freeze-panes-to-lock-rows-and-columns). These are useful behavioral references, not a claim of implementation parity.
 
-The next candidates are freeze panes and column sizing, then safe range sort/filter and explicit data-validation rules. Structural edits, sorting and replace must preserve formula references and invalidate captured reviews correctly. Recovery/autosave needs a clear distinction between a draft, a saved working paper and staged external writeback. XBRL/IFRS remains an add-on concern.
+The next candidates are freeze panes, then safe range sort/filter and explicit data-validation rules. Structural edits, sorting and replace must preserve formula references and invalidate captured reviews correctly. Recovery/autosave needs a clear distinction between a draft, a saved working paper and staged external writeback. XBRL/IFRS remains an add-on concern.

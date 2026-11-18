@@ -91,6 +91,9 @@ pub struct Sheet {
     pub spills: SpillManager,
     pub max_rows: u32,
     pub max_cols: u32,
+    /// Sparse, presentation-only column widths in CSS pixels.
+    #[serde(default)]
+    pub column_widths: HashMap<u32, u16>,
 }
 
 impl Sheet {
@@ -102,6 +105,7 @@ impl Sheet {
             spills: SpillManager::new(),
             max_rows: 1000,
             max_cols: 100,
+            column_widths: HashMap::new(),
         }
     }
 

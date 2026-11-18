@@ -55,6 +55,7 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  setColumnWidth: (sheet_name:string,column:number,width:number|null) => fetchJson('/api/sheets/column-width',{method:'POST',body:JSON.stringify({sheet_name,column,width})}),
   findCells: (request: FindRequest) => fetchJson<FindResponse>('/api/cells/find', {method: 'POST', body: JSON.stringify(request)}),
   addSheet: (name: string) => fetchJson<{status: string}>('/api/sheets', { method: 'POST', body: JSON.stringify({name}) }),
   selectSheet: (name: string) => fetchJson<{status: string}>('/api/sheets/select', { method: 'POST', body: JSON.stringify({name}) }),

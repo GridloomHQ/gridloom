@@ -32,6 +32,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/sheets", post(add_sheet))
         .route("/api/sheets/select", post(select_sheet))
         .route("/api/sheets/rename", post(rename_sheet))
+        .route("/api/sheets/column-width", post(set_column_width))
         .route("/api/ranges/edit", post(edit_range))
         .route("/api/ranges/read", post(read_range))
         .route("/api/ranges/capture", post(capture_range))
@@ -107,6 +108,7 @@ async fn health_handler() -> impl IntoResponse {
 #[derive(Serialize)]
 struct SheetSummary {
     name: String,
+    column_widths: std::collections::HashMap<u32, u16>,
     tables: Vec<gridloom_core::table::WorksheetTable>,
 }
 
@@ -129,6 +131,7 @@ async fn get_workbook_summary(State(state): State<AppState>) -> impl IntoRespons
             .values()
             .map(|s| SheetSummary {
                 name: s.name.clone(),
+                column_widths: s.column_widths.clone(),
                 tables: s.tables.values().cloned().collect(),
             })
             .collect(),
@@ -1008,4 +1011,23 @@ async fn find_cells(
         .find_cells(&req)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+struct ColumnWidthRequest {
+    sheet_name: String,
+    column: u32,
+    width: Option<u16>,
+}
+async fn set_column_width(
+    State(state): State<AppState>,
+    Json(req): Json<ColumnWidthRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    state
+        .workbook
+        .write()
+        .await
+        .set_column_width(&req.sheet_name, req.column, req.width)
+        .map_err(bad_request)?;
+    Ok(Json(serde_json::json!({"status":"resized"})))
 }

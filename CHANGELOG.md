@@ -1,3 +1,8 @@
+# 0.5.1
+
+- Per-sheet column widths, numeric sizing, drag resize with cancel, and reset.
+- Widths persist without changing calculation or review evidence.
+
 # 0.5.0
 
 - Bounded, read-only Find across cached worksheet values and formula inputs.

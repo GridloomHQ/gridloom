@@ -81,6 +81,26 @@ try {
    await find('needle');await panel.getByText('2 matches',{exact:true}).waitFor();assert.equal(await panel.getByText('999 matches',{exact:true}).count(),0);
  }
  await query().press('Escape');assert.equal(await panel.count(),0);
+ // Column presentation is independent per sheet and persists without changing values.
+ await go('A1');const widthField=page.getByRole('spinbutton',{name:'Column width in pixels',exact:true});
+ const expectWidth=async width=>{
+   await page.waitForFunction(width=>document.querySelector('[role="gridcell"][aria-label="A1"]')?.getBoundingClientRect().width===width,width);
+   const a=await cell('A1').boundingBox(),b=await cell('B1').boundingBox();assert(a&&b);assert.equal(a.width,width);assert.equal(b.x-a.x,width);
+ };
+ await widthField.fill('240');await page.getByRole('button',{name:'Set width',exact:true}).click();await idle();await expectWidth(240);
+ const dragColumn=async(delta,cancel=false)=>{const handle=page.getByRole('button',{name:'Resize column A',exact:true});const box=await handle.boundingBox();assert(box);await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2+delta,box.y+box.height/2,{steps:5});if(cancel)await page.keyboard.press('Escape');await page.mouse.up();await idle();};
+ let widthWrites=0;const observeWidth=request=>{if(request.url().endsWith('/api/sheets/column-width'))widthWrites++;};page.on('request',observeWidth);
+ await dragColumn(60);await expectWidth(300);assert.equal(widthWrites,1);
+ await dragColumn(80,true);await expectWidth(300);assert.equal(widthWrites,1,'Escape must not persist a resize');page.off('request',observeWidth);
+ const rejectWidth=route=>route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:'Synthetic width failure'})});await page.route('**/api/sheets/column-width',rejectWidth);
+ await widthField.fill('350');await page.getByRole('button',{name:'Set width',exact:true}).click();await page.getByText(/Error:.*Synthetic width failure/).waitFor();await idle();await expectWidth(300);await page.unroute('**/api/sheets/column-width',rejectWidth);
+ await page.getByRole('button',{name:'Search Other',exact:true}).click();await page.getByRole('grid',{name:'Search Other worksheet'}).waitFor();await idle();await expectWidth(110);
+ await page.getByRole('button',{name:'Sheet1',exact:true}).click();await page.getByRole('grid',{name:'Sheet1 worksheet'}).waitFor();await idle();await expectWidth(300);
+ const widthSave=path.join(artifacts,'column-widths.gridloom');page.once('dialog',d=>d.accept(widthSave));await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByText(`Saved workbook to ${widthSave}`,{exact:true}).waitFor();
+ await widthField.fill('110');await page.getByRole('button',{name:'Set width',exact:true}).click();await idle();await expectWidth(110);
+ page.once('dialog',d=>d.accept(widthSave));await page.getByRole('button',{name:'Open',exact:true}).click();await page.getByText(`Opened workbook from ${widthSave}`,{exact:true}).waitFor();await idle();await expectWidth(300);
+ await page.getByRole('button',{name:'Reset width',exact:true}).click();await idle();await expectWidth(110);assert.equal(await cell('A1').innerText(),'14');
+ await go('Z200');await page.waitForFunction(()=>!document.querySelector('input[aria-label="Formula input"]')?.disabled);await edit('Z200','horizontal navigation works');await selected('Z201');await go('Z200');await cell('Z200').filter({hasText:'horizontal navigation works'}).waitFor();
  await page.screenshot({path:path.join(artifacts,'usability.png'),fullPage:true});assert.deepEqual(errors,[]);
  console.log('PASS keyboard commit/navigation, Escape, failed retry, duplicate delayed commit, Go to, Find values/formulas/exact/workbook, stale query and close/reopen.');
 }catch(error){writeFileSync(path.join(artifacts,'server.log'),log);if(page)await page.screenshot({path:path.join(artifacts,'failure.png'),fullPage:true}).catch(()=>{});throw error;}
