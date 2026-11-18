@@ -28,3 +28,8 @@ export function applyFunctionCompletion(input:string,context:FunctionCompletion,
   const insertion=name+(open?'':'(');
   return {value:input.slice(0,context.start)+insertion+rest,caret:context.start+insertion.length+(open?open[0].length:0)};
 }
+
+/** Duplicate selection notifications must not undo keyboard menu navigation. */
+export function completionEvent(previous:string|null,value:string,start:number|null,end:number|null,inputChanged:boolean):{key:string;update:boolean} {
+  const key=JSON.stringify([value,start,end]);return {key,update:inputChanged||key!==previous};
+}

@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {functionCompletion,applyFunctionCompletion} from '../src/utils/functionCompletion.ts';
+import {functionCompletion,applyFunctionCompletion,completionEvent} from '../src/utils/functionCompletion.ts';
 test('completion finds dotted and nested function tokens at the caret',()=>{
  assert.deepEqual(functionCompletion('=stdev.s',8),{start:1,end:8,prefix:'STDEV.S'});
  const text='=IF(A1>0,SU(A1:A3),0)';const c=functionCompletion(text,11)!;
@@ -25,4 +25,12 @@ test('caret inside references and qualifier names cannot replace the surrounding
  assert.equal(functionCompletion('=SUM$1',4),null);
  assert.equal(functionCompletion('=A$1',2),null);
  assert.equal(functionCompletion('=ROUND99',4),null);
+});
+
+test('duplicate selection events preserve menu state while input changes always refresh',()=>{
+ const change=completionEvent(null,'=RO',3,3,true);assert.equal(change.update,true);
+ assert.equal(completionEvent(change.key,'=RO',3,3,false).update,false);
+ assert.equal(completionEvent(change.key,'=RO',3,3,true).update,true);
+ assert.equal(completionEvent(change.key,'=RO',2,2,false).update,true);
+ assert.equal(completionEvent(change.key,'=ROUND',6,6,false).update,true);
 });

@@ -5,7 +5,7 @@ import { CellRenderData } from '../types';
 import { a1ToCoord, coordToA1 } from '../utils/coords';
 import {cycleReference} from '../utils/referenceCycle';
 import {api} from '../api';
-import {functionCompletion,applyFunctionCompletion,FunctionCompletion} from '../utils/functionCompletion';
+import {functionCompletion,applyFunctionCompletion,completionEvent,FunctionCompletion} from '../utils/functionCompletion';
 
 interface FormulaBarProps {
   disabled?: boolean;
@@ -35,6 +35,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
   const [functionNames,setFunctionNames]=useState<string[]>([]);
   const [completion,setCompletion]=useState<FunctionCompletion|null>(null);
   const [suggestionIndex,setSuggestionIndex]=useState(0);
+  const completionKey=useRef<string|null>(null);
   const filterSuggestions=completion?functionNames.filter(name=>name.startsWith(completion.prefix)):[];
   const suggestionsVisible=showSuggestions&&filterSuggestions.length>0;
   useEffect(()=>{let current=true;api.functionCatalog().then(data=>{if(current)setFunctionNames(data.functions);}).catch(()=>{});return()=>{current=false;};},[]);
@@ -48,7 +49,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
   const latestIdentity=useRef(currentIdentity);latestIdentity.current=currentIdentity;
   const committing=useRef(false);
   useEffect(()=>()=>onDraftChange(false),[onDraftChange]);
-  const reset = () => { dirty.current = false; onDraftChange(false);setInputValue(editableCellInput(activeCellData)); setShowSuggestions(false); };
+  const reset = () => { completionKey.current=null;dirty.current = false; onDraftChange(false);setInputValue(editableCellInput(activeCellData)); setShowSuggestions(false); };
   const commit = async () => {
     if(committing.current||disabled)return;committing.current=true;const target=currentIdentity, submitted=inputValue;
     try {const success=await onCommit(submitted);if(success&&latestIdentity.current===target){dirty.current=false;onDraftChange(false);setShowSuggestions(false);}}
@@ -56,17 +57,21 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
   };
 
   useEffect(() => {
-    if (identity.current !== currentIdentity) { dirty.current = false; identity.current = currentIdentity;onDraftChange(false); setShowSuggestions(false); }
+    if (identity.current !== currentIdentity) { dirty.current = false; identity.current = currentIdentity;completionKey.current=null;onDraftChange(false); setShowSuggestions(false); }
     if (!dirty.current) setInputValue(editableCellInput(activeCellData));
   }, [activeCellData, currentIdentity,onDraftChange]);
 
-  const updateCompletion=(value:string,start:number|null,end:number|null)=>{
+  const updateCompletion=(value:string,start:number|null,end:number|null,inputChanged=false)=>{
+    // React can deliver onSelect after onChange for the same caret. Do not reset
+    // a keyboard choice (or reopen a dismissed popup) for that duplicate event.
+    const event=completionEvent(completionKey.current,value,start,end,inputChanged);if(!event.update)return;
+    completionKey.current=event.key;
     const context=functionCompletion(value,start??0,end??start??0);
     setCompletion(context);setSuggestionIndex(0);setShowSuggestions(!!context);
   };
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     referenceSelection.current=null;dirty.current=true;onDraftChange(true);
-    setInputValue(e.target.value);updateCompletion(e.target.value,e.target.selectionStart,e.target.selectionEnd);
+    setInputValue(e.target.value);updateCompletion(e.target.value,e.target.selectionStart,e.target.selectionEnd,true);
   };
   const selectSuggestion = (fnName: string) => {
     if(disabled||committing.current||!completion||!functionNames.includes(fnName))return;
