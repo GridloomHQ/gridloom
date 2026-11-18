@@ -1,3 +1,4 @@
+import {SelectionSummary} from './components/SelectionSummary';
 import {isCellLoaded} from './utils/frozenViewport';
 import { FindPanel, FindMatch } from './components/FindPanel';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -415,6 +416,7 @@ export const App: React.FC = () => {
       />}
       </div>
 
+      <SelectionSummary key={workbookEpoch} sheetName={sheetName} range={selection} revision={`${workbookEpoch}:${reviewRevision}`} busy={busy}/>
       {/* Bottom Sheet Tabs & Status Bar */}
       <div className="flex items-center justify-between border-t border-slate-300 bg-white px-3 py-1 text-xs select-none shadow-inner">
         {/* Sheet Tabs */}

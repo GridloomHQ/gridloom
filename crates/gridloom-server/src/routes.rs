@@ -36,6 +36,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/sheets/freeze", post(set_freeze_panes))
         .route("/api/ranges/edit", post(edit_range))
         .route("/api/ranges/read", post(read_range))
+        .route("/api/ranges/summary", post(selection_summary))
         .route("/api/ranges/capture", post(capture_range))
         .route("/api/ranges/format", post(format_range))
         .route("/api/ranges/format-attribute", post(format_range_attribute))
@@ -1064,4 +1065,12 @@ async fn get_viewport_panes(
     let wb = state.workbook.read().await;
     let response = wb.get_viewport_panes(&req).map_err(bad_request)?;
     Ok(Json(response))
+}
+
+async fn selection_summary(
+    State(state): State<AppState>,
+    Json(req): Json<gridloom_core::selection_summary::SelectionSummaryRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let wb = state.workbook.read().await;
+    Ok(Json(wb.selection_summary(&req).map_err(bad_request)?))
 }

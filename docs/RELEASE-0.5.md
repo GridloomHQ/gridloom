@@ -26,6 +26,14 @@ Toggle **Freeze top row** and **Freeze first column** independently. The first r
 
 This bounded first version does not freeze arbitrary numbers of rows or columns, split windows, hide data or change calculations. Frozen strips are read as separate bounded regions within one server read lock rather than one huge rectangle spanning the origin and a distant viewport. All panes observe the same workbook and staged-edit state.
 
+## 0.5.3: Quick selection totals
+
+Select a range to see Sum, Average and Numbers in the bottom summary strip. Totals use underlying cached numeric values, including staged edits, not the rounded strings on screen. Numeric-looking text, booleans, dates/times, NULL and blanks are not coerced into numbers. Hover for the detailed counts and scope.
+
+Results remain strings end to end so large integers do not pass through JavaScript floating-point arithmetic. Float inputs are labelled approximate; repeating or unrepresentable decimal averages are marked rounded or unavailable. Errors, nonfinite values or arithmetic overflow make totals unavailable rather than showing an unexplained partial total. Empty numeric selections display a dash. Selections above 10,000 cells have an explicit limit message.
+
+This is a read-only convenience, not a posted journal or recorded review. It does not refresh connected data or recalculate the workbook. Results clear when the selection changes; delayed responses cannot overwrite a newer selection or workbook. The familiar behavior is informed by [Excel's status-bar summaries](https://support.microsoft.com/en-us/excel/view-summary-data-on-the-status-bar).
+
 ## Keyboard editing
 
 - Enter / Shift+Enter: move down / up.

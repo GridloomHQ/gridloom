@@ -1,3 +1,8 @@
+# 0.5.3
+
+- Read-only selection Sum/Average/Numbers with exact strings and explicit approximate, rounded or unavailable results.
+- Cached staged and spill values included; stale-response and10,000-cell guards.
+
 # 0.5.2
 
 - Per-sheet frozen first row and first column, independently toggled and persisted.

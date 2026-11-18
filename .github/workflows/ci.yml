@@ -89,6 +89,10 @@ jobs:
         working-directory: ./frontend
         run: npm run test:usability
 
+      - name: Real browser selection summaries
+        working-directory: ./frontend
+        run: npm run test:summary
+
       - name: Native window-open smoke
         if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
         run: scripts/native-window-smoke.sh
@@ -103,6 +107,7 @@ jobs:
             target/browser-smoke/*.log
             target/native-smoke/*.log
             target/usability-smoke/*
+            target/selection-summary-smoke/*
 
   build-frontend:
     name: Frontend TypeScript & Vite Build

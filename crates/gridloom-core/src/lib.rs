@@ -14,6 +14,7 @@ pub mod pivot;
 pub mod review;
 pub mod spill;
 pub mod spreadsheet;
+pub mod selection_summary;
 pub mod table;
 pub mod value;
 pub mod virtual_view;

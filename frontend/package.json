@@ -1,13 +1,14 @@
 {
   "name": "gridloom-frontend",
   "private": true,
-  "version": "0.5.2",
+  "version": "0.5.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:summary": "node tests/selection-summary-smoke.mjs",
     "test:usability": "node tests/usability-smoke.mjs",
     "test:browser": "node tests/browser-smoke.mjs"
   },
