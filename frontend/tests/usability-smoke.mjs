@@ -42,7 +42,7 @@ try {
  await cell('A2').dblclick();input=page.getByRole('textbox',{name:'Edit A2',exact:true});await input.fill('15');await input.press('Enter');await received.promise;await input.press('Enter');assert.equal(await address.inputValue(),'A2');release.resolve();await selected('A3');await idle();assert.equal(submissions,1);await page.unroute('**/api/cells/set',delay);
  // Navigation is bounded and distant cells become visible; invalid addresses do not move.
  await go('D200');await grid().focus();await grid().press('Home');await selected('A200');await grid().press('Control+Home');await selected('A1');
- await grid().press('PageDown');const pageDown=await address.inputValue();assert.match(pageDown,/^A\d+$/);assert.notEqual(pageDown,'A1');await grid().press('PageUp');await selected('A1');
+ await grid().press('PageDown');await page.waitForFunction(()=>document.querySelector('input[aria-label="Go to cell"]')?.value!=='A1');const pageDown=await address.inputValue();assert.match(pageDown,/^A\d+$/);assert.notEqual(pageDown,'A1');await grid().press('PageUp');await selected('A1');
  await address.fill('A0');await address.press('Enter');await page.getByRole('alert').filter({hasText:'Enter a cell address'}).waitFor();assert.equal(await cell('A1').getAttribute('aria-selected'),'true');await address.press('Escape');assert.equal(await address.inputValue(),'A1');
  // Offscreen data must arrive before editing; a placeholder is not an empty cell.
  await go('D200');await page.waitForFunction(()=>!document.querySelector('input[aria-label="Formula input"]')?.disabled);await edit('D200','existing distant value');await go('A1');await page.waitForFunction(()=>!document.querySelector('input[aria-label="Formula input"]')?.disabled);
