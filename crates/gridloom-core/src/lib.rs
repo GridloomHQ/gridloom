@@ -3,6 +3,7 @@ pub mod chart;
 pub mod close;
 pub mod db;
 pub mod depgraph;
+pub mod dependency_navigation;
 pub mod error;
 pub mod evaluator;
 pub mod functions;

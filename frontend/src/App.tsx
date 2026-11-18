@@ -3,6 +3,7 @@ import { MonthlyClosePanel } from './components/MonthlyClosePanel';
 import { normalizedRange, encodeTsv, decodeTsv, GridRange } from './utils/selection';
 import { displayValue } from './utils/values';
 import { ExplainReviewPanel } from './components/ExplainReviewPanel';
+import { OpenQuestions } from './components/OpenQuestions';
 import { Toolbar } from './components/Toolbar';
 import { FormulaBar } from './components/FormulaBar';
 import { Grid } from './components/Grid';
@@ -15,7 +16,7 @@ import { ChartModal } from './components/ChartModal';
 import { AuditLogModal } from './components/AuditLogModal';
 import { BenchmarkModal } from './components/BenchmarkModal';
 import { api } from './api';
-import { ViewportResponse, WorksheetTable, ReviewDraft } from './types';
+import { ViewportResponse, WorksheetTable, ReviewDraft, DependencyHighlight } from './types';
 import { parseEdit } from './utils/values';
 import { coordToA1 } from './utils/coords';
 
@@ -31,6 +32,10 @@ export const App: React.FC = () => {
   const [copyData, setCopyData] = useState<{text:string;values:string[][];snapshot:string;key:string} | null>(null);
   const reviewDrafts = useRef(new Map<string, ReviewDraft>());
   const [isExplainOpen, setIsExplainOpen] = useState(false);
+  const [isQuestionsOpen, setIsQuestionsOpen] = useState(false);
+  const [dependencyPath, setDependencyPath] = useState<{sheetName: string;row: number;col: number}[]>([]);
+  const [dependencyHighlight, setDependencyHighlight] = useState<DependencyHighlight | null>(null);
+  const clearDependencyTrace = () => { setDependencyPath([]); setDependencyHighlight(null); };
   const [reviewRevision, setReviewRevision] = useState(0);
   const [workbookEpoch, setWorkbookEpoch] = useState(0);
   const [sheetName, setSheetName] = useState('Sheet1');
@@ -98,16 +103,15 @@ export const App: React.FC = () => {
     }
   }, [sheetName]);
 
-  // Initial load
+  useEffect(() => { void refreshMetadata(); }, [refreshMetadata]);
   useEffect(() => {
-    fetchViewportData(visibleBounds.startRow, visibleBounds.startCol, visibleBounds.endRow, visibleBounds.endCol);
-    refreshMetadata();
-  }, [fetchViewportData, refreshMetadata, visibleBounds]);
+    void fetchViewportData(visibleBounds.startRow, visibleBounds.startCol, visibleBounds.endRow, visibleBounds.endCol);
+  }, [fetchViewportData, visibleBounds]);
 
   const handleViewportChange = useCallback((startRow: number, startCol: number, endRow: number, endCol: number) => {
-    setVisibleBounds({ startRow, startCol, endRow, endCol });
-    fetchViewportData(startRow, startCol, endRow, endCol);
-  }, [fetchViewportData]);
+    setVisibleBounds(prev => prev.startRow === startRow && prev.startCol === startCol && prev.endRow === endRow && prev.endCol === endCol
+      ? prev : { startRow, startCol, endRow, endCol });
+  }, []);
 
   const handleCommitCell = async (row: number, col: number, rawInput: string) => {
     if(mutationLock.current)return;mutationLock.current=true;setBusy(true);clipboard.current=null;
@@ -226,8 +230,29 @@ export const App: React.FC = () => {
   const handlePaste = (event:React.ClipboardEvent) => {event.preventDefault();pasteText(event.clipboardData.getData('text/plain'));};
   const handleFillDown = () => void mutate('Filled selection down',()=>api.fillRange(sheetName,{start:selection.start,end:{row:selection.start.row,col:selection.end.col}},selection));
   const handleFillRight = () => void mutate('Filled selection right',()=>api.fillRange(sheetName,{start:selection.start,end:{row:selection.end.row,col:selection.start.col}},selection));
-  const changeSheet = (name:string) => void mutate(`Selected ${name}`,async()=>{await api.selectSheet(name);setViewport(null);selectCell(0,0);},true);
-  const addSheet = () => {const name=prompt('New worksheet name:',`Sheet${sheets.length+1}`);if(name)void mutate(`Added ${name}`,async()=>{await api.addSheet(name);await api.selectSheet(name);selectCell(0,0);});};
+  const changeSheet = (name:string) => void mutate(`Selected ${name}`,async()=>{await api.selectSheet(name);setViewport(null);selectCell(0,0);clearDependencyTrace();},true);
+  const moveToExplanation = (row: number, col: number, targetSheet: string, after: () => void) => {
+    if (mutationLock.current) return;
+    const apply = () => { selectCell(row, col); setIsExplainOpen(true); after(); };
+    if (targetSheet === sheetName) apply();
+    else void mutate(`Selected ${targetSheet}!${coordToA1(row, col)}`, async () => {
+      await api.selectSheet(targetSheet); setSheetName(targetSheet); apply();
+    }, true);
+  };
+  const followDependency = (row: number, col: number, targetSheet = sheetName) => {
+    if (row === selectedRow && col === selectedCol && targetSheet === sheetName) return;
+    moveToExplanation(row, col, targetSheet, () => {
+      setDependencyPath(previous => [...previous, { sheetName, row: selectedRow, col: selectedCol }].slice(-20));
+    });
+  };
+  const goBackDependency = () => {
+    const previous = dependencyPath[dependencyPath.length - 1];
+    if (!previous) return;
+    moveToExplanation(previous.row, previous.col, previous.sheetName, () => {
+      setDependencyHighlight(null); setDependencyPath(path => path.slice(0, -1));
+    });
+  };
+  const addSheet = () => {const name=prompt('New worksheet name:',`Sheet${sheets.length+1}`);if(name)void mutate(`Added ${name}`,async()=>{await api.addSheet(name);await api.selectSheet(name);selectCell(0,0);clearDependencyTrace();});};
   const renameSheet = () => {const name=prompt('Rename worksheet:',sheetName);if(name&&name!==sheetName)void mutate(`Renamed to ${name}`,()=>api.renameSheet(sheetName,name));};
 
   const handleNewWorkbook = async () => {
@@ -235,7 +260,7 @@ export const App: React.FC = () => {
     await mutate('Created new workbook', async () => {
       await api.newWorkbook();
       viewportSequence.current++; setViewport(null); selectCell(0, 0);
-      setWorkbookEpoch(e => e + 1); reviewDrafts.current.clear();
+      setWorkbookEpoch(e => e + 1); reviewDrafts.current.clear(); clearDependencyTrace();
     });
   };
 
@@ -258,7 +283,7 @@ export const App: React.FC = () => {
     await mutate(`Opened workbook from ${path}`, async () => {
       await api.openWorkbook(path);
       viewportSequence.current++; setViewport(null); selectCell(0, 0);
-      setWorkbookEpoch(e => e + 1); reviewDrafts.current.clear();
+      setWorkbookEpoch(e => e + 1); reviewDrafts.current.clear(); clearDependencyTrace();
     });
   };
 
@@ -289,6 +314,7 @@ export const App: React.FC = () => {
         onFillDown={handleFillDown}
         onFillRight={handleFillRight}
         onOpenExplain={() => setIsExplainOpen(true)}
+        onOpenQuestions={() => setIsQuestionsOpen(true)}
         onOpenSchemaBrowser={() => setIsSchemaBrowserOpen(true)}
         onOpenQueryEditor={() => setIsQueryEditorOpen(true)}
         onOpenInsertTable={() => setIsInsertTableOpen(true)}
@@ -322,7 +348,8 @@ export const App: React.FC = () => {
         selectedRow={selectedRow}
         selectedCol={selectedCol}
         selection={selection} busy={busy}
-        onSelectCell={selectCell}
+        traceHighlight={dependencyHighlight}
+        onSelectCell={(row, col, extend) => { clearDependencyTrace(); selectCell(row, col, extend); }}
         onCopy={handleCopy} onPaste={handlePaste}
         onUndo={() => void mutate('Undid worksheet edit',api.undo)}
         onRedo={() => void mutate('Redid worksheet edit',api.redo)}
@@ -337,8 +364,11 @@ export const App: React.FC = () => {
         sheetName={sheetName} row={selectedRow} col={selectedCol}
         revision={`${viewport?.generation ?? 0}:${reviewRevision}`}
         drafts={reviewDrafts.current}
-        onClose={() => setIsExplainOpen(false)}
-        onNavigate={(row, col, targetSheet) => { if(targetSheet && targetSheet!==sheetName)void mutate(`Selected ${targetSheet}`,async()=>{await api.selectSheet(targetSheet);selectCell(row,col);});else selectCell(row,col); }}
+        onClose={() => { setIsExplainOpen(false); clearDependencyTrace(); }}
+        onNavigate={followDependency}
+        onBack={goBackDependency}
+        path={dependencyPath}
+        onHighlight={(target, direction = 'upstream') => setDependencyHighlight(target ? {target, direction} : null)}
       />}
       </div>
 
@@ -367,7 +397,12 @@ export const App: React.FC = () => {
         </div>
       </div>
 
-      {isCloseOpen && <MonthlyClosePanel onClose={()=>setIsCloseOpen(false)} onChanged={()=>{clipboard.current=null;void refreshMetadata();void fetchViewportData(visibleBounds.startRow,visibleBounds.startCol,visibleBounds.endRow,visibleBounds.endCol);}} onSelectCell={(sheet,row,col)=>{void mutate(`Selected ${sheet}!${coordToA1(row,col)}`,async()=>{await api.selectSheet(sheet);selectCell(row,col);setIsExplainOpen(true);setIsCloseOpen(false);});}}/>}
+      {isCloseOpen && <MonthlyClosePanel onClose={()=>setIsCloseOpen(false)} onChanged={()=>{clipboard.current=null;void refreshMetadata();void fetchViewportData(visibleBounds.startRow,visibleBounds.startCol,visibleBounds.endRow,visibleBounds.endCol);}} onSelectCell={(sheet,row,col)=>moveToExplanation(row,col,sheet,()=>{clearDependencyTrace();setIsCloseOpen(false);})}/>}
+      {isQuestionsOpen && <OpenQuestions onClose={() => setIsQuestionsOpen(false)} onNavigate={question => {
+        moveToExplanation(question.coord.row, question.coord.col, question.sheet_name, () => {
+          clearDependencyTrace(); setIsQuestionsOpen(false);
+        });
+      }} />}
       {/* Modals */}
       <SchemaBrowserModal
         isOpen={isSchemaBrowserOpen}

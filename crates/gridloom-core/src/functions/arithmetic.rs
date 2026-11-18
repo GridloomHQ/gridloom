@@ -26,11 +26,13 @@ pub fn sum(args: &[Value]) -> Result<Value, CellError> {
     let flat = flatten_values(args);
     for val in flat {
         match val {
-            Value::Integer(i) => total += Decimal::from(i),
-            Value::Decimal(d) => total += d,
+            Value::Integer(i) => {
+                total = total.checked_add(Decimal::from(i)).ok_or(CellError::Num)?
+            }
+            Value::Decimal(d) => total = total.checked_add(d).ok_or(CellError::Num)?,
             Value::Float(f) => {
                 if let Some(d) = Decimal::from_f64(f) {
-                    total += d;
+                    total = total.checked_add(d).ok_or(CellError::Num)?;
                 }
             }
             Value::Error(e) => return Err(e),
@@ -149,11 +151,7 @@ pub fn round(args: &[Value]) -> Result<Value, CellError> {
         return Err(CellError::Value);
     }
     let n = args[0].to_decimal()?;
-    let digits = if args.len() > 1 {
-        args[1].to_i64()?
-    } else {
-        0
-    };
+    let digits = if args.len() > 1 { args[1].to_i64()? } else { 0 };
     if digits >= 0 {
         let d = digits as u32;
         Ok(Value::Decimal(n.round_dp(d)))
@@ -169,20 +167,24 @@ pub fn roundup(args: &[Value]) -> Result<Value, CellError> {
         return Err(CellError::Value);
     }
     let n = args[0].to_decimal()?;
-    let digits = if args.len() > 1 {
-        args[1].to_i64()?
-    } else {
-        0
-    };
+    let digits = if args.len() > 1 { args[1].to_i64()? } else { 0 };
     if digits >= 0 {
         let factor = Decimal::from(10i64.pow(digits as u32));
-        let sign = if n < Decimal::ZERO { -Decimal::ONE } else { Decimal::ONE };
+        let sign = if n < Decimal::ZERO {
+            -Decimal::ONE
+        } else {
+            Decimal::ONE
+        };
         let abs_scaled = (n * factor).abs();
         let ceil = abs_scaled.ceil();
         Ok(Value::Decimal(ceil * sign / factor))
     } else {
         let factor = Decimal::from(10i64.pow((-digits) as u32));
-        let sign = if n < Decimal::ZERO { -Decimal::ONE } else { Decimal::ONE };
+        let sign = if n < Decimal::ZERO {
+            -Decimal::ONE
+        } else {
+            Decimal::ONE
+        };
         let abs_scaled = (n / factor).abs();
         let ceil = abs_scaled.ceil();
         Ok(Value::Decimal(ceil * sign * factor))
@@ -194,20 +196,24 @@ pub fn rounddown(args: &[Value]) -> Result<Value, CellError> {
         return Err(CellError::Value);
     }
     let n = args[0].to_decimal()?;
-    let digits = if args.len() > 1 {
-        args[1].to_i64()?
-    } else {
-        0
-    };
+    let digits = if args.len() > 1 { args[1].to_i64()? } else { 0 };
     if digits >= 0 {
         let factor = Decimal::from(10i64.pow(digits as u32));
-        let sign = if n < Decimal::ZERO { -Decimal::ONE } else { Decimal::ONE };
+        let sign = if n < Decimal::ZERO {
+            -Decimal::ONE
+        } else {
+            Decimal::ONE
+        };
         let abs_scaled = (n * factor).abs();
         let floor = abs_scaled.floor();
         Ok(Value::Decimal(floor * sign / factor))
     } else {
         let factor = Decimal::from(10i64.pow((-digits) as u32));
-        let sign = if n < Decimal::ZERO { -Decimal::ONE } else { Decimal::ONE };
+        let sign = if n < Decimal::ZERO {
+            -Decimal::ONE
+        } else {
+            Decimal::ONE
+        };
         let abs_scaled = (n / factor).abs();
         let floor = abs_scaled.floor();
         Ok(Value::Decimal(floor * sign * factor))
@@ -227,11 +233,7 @@ pub fn trunc(args: &[Value]) -> Result<Value, CellError> {
         return Err(CellError::Value);
     }
     let n = args[0].to_decimal()?;
-    let digits = if args.len() > 1 {
-        args[1].to_i64()?
-    } else {
-        0
-    };
+    let digits = if args.len() > 1 { args[1].to_i64()? } else { 0 };
     if digits >= 0 {
         let factor = Decimal::from(10i64.pow(digits as u32));
         let truncated = (n * factor).trunc() / factor;
@@ -256,11 +258,7 @@ pub fn ceiling_math(args: &[Value]) -> Result<Value, CellError> {
     if sig.is_zero() {
         return Ok(Value::Decimal(Decimal::ZERO));
     }
-    let mode = if args.len() > 2 {
-        args[2].to_i64()?
-    } else {
-        0
-    };
+    let mode = if args.len() > 2 { args[2].to_i64()? } else { 0 };
     let div = n / sig;
     let mult = if n < Decimal::ZERO && mode != 0 {
         div.floor() // towards zero
@@ -283,11 +281,7 @@ pub fn floor_math(args: &[Value]) -> Result<Value, CellError> {
     if sig.is_zero() {
         return Ok(Value::Decimal(Decimal::ZERO));
     }
-    let mode = if args.len() > 2 {
-        args[2].to_i64()?
-    } else {
-        0
-    };
+    let mode = if args.len() > 2 { args[2].to_i64()? } else { 0 };
     let div = n / sig;
     let mult = if n < Decimal::ZERO && mode != 0 {
         div.ceil() // towards zero
@@ -396,7 +390,7 @@ pub fn sumif(args: &[Value]) -> Result<Value, CellError> {
                     cell
                 };
                 if let Ok(d) = add_val.to_decimal() {
-                    sum += d;
+                    sum = sum.checked_add(d).ok_or(CellError::Num)?;
                 }
             }
         }
@@ -441,7 +435,7 @@ pub fn sumifs(args: &[Value]) -> Result<Value, CellError> {
             }
             if all_match {
                 if let Ok(d) = sum_cell.to_decimal() {
-                    total += d;
+                    total = total.checked_add(d).ok_or(CellError::Num)?;
                 }
             }
         }

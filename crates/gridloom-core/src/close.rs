@@ -1,6 +1,6 @@
 //! Workbook-contained monthly-close working papers, not an external ledger or audit assurance.
 use crate::functions::EvaluationContext;
-use crate::review::ReviewDecision;
+use crate::review::{EvidenceAttachment, EvidenceUpload, ReviewDecision};
 use crate::value::{CellCoord, Value};
 use crate::workbook::{CellData, Sheet, Workbook, WorkbookEvalContext};
 use chrono::{DateTime, Utc};
@@ -38,6 +38,77 @@ pub struct ClosePeriod {
     pub source_sha256: String,
     pub accounts: Vec<CloseAccount>,
     pub prior_period_id: Option<Uuid>,
+    #[serde(default)]
+    pub entity: String,
+    #[serde(default)]
+    pub currency: String,
+    #[serde(default = "default_units")]
+    pub units: String,
+    #[serde(default)]
+    pub report_lines: Vec<ReportLine>,
+    #[serde(default)]
+    pub adjustments: Vec<CloseAdjustment>,
+    /// Legacy files retain their original formula layout until explicitly configured.
+    #[serde(default)]
+    pub reconciliation_version: u32,
+    #[serde(default)]
+    pub configuration_history: Vec<CloseConfiguration>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloseConfiguration {
+    pub created_at: DateTime<Utc>,
+    pub entity: String,
+    pub currency: String,
+    pub units: String,
+    pub report_lines: Vec<ReportLine>,
+    pub mappings: BTreeMap<String, String>,
+}
+fn default_units() -> String {
+    "units".into()
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum NormalBalance {
+    Debit,
+    Credit,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReportLine {
+    pub id: String,
+    pub label: String,
+    pub parent_id: Option<String>,
+    pub normal_balance: NormalBalance,
+}
+#[derive(Debug, Deserialize)]
+pub struct ConfigureCloseRequest {
+    pub period_id: Uuid,
+    pub entity: String,
+    pub currency: String,
+    pub units: String,
+    pub report_lines: Vec<ReportLine>,
+    pub mappings: BTreeMap<String, String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdjustmentLine {
+    pub account: String,
+    pub debit: Decimal,
+    pub credit: Decimal,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloseAdjustment {
+    pub id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub author: String,
+    pub rationale: String,
+    pub lines: Vec<AdjustmentLine>,
+    pub evidence: Vec<EvidenceAttachment>,
+}
+#[derive(Debug, Deserialize)]
+pub struct PostAdjustmentRequest {
+    pub period_id: Uuid,
+    pub author: String,
+    pub rationale: String,
+    pub lines: Vec<AdjustmentLine>,
+    pub evidence: Vec<EvidenceUpload>,
 }
 #[derive(Debug, Deserialize)]
 pub struct ImportTrialBalanceRequest {
@@ -77,6 +148,9 @@ pub struct LiveCloseAccount {
     pub debit: Option<Decimal>,
     pub credit: Option<Decimal>,
     pub identity_matches_import: bool,
+    pub imported_balance: Decimal,
+    pub adjustment_balance: Decimal,
+    pub reported_balance: Option<Decimal>,
 }
 #[derive(Debug, Serialize)]
 pub struct CloseStatus {
@@ -93,6 +167,356 @@ pub struct CloseStatus {
 }
 
 impl Workbook {
+    /// Non-recursive integrity checks for review guards. Never calls explain_cell/close_status.
+    pub fn close_integrity_issues(&self, id: Uuid) -> Vec<String> {
+        let Some(period) = self.close_periods.iter().find(|p| p.id == id) else {
+            return vec!["Close period not found".into()];
+        };
+        let Some(sheet) = self.sheets.get(&period.sheet_name) else {
+            return vec!["Close worksheet is missing".into()];
+        };
+        if period.reconciliation_version == 0 {
+            return Vec::new();
+        }
+        let mut issues = Vec::new();
+        let expected = build_sheet(period);
+        for cell in expected.cells.values() {
+            let c = cell.coord;
+            if c.col == 0 || c.col == 3 || c.col == 4 || c.col == 5 || c.col == 8 || c.col >= 10 {
+                if sheet.get_cell(&c).map(|v| &v.raw_input) != Some(&cell.raw_input) {
+                    issues.push(format!(
+                        "Working-paper import, report or journal differs at {}",
+                        c.to_a1()
+                    ));
+                }
+            }
+        }
+        for (i, _) in period.accounts.iter().enumerate() {
+            if !sheet
+                .get_cell(&CellCoord::new(i as u32 + 1, 2))
+                .map(|c| valid_mapping(period, &c.evaluated_value.to_string_repr()))
+                .unwrap_or(false)
+            {
+                issues.push(format!("Unmapped account at row {}", i + 2));
+            }
+        }
+        if sheet.tables.values().any(|t| {
+            t.range.start_col <= 20
+                && t.range.start_row
+                    <= period
+                        .accounts
+                        .len()
+                        .max(period.report_lines.len())
+                        .max(
+                            period
+                                .adjustments
+                                .iter()
+                                .map(|j| j.lines.len())
+                                .sum::<usize>(),
+                        )
+                        .max(6) as u32
+        }) {
+            issues.push("A source table overlaps the working-paper region".into());
+        }
+        let total = period.accounts.iter().try_fold(Decimal::ZERO, |sum, a| {
+            sum.checked_add(a.debit)?.checked_sub(a.credit)
+        });
+        if total != Some(Decimal::ZERO) {
+            issues.push("Imported trial balance is not balanced".into());
+        }
+        issues.sort();
+        issues
+    }
+
+    /// Change report presentation and dimensions without replacing imported facts or journals.
+    pub fn configure_close(
+        &mut self,
+        request: ConfigureCloseRequest,
+    ) -> Result<ClosePeriod, String> {
+        let index = self
+            .close_periods
+            .iter()
+            .position(|p| p.id == request.period_id)
+            .ok_or("Close period not found")?;
+        let mut period = self.close_periods[index].clone();
+        for (label, value, limit) in [
+            ("Entity", request.entity.as_str(), 200),
+            ("Currency", request.currency.as_str(), 12),
+            ("Units", request.units.as_str(), 80),
+        ] {
+            if value.trim().is_empty() || value.len() > limit || value.chars().any(char::is_control)
+            {
+                return Err(format!(
+                    "{label} is required and must be bounded plain text."
+                ));
+            }
+        }
+        if !request.currency.bytes().all(|c| c.is_ascii_uppercase()) || request.currency.len() != 3
+        {
+            return Err("Currency must be a three-letter uppercase code. No currency conversion or consolidation is implied.".into());
+        }
+        validate_report(&request.report_lines)?;
+        if !period.adjustments.is_empty()
+            && ((!period.entity.is_empty() && period.entity != request.entity.trim())
+                || (!period.currency.is_empty() && period.currency != request.currency)
+                || period.units != request.units.trim())
+        {
+            return Err("Dimensions of a working paper with posted adjustments cannot be reinterpreted. Import a new version for a different entity, currency or units.".into());
+        }
+        period.entity = request.entity.trim().into();
+        period.currency = request.currency;
+        period.units = request.units.trim().into();
+        period.report_lines = request.report_lines;
+        period.reconciliation_version = 1;
+        validate_period_mappings(&period, &request.mappings)?;
+        let original = self
+            .sheets
+            .get(&period.sheet_name)
+            .ok_or("Close worksheet is missing")?
+            .clone();
+        let mut mappings = BTreeMap::new();
+        for (i, a) in period.accounts.iter().enumerate() {
+            let coord = CellCoord::new(i as u32 + 1, 2);
+            let current = original
+                .get_cell(&coord)
+                .map(|c| c.evaluated_value.to_string_repr())
+                .unwrap_or_default();
+            let mapping = request.mappings.get(&a.account).cloned().unwrap_or(current);
+            if !mapping.is_empty() && !valid_mapping(&period, &mapping) {
+                return Err(format!(
+                    "Account {} requires a mapping to a leaf of the new report.",
+                    a.account
+                ));
+            }
+            mappings.insert(a.account.clone(), mapping);
+        }
+        period.configuration_history.push(CloseConfiguration {
+            created_at: Utc::now(),
+            entity: period.entity.clone(),
+            currency: period.currency.clone(),
+            units: period.units.clone(),
+            report_lines: period.report_lines.clone(),
+            mappings: mappings.clone(),
+        });
+        self.replace_close_regions(index, period.clone(), &mappings)?;
+        Ok(period)
+    }
+
+    /// Append a balanced supported journal. Existing journal entries and evidence are immutable.
+    /// Reverse a mistake with a new supported compensating journal, not by editing the old entry.
+    pub fn post_close_adjustment(
+        &mut self,
+        request: PostAdjustmentRequest,
+    ) -> Result<CloseAdjustment, String> {
+        let index = self
+            .close_periods
+            .iter()
+            .position(|p| p.id == request.period_id)
+            .ok_or("Close period not found")?;
+        let mut period = self.close_periods[index].clone();
+        if request.author.trim().is_empty()
+            || request.author.len() > 200
+            || request.rationale.trim().is_empty()
+            || request.rationale.len() > 4000
+        {
+            return Err("An author and a bounded, non-empty rationale are required.".into());
+        }
+        if request.lines.len() < 2
+            || request.lines.len() > 100
+            || period
+                .adjustments
+                .iter()
+                .map(|j| j.lines.len())
+                .sum::<usize>()
+                + request.lines.len()
+                > 2000
+        {
+            return Err("A journal needs 2–100 lines; a working paper supports at most 2,000 adjustment lines.".into());
+        }
+        let mut debit = Decimal::ZERO;
+        let mut credit = Decimal::ZERO;
+        for line in &request.lines {
+            if !period.accounts.iter().any(|a| a.account == line.account) {
+                return Err(format!("Unknown account {}", line.account));
+            }
+            if line.debit < Decimal::ZERO
+                || line.credit < Decimal::ZERO
+                || (line.debit > Decimal::ZERO) == (line.credit > Decimal::ZERO)
+            {
+                return Err("Each journal line needs exactly one positive debit or credit.".into());
+            }
+            debit = debit
+                .checked_add(line.debit)
+                .ok_or("Journal total exceeds decimal precision")?;
+            credit = credit
+                .checked_add(line.credit)
+                .ok_or("Journal total exceeds decimal precision")?;
+        }
+        if debit != credit {
+            return Err("Adjustment debits must equal credits exactly.".into());
+        }
+        if period
+            .adjustments
+            .iter()
+            .flat_map(|j| &j.evidence)
+            .map(|e| e.bytes.len())
+            .sum::<usize>()
+            + request
+                .evidence
+                .iter()
+                .map(|e| e.bytes.len())
+                .sum::<usize>()
+            > 32 * 1024 * 1024
+        {
+            return Err(
+                "A working paper supports at most 32 MiB of captured adjustment evidence.".into(),
+            );
+        }
+        if request.evidence.is_empty()
+            || request.evidence.len() > 20
+            || request
+                .evidence
+                .iter()
+                .map(|e| e.bytes.len())
+                .sum::<usize>()
+                > 8 * 1024 * 1024
+        {
+            return Err("Attach 1–20 supporting files totaling at most 8 MiB.".into());
+        }
+        let mut evidence = Vec::new();
+        for upload in request.evidence {
+            if upload.filename.trim().is_empty()
+                || upload.filename.len() > 255
+                || upload.filename.contains(['/', '\\'])
+                || upload.filename.chars().any(char::is_control)
+                || upload.media_type.trim().is_empty()
+                || upload.media_type.len() > 120
+                || upload.media_type.chars().any(char::is_control)
+                || upload.bytes.is_empty()
+                || upload.bytes.len() > 2 * 1024 * 1024
+                || upload.replaces.is_some()
+            {
+                return Err("Adjustment evidence needs a safe filename, media type, non-empty bytes up to 2 MiB, and cannot replace prior evidence.".into());
+            }
+            evidence.push(EvidenceAttachment {
+                id: Uuid::new_v4(),
+                version: 1,
+                previous_version_id: None,
+                filename: upload.filename,
+                media_type: upload.media_type,
+                sha256: format!("{:x}", Sha256::digest(&upload.bytes)),
+                bytes: upload.bytes,
+                created_at: Utc::now(),
+            });
+        }
+        let journal = CloseAdjustment {
+            id: Uuid::new_v4(),
+            created_at: Utc::now(),
+            author: request.author.trim().into(),
+            rationale: request.rationale.trim().into(),
+            lines: request.lines,
+            evidence,
+        };
+        // Never use a journal post to silently repair unauthorized grid edits.
+        let status = self.close_status(period.id)?;
+        if status
+            .live_accounts
+            .iter()
+            .zip(&period.accounts)
+            .any(|(live, imported)| {
+                live.debit != Some(imported.debit) || live.credit != Some(imported.credit)
+            })
+        {
+            return Err("Working debit/credit values differ from the retained import. Restore them or import a corrected version before posting adjustments.".into());
+        }
+        if status.warnings.len() > 1 {
+            return Err(
+                "Restore changed or invalid working-paper cells before posting an adjustment."
+                    .into(),
+            );
+        }
+        period.adjustments.push(journal.clone());
+        period.reconciliation_version = 1;
+        let mut positive = Decimal::ZERO;
+        let mut negative = Decimal::ZERO;
+        for account in &period.accounts {
+            let adjustment = adjustment_total(&period, &account.account)?;
+            let reported = (account.debit - account.credit)
+                .checked_add(adjustment)
+                .ok_or("Reported balance exceeds decimal precision")?;
+            if reported > Decimal::ZERO {
+                positive = positive
+                    .checked_add(reported)
+                    .ok_or("Reported totals exceed decimal precision")?;
+            } else {
+                negative = negative
+                    .checked_add(reported)
+                    .ok_or("Reported totals exceed decimal precision")?;
+            }
+        }
+        self.replace_close_regions(index, period, &BTreeMap::new())?;
+        Ok(journal)
+    }
+
+    fn replace_close_regions(
+        &mut self,
+        index: usize,
+        period: ClosePeriod,
+        mappings: &BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        let original = self
+            .sheets
+            .get(&period.sheet_name)
+            .ok_or("Close worksheet is missing")?
+            .clone();
+        if original.tables.values().any(|t| t.range.start_col <= 20) {
+            return Err("Move source tables outside columns A:U before configuring or posting to a working paper.".into());
+        }
+        let mut replacement = build_sheet(&period);
+        let old_report_rows = self.close_periods[index].report_lines.len().max(6) as u32;
+        let new_report_rows = period.report_lines.len().max(6) as u32;
+        let old_journal_rows = self.close_periods[index]
+            .adjustments
+            .iter()
+            .map(|j| j.lines.len())
+            .sum::<usize>() as u32;
+        let new_journal_rows = period
+            .adjustments
+            .iter()
+            .map(|j| j.lines.len())
+            .sum::<usize>() as u32;
+        // Only the generated output/schedule regions are rewritten. Keep user notes and editable display columns.
+        let mut merged = original.clone();
+        merged.cells.retain(|_, c| {
+            !((7..=8).contains(&c.coord.col) && c.coord.row <= old_report_rows.max(new_report_rows)
+                || (10..=12).contains(&c.coord.col) && c.coord.row <= period.accounts.len() as u32
+                || (14..=20).contains(&c.coord.col)
+                    && c.coord.row <= old_journal_rows.max(new_journal_rows))
+        });
+        for (address, cell) in replacement.cells.drain() {
+            if cell.coord.col >= 7 {
+                merged.cells.insert(address, cell);
+            }
+        }
+        for (i, a) in period.accounts.iter().enumerate() {
+            if let Some(mapping) = mappings.get(&a.account) {
+                put_text(&mut merged, i as u32 + 1, 2, mapping);
+            }
+        }
+        merged.max_rows = merged.max_rows.max(replacement.max_rows);
+        self.sheets.insert(period.sheet_name.clone(), merged);
+        let previous = self.close_periods[index].clone();
+        self.close_periods[index] = period.clone();
+        if let Err(error) = self.recalculate(&period.sheet_name) {
+            self.sheets.insert(period.sheet_name, original);
+            self.close_periods[index] = previous;
+            return Err(error.to_string());
+        }
+        self.edit_history = Default::default();
+        self.invalidate_changed_reviews();
+        Ok(())
+    }
+
     pub fn import_trial_balance(
         &mut self,
         request: ImportTrialBalanceRequest,
@@ -122,6 +546,13 @@ impl Workbook {
             source_csv: request.csv,
             accounts,
             prior_period_id: None,
+            entity: String::new(),
+            currency: String::new(),
+            units: default_units(),
+            report_lines: Vec::new(),
+            adjustments: Vec::new(),
+            reconciliation_version: 1,
+            configuration_history: Vec::new(),
         };
         let sheet = build_sheet(&period);
         self.sheets.insert(sheet_name.clone(), sheet);
@@ -145,10 +576,7 @@ impl Workbook {
             .position(|p| p.id == request.period_id)
             .ok_or("Close period not found")?;
         let period = self.close_periods[index].clone();
-        validate_mappings(
-            &request.mappings,
-            &period.accounts.iter().map(|a| a.account.clone()).collect(),
-        )?;
+        validate_period_mappings(&period, &request.mappings)?;
         let original = self
             .sheets
             .get(&period.sheet_name)
@@ -179,9 +607,29 @@ impl Workbook {
             self.sheets.insert(period.sheet_name.clone(), original);
             return Err(e.to_string());
         }
+        let mut live_mappings = BTreeMap::new();
+        for (i, a) in period.accounts.iter().enumerate() {
+            live_mappings.insert(
+                a.account.clone(),
+                self.sheets[&period.sheet_name]
+                    .get_cell(&CellCoord::new(i as u32 + 1, 2))
+                    .map(|c| c.evaluated_value.to_string_repr())
+                    .unwrap_or_default(),
+            );
+        }
+        self.close_periods[index]
+            .configuration_history
+            .push(CloseConfiguration {
+                created_at: Utc::now(),
+                entity: period.entity.clone(),
+                currency: period.currency.clone(),
+                units: period.units.clone(),
+                report_lines: period.report_lines.clone(),
+                mappings: live_mappings,
+            });
         self.edit_history = Default::default();
         self.invalidate_changed_reviews();
-        Ok(period)
+        Ok(self.close_periods[index].clone())
     }
 
     pub fn close_status(&self, id: Uuid) -> Result<CloseStatus, String> {
@@ -234,7 +682,7 @@ impl Workbook {
                     row + 1
                 ));
             }
-            if !matches!(current(2), Some(Value::Text(v)) if MAPPINGS.contains(&v.as_str())) {
+            if !matches!(current(2), Some(Value::Text(v)) if valid_mapping(&period, v)) {
                 unmapped_accounts.push(account.account.clone());
             }
             live_accounts.push(LiveCloseAccount {
@@ -246,7 +694,24 @@ impl Workbook {
                 debit,
                 credit,
                 identity_matches_import,
+                imported_balance: account.debit - account.credit,
+                adjustment_balance: adjustment_total(&period, &account.account)?,
+                reported_balance: if period.reconciliation_version == 0 {
+                    debit.zip(credit).map(|(d, c)| d - c)
+                } else {
+                    exact_amount(
+                        context
+                            .get_cell_value(CellCoord::new(row, 12))
+                            .ok()
+                            .as_ref(),
+                    )
+                },
             });
+            if period.reconciliation_version > 0
+                && (debit != Some(account.debit) || credit != Some(account.credit))
+            {
+                warnings.push(format!("Imported debit/credit changed at row {}. Post a supported adjustment instead; reported balances retain the import baseline.", row+1));
+            }
             let expected_net = format!("=D{}-E{}", row + 1, row + 1);
             if sheet
                 .get_cell(&CellCoord::new(row, 5))
@@ -260,25 +725,29 @@ impl Workbook {
         // Refresh can expand a previously separate source into this area.
         if sheet.tables.values().any(|table| {
             (table.range.start_row <= period.accounts.len() as u32 && table.range.start_col <= 5)
-                || (table.range.start_row <= 6
+                || (table.range.start_row <= period.report_lines.len().max(6) as u32
                     && table.range.start_col <= 8
                     && table.range.end_col >= 7)
+                || (period.reconciliation_version > 0
+                    && table.range.start_row <= period.accounts.len() as u32
+                    && table.range.start_col <= 12
+                    && table.range.end_col >= 10)
+                || (period.reconciliation_version > 0
+                    && table.range.start_row
+                        <= period
+                            .adjustments
+                            .iter()
+                            .map(|j| j.lines.len())
+                            .sum::<usize>() as u32
+                    && table.range.start_col <= 20
+                    && table.range.end_col >= 14)
         }) {
             warnings.push("A source table overlaps the close working paper. Move it outside the trial-balance and P&L regions before closing.".into());
         }
         let expected = build_sheet(&period);
         let mut queue = Vec::new();
-        for (i, label) in [
-            "Revenue",
-            "Cost of sales",
-            "Operating expenses",
-            "Other income",
-            "Other expense",
-            "Net profit",
-        ]
-        .iter()
-        .enumerate()
-        {
+        let labels = report_labels(&period);
+        for (i, label) in labels.iter().enumerate() {
             let coord = CellCoord::new(i as u32 + 1, 8);
             if sheet.get_cell(&coord).and_then(|c| c.formula.as_ref())
                 != expected.get_cell(&coord).and_then(|c| c.formula.as_ref())
@@ -288,30 +757,51 @@ impl Workbook {
             let explanation = self
                 .explain_cell(&period.sheet_name, coord)
                 .map_err(|e| e.to_string())?;
-            let status = if !explanation.can_review {
+            let open_question = self.reviews.iter().rev().find(|r| {
+                r.sheet_name == period.sheet_name && r.coord == coord && r.question_is_open()
+            });
+            let status = if open_question.is_some() {
+                "Question"
+            } else if !explanation.can_review {
                 "Blocked"
             } else {
                 match explanation.review.as_ref() {
+                    Some(r) if r.decision == ReviewDecision::Question => "Unreviewed",
                     Some(r) if r.invalidated => "Needs re-review",
-                    Some(r) if r.decision == ReviewDecision::Question => "Question",
                     Some(_) => "Reviewed",
                     None => "Unreviewed",
                 }
             };
             queue.push(CloseQueueItem {
-                label: (*label).into(),
+                label: label.clone(),
                 coord,
                 value: explanation.value,
                 status: status.into(),
-                review_id: explanation.review.map(|r| r.id),
+                review_id: open_question
+                    .map(|r| r.id)
+                    .or_else(|| explanation.review.map(|r| r.id)),
             });
+        }
+        if period.reconciliation_version > 0 {
+            for (address, expected_cell) in &expected.cells {
+                let c = expected_cell.coord;
+                if c.col >= 10
+                    && sheet.get_cell(&c).map(|v| &v.raw_input) != Some(&expected_cell.raw_input)
+                {
+                    warnings.push(format!("Reconciliation or journal cell changed at {address}. Restore the working paper before closing."));
+                }
+            }
         }
         let difference = debits - credits;
         let balanced = difference == Decimal::ZERO
             && !warnings
                 .iter()
                 .any(|w| w.starts_with("Invalid debit/credit"));
-        let ready_for_close = balanced
+        let ready_for_close = !self
+            .reviews
+            .iter()
+            .any(|r| r.sheet_name == period.sheet_name && r.question_is_open())
+            && balanced
             && warnings.len() == 1
             && unmapped_accounts.is_empty()
             && queue.iter().all(|q| q.status == "Reviewed");
@@ -359,17 +849,32 @@ impl Workbook {
                     .get_cell(&CellCoord::new(i as u32 + 1, 2))
                     .map(|c| &c.evaluated_value)
                 {
-                    if MAPPINGS.contains(&mapping.as_str()) {
+                    if valid_mapping(&previous, mapping) {
                         mappings.insert(a.account.clone(), mapping.clone());
                     }
                 }
             }
         }
+        let custom = !previous.report_lines.is_empty();
         let mut period = self.import_trial_balance(ImportTrialBalanceRequest {
             period: request.period,
             csv: request.csv,
-            mappings,
+            mappings: if custom {
+                BTreeMap::new()
+            } else {
+                mappings.clone()
+            },
         })?;
+        if custom || !previous.entity.is_empty() || !previous.currency.is_empty() {
+            period = self.configure_close(ConfigureCloseRequest {
+                period_id: period.id,
+                entity: previous.entity.clone(),
+                currency: previous.currency.clone(),
+                units: previous.units.clone(),
+                report_lines: previous.report_lines.clone(),
+                mappings,
+            })?;
+        }
         period.prior_period_id = Some(previous.id);
         *self.close_periods.last_mut().unwrap() = period.clone();
         Ok(period)
@@ -390,11 +895,18 @@ impl Workbook {
             .collect::<Result<_, _>>()
             .map_err(|e| e.to_string())?;
         Ok(
-            serde_json::json!({"format":"gridloom-review-pack", "version":1, "exported_at":Utc::now(), "status":status, "worksheet":sheet, "reviews":reviews, "explanations":explanations, "limitations":["This JSON contains local workbook evidence and reproducible cached inputs, not authenticated signatures or proof of external ledger completeness.", "Imported source CSV is retained unchanged; worksheet edits are represented separately. Review records retain their own input snapshots."]}),
+            serde_json::json!({"format":"gridloom-review-pack", "version":2, "exported_at":Utc::now(), "status":status, "worksheet":sheet, "reviews":reviews, "explanations":explanations, "limitations":["This JSON contains local workbook evidence and reproducible cached inputs, not authenticated signatures or proof of external ledger completeness.", "Imported source CSV is retained unchanged; worksheet edits are represented separately. Review records retain their own input snapshots."]}),
         )
     }
 }
 
+fn exact_amount(value: Option<&Value>) -> Option<Decimal> {
+    match value {
+        Some(Value::Decimal(v)) => Some(*v),
+        Some(Value::Integer(v)) => Some(Decimal::from(*v)),
+        _ => None,
+    }
+}
 fn exact_nonnegative_amount(value: Option<&Value>) -> Option<Decimal> {
     match value {
         Some(Value::Decimal(v)) if *v >= Decimal::ZERO => Some(*v),
@@ -443,11 +955,119 @@ fn build_sheet(period: &ClosePeriod) -> Sheet {
             &mut sheet,
             i as u32 + 1,
             8,
-            format!("={sign}SUMIF(C2:C{end},\"{mapping}\",F2:F{end})"),
+            format!(
+                "={sign}SUMIF(C2:C{end},\"{mapping}\",{net}2:{net}{end})",
+                net = if period.reconciliation_version > 0 {
+                    "M"
+                } else {
+                    "F"
+                }
+            ),
         );
     }
     put_text(&mut sheet, 6, 7, "Net profit");
     put(&mut sheet, 6, 8, "=I2-I3-I4+I5-I6".into());
+    if !period.report_lines.is_empty() {
+        sheet
+            .cells
+            .retain(|_, c| !(c.coord.col == 7 || c.coord.col == 8));
+        put_text(&mut sheet, 0, 7, &format!("Report {}", period.period));
+        put_text(&mut sheet, 0, 8, "Amount");
+        for (i, line) in period.report_lines.iter().enumerate() {
+            put_text(&mut sheet, i as u32 + 1, 7, &line.label);
+            let children: Vec<_> = period
+                .report_lines
+                .iter()
+                .enumerate()
+                .filter(|(_, l)| l.parent_id.as_deref() == Some(line.id.as_str()))
+                .collect();
+            let sign = if line.normal_balance == NormalBalance::Credit {
+                "-"
+            } else {
+                ""
+            };
+            let formula = if children.is_empty() {
+                format!("={sign}SUMIF(C2:C{end},\"{}\",M2:M{end})", line.id)
+            } else {
+                let terms: Vec<_> = children
+                    .iter()
+                    .map(|(j, l)| {
+                        format!(
+                            "{}I{}",
+                            if l.normal_balance == NormalBalance::Credit {
+                                "-"
+                            } else {
+                                "+"
+                            },
+                            j + 2
+                        )
+                    })
+                    .collect();
+                format!("={sign}(0{})", terms.join(""))
+            };
+            put(&mut sheet, i as u32 + 1, 8, formula);
+        }
+    }
+    if period.reconciliation_version > 0 {
+        for (col, label) in [
+            (10, "Imported balance"),
+            (11, "Documented adjustments"),
+            (12, "Reported balance"),
+            (14, "Adjustment account"),
+            (15, "Journal ID"),
+            (16, "Adjustment debit"),
+            (17, "Adjustment credit"),
+            (18, "Rationale"),
+            (19, "Author"),
+            (20, "Evidence SHA-256"),
+        ] {
+            put_text(&mut sheet, 0, col, label);
+        }
+        let mut journal_row = 1;
+        let mut refs: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for journal in &period.adjustments {
+            for line in &journal.lines {
+                put_text(&mut sheet, journal_row, 14, &line.account);
+                put_text(&mut sheet, journal_row, 15, &journal.id.to_string());
+                put(&mut sheet, journal_row, 16, line.debit.to_string());
+                put(&mut sheet, journal_row, 17, line.credit.to_string());
+                put_text(&mut sheet, journal_row, 18, &journal.rationale);
+                put_text(&mut sheet, journal_row, 19, &journal.author);
+                put_text(
+                    &mut sheet,
+                    journal_row,
+                    20,
+                    &journal
+                        .evidence
+                        .iter()
+                        .map(|e| e.sha256.clone())
+                        .collect::<Vec<_>>()
+                        .join(";"),
+                );
+                refs.entry(line.account.clone()).or_default().push(format!(
+                    "+Q{}-R{}",
+                    journal_row + 1,
+                    journal_row + 1
+                ));
+                journal_row += 1;
+            }
+        }
+        for (i, a) in period.accounts.iter().enumerate() {
+            let row = i as u32 + 1;
+            put(&mut sheet, row, 10, (a.debit - a.credit).to_string());
+            put(
+                &mut sheet,
+                row,
+                11,
+                format!(
+                    "=0{}",
+                    refs.get(&a.account).map(|r| r.join("")).unwrap_or_default()
+                ),
+            );
+            put(&mut sheet, row, 12, format!("=K{}+L{}", row + 1, row + 1));
+        }
+        sheet.max_rows = sheet.max_rows.max(journal_row + 10);
+    }
     sheet
 }
 fn validate_period(period: &str) -> Result<(), String> {
@@ -618,4 +1238,101 @@ fn parse_csv(input: &str) -> Result<Vec<Vec<String>>, String> {
         records.push(row);
     }
     Ok(records)
+}
+
+fn report_labels(period: &ClosePeriod) -> Vec<String> {
+    if period.report_lines.is_empty() {
+        [
+            "Revenue",
+            "Cost of sales",
+            "Operating expenses",
+            "Other income",
+            "Other expense",
+            "Net profit",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    } else {
+        period
+            .report_lines
+            .iter()
+            .map(|l| l.label.clone())
+            .collect()
+    }
+}
+fn valid_mapping(period: &ClosePeriod, mapping: &str) -> bool {
+    if period.report_lines.is_empty() {
+        MAPPINGS.contains(&mapping)
+    } else {
+        period.report_lines.iter().any(|line| line.id == mapping)
+            && !period
+                .report_lines
+                .iter()
+                .any(|line| line.parent_id.as_deref() == Some(mapping))
+    }
+}
+fn validate_period_mappings(
+    period: &ClosePeriod,
+    mappings: &BTreeMap<String, String>,
+) -> Result<(), String> {
+    for (account, mapping) in mappings {
+        if !period.accounts.iter().any(|a| &a.account == account) {
+            return Err(format!("Mapping refers to unknown account {account}."));
+        }
+        if !mapping.is_empty() && !valid_mapping(period, mapping) {
+            return Err(format!("Unknown or non-leaf report mapping {mapping}."));
+        }
+    }
+    Ok(())
+}
+fn adjustment_total(period: &ClosePeriod, account: &str) -> Result<Decimal, String> {
+    period
+        .adjustments
+        .iter()
+        .flat_map(|j| &j.lines)
+        .filter(|l| l.account == account)
+        .try_fold(Decimal::ZERO, |sum, line| {
+            sum.checked_add(line.debit)?.checked_sub(line.credit)
+        })
+        .ok_or("Adjustment balance exceeds decimal precision".into())
+}
+fn validate_report(lines: &[ReportLine]) -> Result<(), String> {
+    if lines.len() > 100 {
+        return Err("A report supports at most 100 lines.".into());
+    }
+    let mut ids = BTreeSet::new();
+    for line in lines {
+        if line.id.is_empty()
+            || line.id.len() > 80
+            || !line
+                .id
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+            || !ids.insert(line.id.clone())
+            || line.label.trim().is_empty()
+            || line.label.len() > 200
+            || line.label.chars().any(char::is_control)
+        {
+            return Err("Report lines need unique alphanumeric IDs (underscore/hyphen allowed) and bounded plain-text labels.".into());
+        }
+    }
+    for line in lines {
+        let mut seen = BTreeSet::from([line.id.clone()]);
+        let mut parent = line.parent_id.as_ref();
+        while let Some(id) = parent {
+            if !seen.insert(id.clone()) {
+                return Err("Report hierarchy contains a cycle.".into());
+            }
+            let p = lines
+                .iter()
+                .find(|l| &l.id == id)
+                .ok_or("Report parent does not exist")?;
+            parent = p.parent_id.as_ref();
+            if seen.len() > 20 {
+                return Err("Report hierarchy supports at most 20 levels.".into());
+            }
+        }
+    }
+    Ok(())
 }

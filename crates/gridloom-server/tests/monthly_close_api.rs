@@ -214,3 +214,128 @@ async fn local_server_rejects_cross_origin_and_rebinding() {
         );
     }
 }
+
+#[tokio::test]
+async fn working_paper_question_adjustment_impact_and_reproducible_export() {
+    let app = create_router(AppState::new(Workbook::new()));
+    let csv = "account,name,debit,credit\n1000,Cash,100,0\n4000,Sales,0,100";
+    let (status, p) = call(
+        &app,
+        "POST",
+        "/api/close/import",
+        json!({"period":"2026-10","csv":csv}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let id = &p["id"];
+    let sheet = &p["sheet_name"];
+    let (status, configured) = call(
+        &app,
+        "POST",
+        "/api/close/configure",
+        json!({
+            "period_id":id,"entity":"Sample Ltd","currency":"BRL","units":"units",
+            "report_lines":[
+                {"id":"cash","label":"Cash","parent_id":null,"normal_balance":"Debit"},
+                {"id":"revenue","label":"Revenue","parent_id":null,"normal_balance":"Credit"}],
+            "mappings":{}
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{configured}");
+    let cash = json!({"sheet_name":sheet,"row":1,"col":8});
+    let (_, before) = call(&app, "POST", "/api/cells/explain", cash.clone()).await;
+    assert_eq!(before["can_review"], false);
+    let mut question_request = cash.clone();
+    question_request["expected_snapshot"] = before["snapshot"].clone();
+    question_request["decision"] = json!("Question");
+    question_request["reviewer"] = json!("Reviewer");
+    question_request["note"] = json!("Check last transaction");
+    question_request["evidence"] = json!([]);
+    let (status, question) = call(&app, "POST", "/api/reviews", question_request).await;
+    assert_eq!(status, StatusCode::OK, "{question}");
+    let (status, queue) = call(&app, "GET", "/api/questions", Value::Null).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(queue[0]["id"], question["id"]);
+    let (status, deps) = call(&app, "POST", "/api/cells/dependencies", cash.clone()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(deps["upstream"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["kind"] == "range"));
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/close/map",
+            json!({"period_id":id,"mappings":{"1000":"cash","4000":"revenue"}})
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    let revenue = json!({"sheet_name":sheet,"row":2,"col":8});
+    let (_, before_adjustment) = call(&app, "POST", "/api/cells/explain", revenue.clone()).await;
+    let (status,review)=call(&app,"POST","/api/reviews",json!({
+        "sheet_name":sheet,"row":2,"col":8,"expected_snapshot":before_adjustment["snapshot"],
+        "decision":"Reviewed","reviewer":"Controller","note":"Reviewed before adjustment","evidence":[]
+    })).await;
+    assert_eq!(status, StatusCode::OK, "{review}");
+    let (status,receipt)=call(&app,"POST","/api/close/adjustments",json!({
+        "period_id":id,"author":"Preparer","rationale":"Accrued invoice",
+        "lines":[{"account":"1000","debit":"25","credit":"0"},{"account":"4000","debit":"0","credit":"25"}],
+        "evidence":[{"filename":"invoice.txt","media_type":"text/plain","bytes":[65,66]}]
+    })).await;
+    assert_eq!(status, StatusCode::OK, "{receipt}");
+    assert_eq!(receipt["affected_lines"].as_array().unwrap().len(), 2);
+    assert_eq!(receipt["invalidated_reviews"][0]["id"], review["id"]);
+    let (_, comparison) = call(
+        &app,
+        "GET",
+        &format!("/api/reviews/{}/compare", review["id"].as_str().unwrap()),
+        Value::Null,
+    )
+    .await;
+    assert!(comparison["summaries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["category"] == "adjustment"));
+    let (_, current) = call(&app, "POST", "/api/cells/explain", cash.clone()).await;
+    let path = format!(
+        "/api/questions/{}/transition",
+        question["id"].as_str().unwrap()
+    );
+    let (status,resolved)=call(&app,"POST",&path,json!({"action":"Resolved","actor":"Reviewer","note":"Verified invoice and accrual","expected_snapshot":current["snapshot"]})).await;
+    assert_eq!(status, StatusCode::OK, "{resolved}");
+    let (_, queue) = call(&app, "GET", "/api/questions", Value::Null).await;
+    assert_eq!(queue, json!([]));
+    let (_, pack) = call(
+        &app,
+        "GET",
+        &format!("/api/close/{}/pack", id.as_str().unwrap()),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(pack["version"], 2);
+    assert_eq!(pack["status"]["period"]["source_csv"], csv);
+    assert_eq!(
+        pack["status"]["live_accounts"][0]["reported_balance"],
+        "125"
+    );
+    assert_eq!(
+        pack["status"]["period"]["adjustments"][0]["evidence"][0]["bytes"],
+        json!([65, 66])
+    );
+    let recorded_question = pack["reviews"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|review| review["id"] == question["id"])
+        .expect("Question retained in review pack");
+    assert_eq!(
+        recorded_question["question_events"][0]["action"],
+        "Resolved"
+    );
+}

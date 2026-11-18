@@ -43,6 +43,45 @@ pub struct ReviewRecord {
     pub input_snapshot: Option<ReviewInputSnapshot>,
     #[serde(default)]
     pub attachments: Vec<EvidenceAttachment>,
+    #[serde(default)]
+    pub question_events: Vec<QuestionEvent>,
+}
+
+/// Local issue history, not authenticated approval. Events never overwrite the original question.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum QuestionAction {
+    Resolved,
+    Reopened,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuestionEvent {
+    pub id: Uuid,
+    pub action: QuestionAction,
+    pub actor: String,
+    pub note: String,
+    pub created_at: DateTime<Utc>,
+    pub snapshot: String,
+    pub input_snapshot: ReviewInputSnapshot,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct QuestionTransitionRequest {
+    pub action: QuestionAction,
+    pub actor: String,
+    pub note: String,
+    pub expected_snapshot: String,
+    pub expected_last_event_id: Option<Uuid>,
+}
+
+impl ReviewRecord {
+    pub fn question_is_open(&self) -> bool {
+        self.decision == ReviewDecision::Question
+            && !matches!(
+                self.question_events.last().map(|e| &e.action),
+                Some(QuestionAction::Resolved)
+            )
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -133,6 +172,24 @@ pub struct ReviewComparison {
     pub before_snapshot: String,
     pub after_snapshot: String,
     pub changes: Vec<SnapshotChange>,
+    pub summaries: Vec<ChangeSummary>,
+    /// Changed cells in this captured dependency trace, not a workbook-wide impact analysis.
+    pub affected_cells: Vec<AffectedCell>,
+}
+#[derive(Debug, Serialize)]
+pub struct ChangeSummary {
+    pub category: String,
+    pub label: String,
+    pub sheet_name: Option<String>,
+    pub coord: Option<CellCoord>,
+    pub before: Option<serde_json::Value>,
+    pub after: Option<serde_json::Value>,
+}
+#[derive(Debug, Serialize)]
+pub struct AffectedCell {
+    pub sheet_name: String,
+    pub coord: CellCoord,
+    pub label: String,
 }
 #[derive(Debug, Serialize)]
 pub struct SourceDrilldownRow {
@@ -207,6 +264,79 @@ impl Workbook {
             "pending_database_edits".into(),
             serde_json::json!(!self.staged.patches.is_empty()),
         );
+        // Include close configuration, import identity and adjustment evidence for every
+        // referenced close sheet, not just the root cell's sheet.
+        for period in &self.close_periods {
+            if trace
+                .nodes
+                .values()
+                .any(|n| n.sheet_name.as_deref() == Some(period.sheet_name.as_str()))
+            {
+                let issues = self.close_integrity_issues(period.id);
+                if !issues.is_empty() {
+                    trace.can_review = false;
+                    trace.warnings.insert(format!(
+                        "Working paper {} has {} integrity issue(s): {}",
+                        period.sheet_name,
+                        issues.len(),
+                        issues[0]
+                    ));
+                }
+                // Avoid even temporarily serializing potentially large CSV and
+                // attachment bytes into each line's capture. Those bytes live in
+                // the working paper; this snapshot binds to their retained hashes.
+                let journals: Vec<_> = period.adjustments.iter().map(|journal| {
+                    let evidence: Vec<_> = journal.evidence.iter().map(|attachment| {
+                        serde_json::json!({
+                            "id":attachment.id, "version":attachment.version,
+                            "previous_version_id":attachment.previous_version_id,
+                            "filename":attachment.filename, "media_type":attachment.media_type,
+                            "sha256":attachment.sha256, "created_at":attachment.created_at,
+                        })
+                    }).collect();
+                    serde_json::json!({
+                        "id":journal.id, "created_at":journal.created_at, "author":journal.author,
+                        "rationale":journal.rationale, "lines":journal.lines, "evidence":evidence,
+                    })
+                }).collect();
+                trace.parts.insert(
+                    format!("close_adjustments:{}", period.id),
+                    serde_json::Value::Array(journals),
+                );
+                trace.parts.insert(
+                    format!("close_working_paper:{}", period.id),
+                    serde_json::json!({
+                        "id":period.id, "period":period.period, "version":period.version,
+                        "sheet_name":period.sheet_name, "created_at":period.created_at,
+                        "source_sha256":period.source_sha256, "accounts":period.accounts,
+                        "prior_period_id":period.prior_period_id, "entity":period.entity,
+                        "currency":period.currency, "units":period.units,
+                        "report_lines":period.report_lines,
+                        "reconciliation_version":period.reconciliation_version,
+                    }),
+                );
+                // These protected worksheet inputs may not be on the result's numeric
+                // path. Capture attempted tampering exactly even if totals stay equal.
+                let sheet = &self.sheets[&period.sheet_name];
+                let mut import_cells = BTreeMap::new();
+                for row in 1..=period.accounts.len() as u32 {
+                    for col in 0..=5 {
+                        let coord = CellCoord::new(row, col);
+                        let value = sheet.get_cell(&coord).map(|cell| {
+                            serde_json::json!({
+                                "raw_input": cell.raw_input, "formula": cell.formula,
+                                "value": cell.evaluated_value
+                            })
+                        });
+                        import_cells.insert(coord.to_a1(), value);
+                    }
+                }
+                trace.parts.insert(
+                    format!("close_import_cells:{}", period.id),
+                    serde_json::to_value(import_cells).map_err(|_| CellError::Value)?,
+                );
+            }
+        }
         let nodes: Vec<_> = trace.nodes.into_values().collect();
         let warnings: Vec<_> = trace.warnings.into_iter().collect();
         // Versioned, canonical content digest. Not a signature or proof that a database/document is current.
@@ -225,7 +355,7 @@ impl Workbook {
             can_review: trace.can_review,
         };
         let review = self.reviews.iter().rev().find(|r| r.sheet_name == sheet_name && r.coord == coord).cloned().map(|mut r| {
-            if r.snapshot != snapshot || !trace.can_review {
+            if r.snapshot != snapshot || (r.decision == ReviewDecision::Reviewed && !trace.can_review) {
                 r.invalidated = true;
                 r.invalidation_reason.get_or_insert_with(|| "The calculation, dependencies, or reviewable state changed. Review again.".into());
             }
@@ -276,7 +406,16 @@ impl Workbook {
         if explanation.snapshot != request.expected_snapshot {
             return Err("This calculation changed while you were reviewing it. Reload its explanation and review again.".into());
         }
-        if !explanation.can_review {
+        if request.decision == ReviewDecision::Reviewed
+            && self.reviews.iter().any(|r| {
+                r.sheet_name == request.sheet_name && r.coord == coord && r.question_is_open()
+            })
+        {
+            return Err(
+                "Resolve the open questions on this cell before marking it reviewed.".into(),
+            );
+        }
+        if request.decision == ReviewDecision::Reviewed && !explanation.can_review {
             return Err(
                 "This calculation cannot be reviewed yet. Resolve its warnings first.".into(),
             );
@@ -302,9 +441,72 @@ impl Workbook {
             invalidation_reason: None,
             input_snapshot: Some(explanation.input_snapshot),
             attachments: vec![],
+            question_events: vec![],
         };
         self.reviews.push(record.clone());
         Ok(record)
+    }
+
+    /// Queue membership is independent of sign-off validity or later reviews on the same cell.
+    pub fn open_questions(&self) -> Vec<ReviewRecord> {
+        self.review_history()
+            .into_iter()
+            .filter(ReviewRecord::question_is_open)
+            .collect()
+    }
+
+    pub fn transition_question(
+        &mut self,
+        question_id: Uuid,
+        mut request: QuestionTransitionRequest,
+    ) -> Result<ReviewRecord, String> {
+        request.actor = request.actor.trim().into();
+        request.note = request.note.trim().into();
+        if request.actor.is_empty()
+            || request.actor.len() > 120
+            || request.note.is_empty()
+            || request.note.len() > 4000
+        {
+            return Err("Enter a local actor label (up to 120 characters) and a reason (1–4000 characters).".into());
+        }
+        let index = self
+            .reviews
+            .iter()
+            .position(|r| r.id == question_id)
+            .ok_or("Question not found")?;
+        let question = &self.reviews[index];
+        if question.decision != ReviewDecision::Question {
+            return Err("This record is not a question.".into());
+        }
+        if question.question_events.last().map(|e| e.id) != request.expected_last_event_id {
+            return Err("Question history changed. Reload before retrying.".into());
+        }
+        if (request.action == QuestionAction::Resolved) != question.question_is_open() {
+            return Err("Question is already in the requested state.".into());
+        }
+        let current = self
+            .explain_cell(&question.sheet_name, question.coord)
+            .map_err(|e| e.to_string())?;
+        if current.snapshot != request.expected_snapshot {
+            return Err("Calculation changed. Reload before updating the question.".into());
+        }
+        if serde_json::to_vec(&current.input_snapshot)
+            .map_err(|e| e.to_string())?
+            .len()
+            > 16 * 1024 * 1024
+        {
+            return Err("Question event inputs exceed the 16 MiB snapshot limit.".into());
+        }
+        self.reviews[index].question_events.push(QuestionEvent {
+            id: Uuid::new_v4(),
+            action: request.action,
+            actor: request.actor,
+            note: request.note,
+            created_at: Utc::now(),
+            snapshot: current.snapshot,
+            input_snapshot: current.input_snapshot,
+        });
+        Ok(self.reviews[index].clone())
     }
 
     /// Sticky invalidation: restoring the old value must not silently resurrect an old sign-off.
@@ -315,7 +517,10 @@ impl Workbook {
             .enumerate()
             .filter(|(_, r)| !r.invalidated)
             .filter_map(|(i, r)| match self.explain_cell(&r.sheet_name, r.coord) {
-                Ok(explanation) if explanation.can_review && explanation.snapshot == r.snapshot => {
+                Ok(explanation)
+                    if (r.decision == ReviewDecision::Question || explanation.can_review)
+                        && explanation.snapshot == r.snapshot =>
+                {
                     None
                 }
                 _ => Some(i),
@@ -331,7 +536,7 @@ impl Workbook {
 
     pub fn review_history(&self) -> Vec<ReviewRecord> {
         self.reviews.iter().rev().cloned().map(|mut record| {
-            if !record.invalidated && !matches!(self.explain_cell(&record.sheet_name, record.coord), Ok(e) if e.can_review && e.snapshot == record.snapshot) {
+            if !record.invalidated && !matches!(self.explain_cell(&record.sheet_name, record.coord), Ok(e) if (record.decision == ReviewDecision::Question || e.can_review) && e.snapshot == record.snapshot) {
                 record.invalidated = true;
                 record.invalidation_reason = Some("The calculation, dependencies, or reviewable state changed. Review again.".into());
             }
@@ -775,7 +980,10 @@ impl Workbook {
         let current = self
             .explain_cell(&before.sheet_name, before.coord)
             .map_err(|e| e.message().to_string())?;
+        let (summaries, affected_cells) = self.summarize_changes(retained, &current.input_snapshot);
         Ok(ReviewComparison {
+            summaries,
+            affected_cells,
             before_review_id: before.id,
             after_review_id: None,
             before_snapshot: before.snapshot.clone(),
@@ -817,13 +1025,130 @@ impl Workbook {
             Some(&serde_json::to_value(&after.attachments).map_err(|e| e.to_string())?),
             &mut changes,
         );
+        let (mut summaries, affected_cells) = self.summarize_changes(a, b);
+        let old_files = serde_json::to_value(&before.attachments).map_err(|e| e.to_string())?;
+        let new_files = serde_json::to_value(&after.attachments).map_err(|e| e.to_string())?;
+        if old_files != new_files {
+            summaries.push(ChangeSummary {
+                category: "evidence".into(),
+                label: "Retained supporting evidence changed".into(),
+                sheet_name: Some(before.sheet_name.clone()),
+                coord: Some(before.coord),
+                before: Some(old_files),
+                after: Some(new_files),
+            });
+        }
         Ok(ReviewComparison {
+            summaries,
+            affected_cells,
             before_review_id: before.id,
             after_review_id: Some(after.id),
             before_snapshot: before.snapshot.clone(),
             after_snapshot: after.snapshot.clone(),
             changes,
         })
+    }
+
+    fn summarize_changes(
+        &self,
+        before: &ReviewInputSnapshot,
+        after: &ReviewInputSnapshot,
+    ) -> (Vec<ChangeSummary>, Vec<AffectedCell>) {
+        let mut summaries = Vec::new();
+        let mut affected = BTreeMap::new();
+        let keys: BTreeSet<_> = before
+            .inputs
+            .keys()
+            .chain(after.inputs.keys())
+            .cloned()
+            .collect();
+        for key in keys {
+            let old = before.inputs.get(&key);
+            let new = after.inputs.get(&key);
+            if old == new {
+                continue;
+            }
+            let node = after
+                .nodes
+                .iter()
+                .find(|n| n.id == key)
+                .or_else(|| before.nodes.iter().find(|n| n.id == key));
+            let sheet = node.and_then(|n| n.sheet_name.clone());
+            let coord = node.and_then(|n| n.coord);
+            let old_node = before.nodes.iter().find(|n| n.id == key);
+            let new_node = after.nodes.iter().find(|n| n.id == key);
+            let category = if key.starts_with("cell:") {
+                if old_node.and_then(|n| n.formula.as_ref())
+                    != new_node.and_then(|n| n.formula.as_ref())
+                {
+                    "formula"
+                } else if old.and_then(|v| v.get("raw_input"))
+                    != new.and_then(|v| v.get("raw_input"))
+                {
+                    if sheet
+                        .as_ref()
+                        .is_some_and(|s| self.close_periods.iter().any(|p| &p.sheet_name == s))
+                        && coord.is_some_and(|c| c.col == 2 && c.row > 0)
+                    {
+                        "mapping"
+                    } else {
+                        "input"
+                    }
+                } else {
+                    "calculation"
+                }
+            } else if key.starts_with("close_working_paper:") {
+                "close_configuration"
+            } else if key.starts_with("close_adjustments:") {
+                "adjustment"
+            } else if key.starts_with("close_import_cells:") {
+                "working_paper_input"
+            } else if key.starts_with("source:") {
+                "source"
+            } else if key.starts_with("source_stale:") {
+                "source_state"
+            } else if key.starts_with("connection:") {
+                "connection"
+            } else if key.starts_with("table:") {
+                "table"
+            } else {
+                "calculation_state"
+            };
+            let label = node.map(|n| n.label.clone()).unwrap_or_else(|| key.clone());
+            if let (Some(sheet), Some(coord)) = (&sheet, coord) {
+                affected.insert(
+                    (sheet.clone(), coord.row, coord.col),
+                    AffectedCell {
+                        sheet_name: sheet.clone(),
+                        coord,
+                        label: label.clone(),
+                    },
+                );
+            }
+            summaries.push(ChangeSummary {
+                category: category.into(),
+                label,
+                sheet_name: sheet,
+                coord,
+                before: old.cloned(),
+                after: new.cloned(),
+            });
+        }
+        if before.can_review != after.can_review || before.warnings != after.warnings {
+            summaries.push(ChangeSummary {
+                category: "reviewability".into(),
+                label: "Calculation warnings or sign-off eligibility changed".into(),
+                sheet_name: Some(after.sheet_name.clone()),
+                coord: Some(after.coord),
+                before: Some(
+                    serde_json::json!({"can_review":before.can_review,"warnings":before.warnings}),
+                ),
+                after: Some(
+                    serde_json::json!({"can_review":after.can_review,"warnings":after.warnings}),
+                ),
+            });
+        }
+        (summaries, affected.into_values().collect())
     }
 
     /// Only returns observed, direct-projection result rows with complete declared primary keys.

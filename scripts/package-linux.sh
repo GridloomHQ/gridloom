@@ -28,7 +28,7 @@ mkdir -p "$stage/lib" "$stage/frontend" "$stage/docs"
 cp "$binary" "$stage/gridloom-$mode"
 cp -R frontend/dist "$stage/frontend/"
 cp README.md LICENSE CHANGELOG.md "$stage/"
-cp docs/RELEASE-0.3.md docs/VERIFICATION-0.3.md "$stage/docs/"
+cp docs/RELEASE-*.md docs/VERIFICATION-*.md "$stage/docs/"
 duckdb_version=$(python3 - <<'PYDUCK'
 import tomllib
 from pathlib import Path

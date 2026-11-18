@@ -56,17 +56,17 @@ pub fn evaluate_expr<C: EvaluationContext + ?Sized>(
                 BinaryOp::Add => {
                     let a = left_val.to_decimal()?;
                     let b = right_val.to_decimal()?;
-                    Ok(Value::Decimal(a + b))
+                    Ok(Value::Decimal(a.checked_add(b).ok_or(CellError::Num)?))
                 }
                 BinaryOp::Sub => {
                     let a = left_val.to_decimal()?;
                     let b = right_val.to_decimal()?;
-                    Ok(Value::Decimal(a - b))
+                    Ok(Value::Decimal(a.checked_sub(b).ok_or(CellError::Num)?))
                 }
                 BinaryOp::Mul => {
                     let a = left_val.to_decimal()?;
                     let b = right_val.to_decimal()?;
-                    Ok(Value::Decimal(a * b))
+                    Ok(Value::Decimal(a.checked_mul(b).ok_or(CellError::Num)?))
                 }
                 BinaryOp::Div => {
                     let a = left_val.to_decimal()?;
@@ -74,7 +74,7 @@ pub fn evaluate_expr<C: EvaluationContext + ?Sized>(
                     if b.is_zero() {
                         return Err(CellError::Div0);
                     }
-                    Ok(Value::Decimal(a / b))
+                    Ok(Value::Decimal(a.checked_div(b).ok_or(CellError::Num)?))
                 }
                 BinaryOp::Power => {
                     let a = left_val.to_f64()?;

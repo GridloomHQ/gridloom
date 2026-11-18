@@ -29,6 +29,12 @@ The database remains in its original format. Editing an eligible source-backed t
 
 ---
 
+## 0.4 Preview: Accounting Working Papers
+
+Import a trial balance, define your report and follow the cells behind each number. Circle up uncertain items even while sign-off is blocked. Post a supported adjustment without replacing the import, see which reported values and reviews changed, and export the full working paper.
+
+[Work through a 0.4 example and see its limits](docs/RELEASE-0.4.md).
+
 ## 0.3 Preview: Monthly Close & Captured Review Evidence
 
 **Monthly close** imports a trial-balance CSV, maps accounts, generates an explained P&L, checks debit-credit reconciliation and exposes a six-line review queue. Attach retained support files, record local reviews or questions, compare exact before/after inputs, roll mappings into a new period and export a self-contained JSON review pack, conventional P&L CSV or a print-friendly readable HTML summary.

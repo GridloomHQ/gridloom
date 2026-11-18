@@ -197,7 +197,27 @@ export interface ReviewRecord {
   snapshot: string;
   invalidated: boolean;
   invalidation_reason: string | null;
+  question_events?: QuestionEvent[];
 }
+export type QuestionAction = 'Resolved' | 'Reopened';
+export interface QuestionEvent {
+  id: string; action: QuestionAction; actor: string; note: string; created_at: string;
+  snapshot: string; input_snapshot: ReviewInputSnapshot;
+}
+export interface QuestionTransitionInput {
+  action: QuestionAction; actor: string; note: string; expected_snapshot: string; expected_last_event_id?: string | null;
+}
+export type DependencyDirection = 'upstream' | 'downstream';
+export interface DependencyTarget {
+  id: string; kind: 'cell' | 'range' | 'table' | 'source' | 'spill'; label: string;
+  sheet_name: string | null; coord: CellCoord | null; range: CellRange | null;
+  formula: string | null; source_name: string | null;
+}
+export interface DependencyNavigation {
+  sheet_name: string; coord: CellCoord; upstream: DependencyTarget[]; downstream: DependencyTarget[];
+  warnings: string[]; truncated: boolean;
+}
+export interface DependencyHighlight { target: DependencyTarget; direction: DependencyDirection }
 export interface ExplanationNode {
   id: string;
   kind: 'cell' | 'table' | 'source' | 'sql';
@@ -245,14 +265,30 @@ export interface ReviewInputSnapshot {
 export interface EvidenceUpload { filename: string; media_type: string; bytes: number[]; replaces?: string | null }
 export interface EvidenceAttachment { id: string; version: number; previous_version_id: string | null; filename: string; media_type: string; sha256: string; bytes: number[]; created_at: string }
 export interface SnapshotChange { path: string; before: unknown | null; after: unknown | null }
-export interface ReviewComparison { before_review_id: string; after_review_id: string | null; before_snapshot: string; after_snapshot: string; changes: SnapshotChange[] }
+export interface ChangeSummary { category: string; label: string; sheet_name?: string | null; coord?: CellCoord | null; before?: unknown; after?: unknown }
+export interface AffectedCell { sheet_name: string; coord: CellCoord; label: string }
+export interface ReviewComparison {
+  before_review_id: string; after_review_id: string | null; before_snapshot: string; after_snapshot: string;
+  changes: SnapshotChange[]; summaries?: ChangeSummary[]; affected_cells?: AffectedCell[];
+}
 export interface SourceDrilldownRow { cached_row_index: number; primary_key: Record<string, CellValue>; values: CellValue[] }
 export interface SourceDrilldown { source_name: string; connection_name: string; base_table: string; sql: string; columns: string[]; rows: SourceDrilldownRow[]; total_rows: number; offset: number; warning: string }
 export type CloseMapping = 'Revenue' | 'Cost of sales' | 'Operating expenses' | 'Other income' | 'Other expense' | 'Balance sheet';
 export interface CloseAccount { account: string; name: string; debit: string; credit: string; mapping: string }
-export interface ClosePeriod { id: string; period: string; version: number; sheet_name: string; created_at: string; source_csv: string; source_sha256: string; accounts: CloseAccount[]; prior_period_id: string | null }
+export interface ReportLine { id: string; label: string; parent_id: string | null; normal_balance: 'Debit' | 'Credit' }
+export interface CloseDimensions { entity: string; currency: string; units: string }
+export interface ConfigureCloseInput extends CloseDimensions { period_id: string; report_lines: ReportLine[]; mappings: Record<string,string> }
+export interface AdjustmentLine { account: string; debit: string; credit: string }
+export interface PostAdjustmentInput { period_id: string; author: string; rationale: string; lines: AdjustmentLine[]; evidence: EvidenceUpload[] }
+export interface AdjustmentImpact {
+  adjustment: CloseAdjustment;
+  affected_lines: { label: string; coord: CellCoord; before: CellValue; after: CellValue; before_status: string; after_status: string }[];
+  invalidated_reviews: { id: string; sheet_name: string; coord: CellCoord; reviewer: string }[];
+}
+export interface CloseAdjustment { id: string; author: string; rationale: string; lines: AdjustmentLine[]; evidence: EvidenceAttachment[]; created_at: string }
+export interface ClosePeriod { id: string; period: string; version: number; sheet_name: string; created_at: string; source_csv: string; source_sha256: string; accounts: CloseAccount[]; prior_period_id: string | null; entity?: string; currency?: string; units?: string; reconciliation_version?: number; report_lines?: ReportLine[]; adjustments?: CloseAdjustment[] }
 export interface CloseQueueItem { label: string; coord: CellCoord; value: CellValue; status: string; review_id: string | null }
-export interface LiveCloseAccount { row: number; imported_account: string; account: string; name: string; mapping: string; debit: string | null; credit: string | null; identity_matches_import: boolean }
+export interface LiveCloseAccount { row: number; imported_account: string; account: string; name: string; mapping: string; debit: string | null; credit: string | null; identity_matches_import: boolean; imported_balance?: string | null; adjustment_balance?: string | null; reported_balance?: string | null }
 export interface CloseStatus { period: ClosePeriod; live_accounts: LiveCloseAccount[]; debits: string; credits: string; difference: string; balanced: boolean; unmapped_accounts: string[]; queue: CloseQueueItem[]; ready_for_close: boolean; warnings: string[] }
 export interface ReviewPack {
   format: 'gridloom-review-pack'; version: number; exported_at: string;

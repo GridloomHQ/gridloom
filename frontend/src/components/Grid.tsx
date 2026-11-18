@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ViewportResponse } from '../types';
+import { ViewportResponse, DependencyHighlight } from '../types';
 import { editableCellInput } from '../utils/cellInput';
 import { colIndexToName, coordToA1 } from '../utils/coords';
 import { containsCell, GridRange } from '../utils/selection';
 
 interface GridProps {
   sheetName: string; viewport: ViewportResponse | null; selectedRow: number; selectedCol: number;
-  selection: GridRange; busy: boolean;
+  selection: GridRange; busy: boolean; traceHighlight?: DependencyHighlight | null;
   onSelectCell: (row: number, col: number, extend?: boolean) => void;
   onCommitCell: (row: number, col: number, value: string) => void;
   onViewportChange: (startRow: number, startCol: number, endRow: number, endCol: number) => void;
@@ -25,6 +25,8 @@ export const Grid: React.FC<GridProps> = (props) => {
   const editor = useRef<HTMLInputElement>(null);
   const editing = useRef(false);
   const dragging = useRef(false);
+  const highlight = props.traceHighlight?.target.sheet_name === sheetName ? props.traceHighlight : null;
+  const traceRange = highlight?.target.range ?? (highlight?.target.coord ? {start:highlight.target.coord, end:highlight.target.coord} : null);
   const totalRows = viewport?.total_rows ?? 1000, totalCols = viewport?.total_cols ?? 100;
   const startRow = Math.max(0, Math.floor(scroll.top / H) - 3), endRow = Math.min(totalRows - 1, startRow + Math.ceil(size.height / H) + 6);
   const startCol = Math.max(0, Math.floor(scroll.left / W) - 2), endCol = Math.min(totalCols - 1, startCol + Math.ceil(size.width / W) + 4);
@@ -38,7 +40,16 @@ export const Grid: React.FC<GridProps> = (props) => {
     const x=selectedCol*W,y=selectedRow*H;
     if(x<el.scrollLeft)el.scrollLeft=x;else if(x+W>el.scrollLeft+el.clientWidth-LEFT)el.scrollLeft=x+W-el.clientWidth+LEFT;
     if(y<el.scrollTop)el.scrollTop=y;else if(y+H>el.scrollTop+el.clientHeight-H)el.scrollTop=y+H-el.clientHeight+H;
-  },[selectedRow,selectedCol]);
+  },[selectedRow,selectedCol,sheetName]);
+  useEffect(() => {
+    const el=container.current, target=highlight?.target;
+    const first=target?.range?.start ?? target?.coord;
+    if (!el || !first) return;
+    // Reveal the first cell of an offscreen trace without moving the selection.
+    const x=first.col*W, y=first.row*H;
+    if(x<el.scrollLeft)el.scrollLeft=x;else if(x+W>el.scrollLeft+el.clientWidth-LEFT)el.scrollLeft=x+W-el.clientWidth+LEFT;
+    if(y<el.scrollTop)el.scrollTop=y;else if(y+H>el.scrollTop+el.clientHeight-H)el.scrollTop=y+H-el.clientHeight+H;
+  },[highlight]);
   const begin = (initial?: string) => { if(busy)return;const cell=viewport?.cells[coordToA1(selectedRow,selectedCol)];editing.current=true;setEdit(initial ?? editableCellInput(cell)); };
   const finish = (commit: boolean) => { if(!editing.current)return;editing.current=false;if(commit && edit!==null)onCommitCell(selectedRow,selectedCol,edit);setEdit(null);container.current?.focus(); };
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -53,6 +64,7 @@ export const Grid: React.FC<GridProps> = (props) => {
     e.preventDefault();onSelectCell(Math.max(0,Math.min(totalRows-1,r)),Math.max(0,Math.min(totalCols-1,c)),e.shiftKey&&e.key!=='Tab');
   };
   const rows=Array.from({length:Math.max(0,endRow-startRow+1)},(_,i)=>i+startRow),cols=Array.from({length:Math.max(0,endCol-startCol+1)},(_,i)=>i+startCol);
+
   return <div ref={container} role="grid" aria-label={`${sheetName} worksheet`} aria-busy={busy} tabIndex={0}
     onScroll={e=>setScroll({top:e.currentTarget.scrollTop,left:e.currentTarget.scrollLeft})} onKeyDown={onKeyDown}
     onCopy={e=>{if(!editing.current)props.onCopy(e);}} onPaste={e=>{if(!editing.current&&!busy)props.onPaste(e);}}
@@ -61,13 +73,14 @@ export const Grid: React.FC<GridProps> = (props) => {
       {rows.map(r=>cols.map(c=>{
         const key=coordToA1(r,c),cell=viewport?.cells[key],active=r===selectedRow&&c===selectedCol,selected=containsCell(selection,r,c);
         const style=cell?.style;
-        return <div key={key} role="gridcell" aria-label={key} aria-selected={selected}
+        const traced = traceRange && containsCell(traceRange, r, c) ? highlight?.direction : undefined;
+        return <div key={key} role="gridcell" aria-label={key} aria-selected={selected} data-dependency-highlight={traced}
           onMouseDown={e=>{if(e.button!==0||busy)return;e.preventDefault();if(editing.current)finish(true);dragging.current=true;onSelectCell(r,c,e.shiftKey);container.current?.focus();}}
           onMouseEnter={()=>{if(dragging.current)onSelectCell(r,c,true);}}
           onDoubleClick={()=>{if(active)begin();}}
-          style={{position:'absolute',left:c*W+LEFT,top:r*H+H,width:W,height:H,backgroundColor:cell?.is_staged?'#fffbeb':selected?'#eff6ff':style?.fill??undefined,fontWeight:style?.bold||cell?.is_table_header?'bold':undefined,fontStyle:style?.italic?'italic':undefined}}
+          style={{position:'absolute',left:c*W+LEFT,top:r*H+H,width:W,height:H,backgroundColor:traced==='upstream'?'#ccfbf1':traced==='downstream'?'#ede9fe':cell?.is_staged?'#fffbeb':selected?'#eff6ff':style?.fill??undefined,fontWeight:style?.bold||cell?.is_table_header?'bold':undefined,fontStyle:style?.italic?'italic':undefined}}
           className={`border-r border-b border-slate-200 px-1.5 flex items-center text-xs overflow-hidden cursor-cell ${active?'ring-2 ring-inset ring-blue-500':''} ${cell?.is_error?'text-rose-700':''} ${cell?.is_table_header?'bg-slate-100':''}`}
-          title={cell?.display_text}>{cell?.is_staged&&<span className="text-amber-600 mr-1">●</span>}<span className="truncate">{cell?.display_text??''}</span></div>;
+          title={traced ? (traced === 'upstream' ? 'Upstream dependency' : 'Downstream dependent') + (cell?.display_text ? ': ' + cell.display_text : '') : cell?.display_text}>{cell?.is_staged&&<span className="text-amber-600 mr-1">●</span>}<span className="truncate">{cell?.display_text??''}</span></div>;
       }))}
       {cols.map(c=><div key={`c${c}`} aria-hidden style={{position:'absolute',top:scroll.top,left:c*W+LEFT,width:W,height:H,zIndex:30}} className="bg-slate-100 border-r border-b border-slate-300 text-center text-xs py-1">{colIndexToName(c)}</div>)}
       {rows.map(r=><div key={`r${r}`} aria-hidden style={{position:'absolute',left:scroll.left,top:r*H+H,width:LEFT,height:H,zIndex:30}} className="bg-slate-100 border-r border-b border-slate-300 text-center text-xs py-1">{r+1}</div>)}

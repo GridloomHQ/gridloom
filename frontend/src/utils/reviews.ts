@@ -1,8 +1,13 @@
 import type { EvidenceReference, ReviewRecord } from '../types';
 
+export function questionIsOpen(review: ReviewRecord): boolean {
+  return review.decision === 'Question' && review.question_events?.[review.question_events.length - 1]?.action !== 'Resolved';
+}
+
 export function reviewStatus(review: ReviewRecord): string {
+  if (review.decision === 'Question') return questionIsOpen(review) ? 'Open question' : 'Resolved question';
   if (review.invalidated) return 'Needs re-review';
-  return review.decision === 'Question' ? 'Circled up' : 'Reviewed';
+  return 'Reviewed';
 }
 
 export function validateReview(reviewer: string, decision: 'Reviewed' | 'Question', note: string, evidence: EvidenceReference[]): string | null {

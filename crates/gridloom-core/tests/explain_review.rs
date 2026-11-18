@@ -100,7 +100,18 @@ fn save_open_preserves_evidence_history_and_loads_legacy_without_reviews() {
     let mut question = request(&wb, "Sheet1", "C1");
     question.decision = ReviewDecision::Question;
     question.note = "Confirm the growth assumption".into();
-    wb.record_review(question).unwrap();
+    let q = wb.record_review(question).unwrap();
+    wb.transition_question(
+        q.id,
+        gridloom_core::review::QuestionTransitionRequest {
+            action: gridloom_core::review::QuestionAction::Resolved,
+            actor: "Controller".into(),
+            note: "Growth assumption confirmed".into(),
+            expected_snapshot: wb.explain_cell("Sheet1", coord("C1")).unwrap().snapshot,
+            expected_last_event_id: None,
+        },
+    )
+    .unwrap();
     wb.record_review(request(&wb, "Sheet1", "C1")).unwrap();
     wb.save_to_file(&path).unwrap();
     let loaded = Workbook::open_from_file(&path).unwrap();

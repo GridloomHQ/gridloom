@@ -1,5 +1,6 @@
-import {
-  ReviewPack, CellCoord, CellRange, CellStyle, EvidenceUpload, ReviewComparison, SourceDrilldown, ClosePeriod, CloseStatus,
+import type {
+  ReviewPack, CellCoord, DependencyNavigation, QuestionTransitionInput,
+  ConfigureCloseInput, PostAdjustmentInput, AdjustmentImpact, CellRange, CellStyle, EvidenceUpload, DependencyTarget, ReviewComparison, SourceDrilldown, ClosePeriod, CloseStatus,
   AuditRecord,
   CellExplanation,
   ReviewRecord,
@@ -24,6 +25,18 @@ import {
 
 const BASE_URL = '';
 const wireRange = (range: CellRange) => ({ start_row: range.start.row, start_col: range.start.col, end_row: range.end.row, end_col: range.end.col });
+type WireRange = ReturnType<typeof wireRange>;
+type WireDependencyTarget = Omit<DependencyTarget, 'range'> & { range: WireRange | null };
+type WireDependencyNavigation = Omit<DependencyNavigation, 'upstream' | 'downstream'> & {
+  upstream: WireDependencyTarget[]; downstream: WireDependencyTarget[];
+};
+const dependencyTarget = (target: WireDependencyTarget): DependencyTarget => ({
+  ...target,
+  range: target.range ? {
+    start: {row:target.range.start_row,col:target.range.start_col},
+    end: {row:target.range.end_row,col:target.range.end_col},
+  } : null,
+});
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${url}`, {
@@ -56,6 +69,8 @@ export const api = {
   listClosePeriods: () => fetchJson<ClosePeriod[]>('/api/close/periods'),
   importTrialBalance: (request: {period:string,csv:string,mappings?:Record<string,string>}) => fetchJson<ClosePeriod>('/api/close/import', {method:'POST',body:JSON.stringify(request)}),
   mapCloseAccounts: (request: {period_id:string,mappings:Record<string,string>}) => fetchJson<ClosePeriod>('/api/close/map', {method:'POST',body:JSON.stringify(request)}),
+  configureClose: (request: ConfigureCloseInput) => fetchJson<ClosePeriod>('/api/close/configure', {method:'POST',body:JSON.stringify(request)}),
+  postCloseAdjustment: (request: PostAdjustmentInput) => fetchJson<AdjustmentImpact>('/api/close/adjustments', {method:'POST',body:JSON.stringify(request)}),
   getCloseStatus: (id: string) => fetchJson<CloseStatus>(`/api/close/${encodeURIComponent(id)}/status`),
   rollforwardClose: (request: {source_period_id:string,period:string,csv:string}) => fetchJson<ClosePeriod>('/api/close/rollforward', {method:'POST',body:JSON.stringify(request)}),
   exportReviewPack: (id: string) => fetchJson<ReviewPack>(`/api/close/${encodeURIComponent(id)}/pack`),
@@ -64,6 +79,12 @@ export const api = {
   getSourceDrilldown: (name: string, offset = 0, limit = 50) => fetchJson<SourceDrilldown>(`/api/sources/${encodeURIComponent(name)}/drilldown?offset=${offset}&limit=${limit}`),
   explainCell: (sheet_name: string, row: number, col: number) =>
     fetchJson<CellExplanation>('/api/cells/explain', { method: 'POST', body: JSON.stringify({ sheet_name, row, col }) }),
+  navigateDependencies: async (sheet_name: string, row: number, col: number): Promise<DependencyNavigation> => {
+    const result = await fetchJson<WireDependencyNavigation>('/api/cells/dependencies', { method: 'POST', body: JSON.stringify({ sheet_name, row, col }) });
+    return {...result, upstream:result.upstream.map(dependencyTarget), downstream:result.downstream.map(dependencyTarget)};
+  },
+  getOpenQuestions: () => fetchJson<ReviewRecord[]>('/api/questions'),
+  transitionQuestion: (id: string, request: QuestionTransitionInput) => fetchJson<ReviewRecord>(`/api/questions/${encodeURIComponent(id)}/transition`, {method:'POST',body:JSON.stringify(request)}),
   getReviews: () => fetchJson<ReviewRecord[]>('/api/reviews'),
   saveReview: (data: ReviewInput) =>
     fetchJson<ReviewRecord>('/api/reviews', { method: 'POST', body: JSON.stringify(data) }),

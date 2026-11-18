@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 (preview)
+
+- Circle up questions on erroneous, blank or incomplete calculations. Resolve or reopen with a captured state and dated note, and see outstanding questions across the workbook. Resolution is not a sign-off.
+- Walk direct upstream inputs and downstream formula consumers with range/table grouping, worksheet highlights and a navigation trail.
+- Keep the trial-balance import unchanged; post balanced journals with rationale and retained support. See imported, adjusted and reported balances, affected report values and invalidated sign-offs.
+- Define a working paper's entity, currency, units and report hierarchy. Roll forward a fresh import with matching mappings, not adjustments or sign-offs.
+- Compare captured changes by accounting category while retaining exact before/after fields. Review packs retain the report structure, adjustment evidence and question history.
+
 ## 0.3.0 (preview)
 
 - Monthly trial-balance CSV import, account mappings, generated P&L, live reconciliation/review queue, period rollforward and JSON review packs.

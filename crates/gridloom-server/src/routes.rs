@@ -6,11 +6,14 @@ use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use gridloom_core::chart::ChartDefinition;
-use gridloom_core::close::{ImportTrialBalanceRequest, MapAccountsRequest, RollforwardRequest};
+use gridloom_core::close::{
+    ConfigureCloseRequest, ImportTrialBalanceRequest, MapAccountsRequest, PostAdjustmentRequest,
+    RollforwardRequest,
+};
 use gridloom_core::db::EngineKind;
 use gridloom_core::lineage::analyze_lineage;
 use gridloom_core::pivot::PivotDefinition;
-use gridloom_core::review::{EvidenceUpload, ReviewRequest};
+use gridloom_core::review::{EvidenceUpload, QuestionTransitionRequest, ReviewRequest};
 use gridloom_core::spreadsheet::CellStyle;
 use gridloom_core::value::{CellCoord, CellRange, Value};
 use gridloom_core::virtual_view::ViewportRequest;
@@ -41,6 +44,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/close/periods", get(list_close_periods))
         .route("/api/close/import", post(import_trial_balance))
         .route("/api/close/map", post(map_close_accounts))
+        .route("/api/close/configure", post(configure_close))
+        .route("/api/close/adjustments", post(post_close_adjustment))
         .route("/api/close/rollforward", post(rollforward_close))
         .route("/api/close/{id}/status", get(close_status))
         .route("/api/close/{id}/pack", get(export_review_pack))
@@ -63,6 +68,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/cells/set", post(set_cell))
         .route("/api/cells/viewport", post(get_viewport))
         .route("/api/cells/explain", post(explain_cell))
+        .route("/api/cells/dependencies", post(navigate_dependencies))
+        .route("/api/questions", get(list_open_questions))
+        .route("/api/questions/{id}/transition", post(transition_question))
         .route("/api/reviews", get(list_reviews).post(record_review))
         .route("/api/reviews/attached", post(record_attached_review))
         .route("/api/reviews/{id}/compare", get(compare_review))
@@ -565,6 +573,33 @@ async fn explain_cell(
     Ok(Json(explanation))
 }
 
+async fn navigate_dependencies(
+    State(state): State<AppState>,
+    Json(req): Json<ExplainCellRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let wb = state.workbook.read().await;
+    Ok(Json(
+        wb.navigate_dependencies(&req.sheet_name, CellCoord::new(req.row, req.col))
+            .map_err(|e| bad_request(e.message()))?,
+    ))
+}
+
+async fn list_open_questions(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.workbook.read().await.open_questions())
+}
+
+async fn transition_question(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<QuestionTransitionRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let mut wb = state.workbook.write().await;
+    Ok(Json(
+        wb.transition_question(id, req)
+            .map_err(|message| (StatusCode::CONFLICT, message))?,
+    ))
+}
+
 async fn record_review(
     State(state): State<AppState>,
     Json(req): Json<ReviewRequest>,
@@ -791,6 +826,45 @@ async fn map_close_accounts(
             .map_err(bad_request)?,
     ))
 }
+async fn configure_close(
+    State(state): State<AppState>,
+    Json(req): Json<ConfigureCloseRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let mut wb = state.workbook.write().await;
+    Ok(Json(wb.configure_close(req).map_err(bad_request)?))
+}
+
+async fn post_close_adjustment(
+    State(state): State<AppState>,
+    Json(req): Json<PostAdjustmentRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let mut wb = state.workbook.write().await;
+    let period_id = req.period_id;
+    let before = wb.close_status(period_id).map_err(bad_request)?;
+    let current: std::collections::HashSet<_> = wb
+        .reviews
+        .iter()
+        .filter(|record| {
+            !record.invalidated
+                && record.decision == gridloom_core::review::ReviewDecision::Reviewed
+        })
+        .map(|record| record.id)
+        .collect();
+    let adjustment = wb.post_close_adjustment(req).map_err(bad_request)?;
+    let after = wb.close_status(period_id).map_err(bad_request)?;
+    let after_sheet = &after.period.sheet_name;
+    let invalidated_reviews: Vec<_> = wb.reviews.iter()
+        .filter(|record| record.invalidated && current.contains(&record.id))
+        .map(|record| serde_json::json!({"id":record.id,"sheet_name":record.sheet_name,"coord":record.coord,"reviewer":record.reviewer})).collect();
+    let affected_lines: Vec<_> = after.queue.iter().zip(before.queue.iter())
+        .filter(|(after, before)| after.value != before.value || after.status != before.status
+            || wb.reviews.iter().any(|review| &review.sheet_name == after_sheet && review.coord == after.coord && review.invalidated && current.contains(&review.id)))
+        .map(|(after, before)| serde_json::json!({"label":after.label,"coord":after.coord,"before":before.value,"after":after.value,"before_status":before.status,"after_status":after.status})).collect();
+    Ok(Json(
+        serde_json::json!({"adjustment":adjustment,"affected_lines":affected_lines,"invalidated_reviews":invalidated_reviews}),
+    ))
+}
+
 async fn rollforward_close(
     State(state): State<AppState>,
     Json(req): Json<RollforwardRequest>,

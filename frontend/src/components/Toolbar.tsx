@@ -1,3 +1,4 @@
+import { version } from '../../package.json';
 import React from 'react';
 import {
   Database,
@@ -20,6 +21,7 @@ interface ToolbarProps {
   busy: boolean;
   onUndo: () => void; onRedo: () => void; onFillDown: () => void; onFillRight: () => void; onOpenClose: () => void;
   onOpenExplain: () => void;
+  onOpenQuestions: () => void;
   onOpenSchemaBrowser: () => void;
   onOpenQueryEditor: () => void;
   onOpenInsertTable: () => void;
@@ -39,6 +41,7 @@ interface ToolbarProps {
 export const Toolbar: React.FC<ToolbarProps> = ({
   busy, onUndo, onRedo, onFillDown, onFillRight, onOpenClose,
   onOpenExplain,
+  onOpenQuestions,
   onOpenSchemaBrowser,
   onOpenQueryEditor,
   onOpenInsertTable,
@@ -64,7 +67,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           </div>
           <span>Gridloom</span>
           <span className="text-[10px] px-1 py-0.2 bg-emerald-100 text-emerald-800 rounded font-semibold ml-0.5">
-            0.3 preview
+            {version.split('.').slice(0, 2).join('.')} preview
           </span>
         </div>
 
@@ -196,6 +199,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </button>
       </div>
 
+      <button disabled={busy} onClick={onOpenQuestions} className="px-3 py-1 rounded bg-amber-100 text-amber-900 font-semibold hover:bg-amber-200">
+        Open questions
+      </button>
       <button disabled={busy} onClick={onOpenExplain} className="px-3 py-1 rounded bg-indigo-100 text-indigo-900 font-semibold hover:bg-indigo-200">
         Explain &amp; Review
       </button>
