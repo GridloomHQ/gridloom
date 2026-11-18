@@ -109,6 +109,10 @@ jobs:
         working-directory: frontend
         run: node tests/function-completion-smoke.mjs
 
+      - name: Real browser rounding correctness
+        working-directory: frontend
+        run: node tests/rounding-smoke.mjs
+
       - name: Native window-open smoke
         if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
         run: scripts/native-window-smoke.sh
@@ -128,6 +132,7 @@ jobs:
             target/formula-reference-smoke/*
             target/lookup-smoke/*
             target/function-completion-smoke/*
+            target/rounding-smoke/*
 
   build-frontend:
     name: Frontend TypeScript & Vite Build

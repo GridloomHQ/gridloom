@@ -1,6 +1,6 @@
 [package]
 name = "gridloom-server"
-version = "0.5.7"
+version = "0.5.8"
 edition = "2021"
 description = "Embedded HTTP/JSON local server for Gridloom desktop engine"
 license = "MIT OR Apache-2.0"

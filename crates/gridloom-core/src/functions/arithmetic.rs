@@ -146,78 +146,79 @@ pub fn sqrt(args: &[Value]) -> Result<Value, CellError> {
     }
 }
 
-pub fn round(args: &[Value]) -> Result<Value, CellError> {
-    if args.is_empty() {
-        return Err(CellError::Value);
-    }
-    let n = args[0].to_decimal()?;
+#[derive(Clone, Copy)]
+enum DecimalRounding {
+    HalfEven,
+    AwayFromZero,
+    TowardZero,
+}
+
+/// Quantize the exact decimal coefficient, never a scaled/rounded Decimal quotient.
+/// All powers are bounded before conversion, including for i64::MIN digits.
+fn round_decimal(args: &[Value], mode: DecimalRounding) -> Result<Value, CellError> {
+    let n = args.first().ok_or(CellError::Value)?.to_decimal()?;
+    // Preserve existing coercion: numeric fractional digits truncate toward zero.
     let digits = if args.len() > 1 { args[1].to_i64()? } else { 0 };
-    if digits >= 0 {
-        let d = digits as u32;
-        Ok(Value::Decimal(n.round_dp(d)))
-    } else {
-        let factor = Decimal::from(10i64.pow((-digits) as u32));
-        let scaled = (n / factor).round();
-        Ok(Value::Decimal(scaled * factor))
+    if digits >= i64::from(n.scale()) {
+        return Ok(Value::Decimal(n));
     }
+    let coefficient = n.mantissa().abs(); // Decimal coefficients are at most 96 bits.
+    let drop = i128::from(n.scale()) - i128::from(digits);
+    let rounded = if drop > 29 {
+        // The coefficient is <10^29, hence strictly below half of 10^drop.
+        match mode {
+            DecimalRounding::AwayFromZero if coefficient != 0 => 1,
+            _ => 0,
+        }
+    } else {
+        let divisor = 10i128.pow(drop as u32);
+        let quotient = coefficient / divisor;
+        let remainder = coefficient % divisor;
+        let increment = match mode {
+            DecimalRounding::HalfEven => {
+                remainder > divisor / 2 || (remainder == divisor / 2 && quotient % 2 != 0)
+            }
+            DecimalRounding::AwayFromZero => remainder != 0,
+            DecimalRounding::TowardZero => false,
+        };
+        quotient + i128::from(increment)
+    };
+    let (coefficient, scale) = if digits >= 0 {
+        (rounded, digits as u32) // digits < original scale <=28
+    } else if rounded == 0 {
+        (0, 0)
+    } else {
+        let power = -i128::from(digits);
+        if power > 29 {
+            return Err(CellError::Num);
+        }
+        (
+            rounded
+                .checked_mul(10i128.pow(power as u32))
+                .ok_or(CellError::Num)?,
+            0,
+        )
+    };
+    let signed = if n.is_sign_negative() {
+        -coefficient
+    } else {
+        coefficient
+    };
+    Decimal::try_from_i128_with_scale(signed, scale)
+        .map(Value::Decimal)
+        .map_err(|_| CellError::Num)
+}
+
+pub fn round(args: &[Value]) -> Result<Value, CellError> {
+    round_decimal(args, DecimalRounding::HalfEven)
 }
 
 pub fn roundup(args: &[Value]) -> Result<Value, CellError> {
-    if args.is_empty() {
-        return Err(CellError::Value);
-    }
-    let n = args[0].to_decimal()?;
-    let digits = if args.len() > 1 { args[1].to_i64()? } else { 0 };
-    if digits >= 0 {
-        let factor = Decimal::from(10i64.pow(digits as u32));
-        let sign = if n < Decimal::ZERO {
-            -Decimal::ONE
-        } else {
-            Decimal::ONE
-        };
-        let abs_scaled = (n * factor).abs();
-        let ceil = abs_scaled.ceil();
-        Ok(Value::Decimal(ceil * sign / factor))
-    } else {
-        let factor = Decimal::from(10i64.pow((-digits) as u32));
-        let sign = if n < Decimal::ZERO {
-            -Decimal::ONE
-        } else {
-            Decimal::ONE
-        };
-        let abs_scaled = (n / factor).abs();
-        let ceil = abs_scaled.ceil();
-        Ok(Value::Decimal(ceil * sign * factor))
-    }
+    round_decimal(args, DecimalRounding::AwayFromZero)
 }
 
 pub fn rounddown(args: &[Value]) -> Result<Value, CellError> {
-    if args.is_empty() {
-        return Err(CellError::Value);
-    }
-    let n = args[0].to_decimal()?;
-    let digits = if args.len() > 1 { args[1].to_i64()? } else { 0 };
-    if digits >= 0 {
-        let factor = Decimal::from(10i64.pow(digits as u32));
-        let sign = if n < Decimal::ZERO {
-            -Decimal::ONE
-        } else {
-            Decimal::ONE
-        };
-        let abs_scaled = (n * factor).abs();
-        let floor = abs_scaled.floor();
-        Ok(Value::Decimal(floor * sign / factor))
-    } else {
-        let factor = Decimal::from(10i64.pow((-digits) as u32));
-        let sign = if n < Decimal::ZERO {
-            -Decimal::ONE
-        } else {
-            Decimal::ONE
-        };
-        let abs_scaled = (n / factor).abs();
-        let floor = abs_scaled.floor();
-        Ok(Value::Decimal(floor * sign * factor))
-    }
+    round_decimal(args, DecimalRounding::TowardZero)
 }
 
 pub fn int_fn(args: &[Value]) -> Result<Value, CellError> {
@@ -229,20 +230,7 @@ pub fn int_fn(args: &[Value]) -> Result<Value, CellError> {
 }
 
 pub fn trunc(args: &[Value]) -> Result<Value, CellError> {
-    if args.is_empty() {
-        return Err(CellError::Value);
-    }
-    let n = args[0].to_decimal()?;
-    let digits = if args.len() > 1 { args[1].to_i64()? } else { 0 };
-    if digits >= 0 {
-        let factor = Decimal::from(10i64.pow(digits as u32));
-        let truncated = (n * factor).trunc() / factor;
-        Ok(Value::Decimal(truncated))
-    } else {
-        let factor = Decimal::from(10i64.pow((-digits) as u32));
-        let truncated = (n / factor).trunc() * factor;
-        Ok(Value::Decimal(truncated))
-    }
+    round_decimal(args, DecimalRounding::TowardZero)
 }
 
 pub fn ceiling_math(args: &[Value]) -> Result<Value, CellError> {

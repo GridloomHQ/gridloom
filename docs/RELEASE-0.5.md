@@ -89,3 +89,14 @@ The formula bar now suggests all 95 names and aliases accepted by this engine, f
 Completion preserves the rest of the formula and excludes quoted text, sheet/table qualifiers, structured references and cell references. Existing F4 reference locking and failed-commit draft retention remain available. If the catalogue cannot load, manual entry still works. This is formula-bar function-name completion, not in-cell completion, argument validation, named-range completion or a claim of Excel function compatibility.
 
 The interaction follows the explicit, nested-formula completion pattern documented in [Microsoft’s Formula AutoComplete guidance](https://support.microsoft.com/en-us/excel/use-formula-autocomplete), while advertising only Gridloom’s own supported function names.
+
+
+## 0.5.8: Rounding without silent underflow or crashes
+
+`ROUND`, `ROUNDUP`, `ROUNDDOWN` and `TRUNC` now quantize decimal coefficients directly, without overflowing integer powers or dividing tiny nonzero values into zero before rounding. Extreme precision arguments do not wrap. Results outside the supported decimal range return `#NUM!`; requesting more decimal places than a value already has leaves that value unchanged.
+
+`ROUND` retains Gridloom’s existing **half-even** tie rule: `ROUND(1.25,1)` is `1.2`, while `ROUND(1.35,1)` is `1.4`. This is not a claim of Excel rounding parity. `ROUNDUP` rounds away from zero, while `ROUNDDOWN` and `TRUNC` round toward zero. Negative precision rounds to positions left of the decimal point. Existing argument coercion is unchanged, including truncating numeric fractional precision arguments toward zero.
+
+Saved workbooks are recalculated on open. Previously wrong cached formula results may therefore change, and existing review invalidation safeguards remain in force; old evidence is not silently treated as approval of a corrected number. These fixes are limited to the four named rounding functions, not a complete numerical audit.
+
+The retained tie behavior follows [Rust Decimal’s nearest-even rounding](https://docs.rs/rust_decimal/latest/rust_decimal/enum.RoundingStrategy.html). Directional rounding follows the familiar [away-from-zero](https://support.microsoft.com/en-us/excel/functions/roundup-function) and [toward-zero](https://support.microsoft.com/en-us/excel/functions/rounddown-function) definitions.

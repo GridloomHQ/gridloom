@@ -1,3 +1,9 @@
+# 0.5.8
+
+- Exact mantissa-based ROUND, ROUNDUP, ROUNDDOWN and TRUNC avoid extreme-precision overflow, wrapping and underflow.
+- Unrepresentable rounded results return `#NUM!` rather than crashing or silently losing a nonzero result.
+- Existing half-even ROUND behavior is retained and explicitly documented.
+
 # 0.5.7
 
 - Formula-bar autocomplete uses the engine’s authoritative catalogue of supported functions and aliases.
