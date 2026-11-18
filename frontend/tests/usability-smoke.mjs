@@ -17,7 +17,7 @@ try {
  await page.goto(base);const grid=()=>page.getByRole('grid');const cell=name=>page.getByRole('gridcell',{name,exact:true});const address=page.getByRole('textbox',{name:'Go to cell',exact:true});
  const idle=()=>page.waitForFunction(()=>document.querySelector('[role="grid"]')?.getAttribute('aria-busy')==='false');
  const selected=async name=>{await page.waitForFunction(name=>document.querySelector('input[aria-label="Go to cell"]')?.value===name,name);assert.equal(await cell(name).getAttribute('aria-selected'),'true');};
- const go=async name=>{await address.fill(name);await address.press('Enter');await selected(name);};
+ const go=async name=>{await address.focus();await idle();await address.fill(name);await address.press('Enter');await selected(name);};
  const edit=async(name,value,key='Enter')=>{await cell(name).dblclick();const input=page.getByRole('textbox',{name:`Edit ${name}`,exact:true});await input.fill(value);await input.press(key);await idle();};
  await grid().waitFor();await edit('A1','12');await selected('A2');await grid().press('Shift+Enter');await selected('A1');
  await edit('A1','13','Tab');await selected('B1');await grid().press('Shift+Tab');await selected('A1');
@@ -29,9 +29,9 @@ try {
  // A failed draft belongs to its original cell, never to a later Go to target.
  await page.route('**/api/cells/set',failure);await cell('A1').dblclick();input=page.getByRole('textbox',{name:'Edit A1',exact:true});await input.fill('must not reach B2');await input.press('Enter');await idle();await page.getByText(/Error:.*Synthetic write failure/).waitFor();
  assert.equal(await input.inputValue(),'must not reach B2');
- // Focusing the address box may retry the failed draft on blur. Let that failure
- // settle before navigating, and prove navigation itself cannot submit to B2.
- await address.fill('B2');await idle();const beforeNavigate=attempts;await address.press('Enter');await selected('B2');
+ // Focusing recovery controls must not retry an unchanged failed draft on blur.
+ // Navigation must never submit the draft to its new target.
+ const beforeFocus=attempts;await address.focus();await idle();assert.equal(attempts,beforeFocus,'Focusing Go to must not retry the failed draft');await address.fill('B2');assert.equal(await address.inputValue(),'B2');const beforeNavigate=attempts;await address.press('Enter');await selected('B2');
  assert.equal(await page.getByRole('textbox',{name:'Edit B2',exact:true}).count(),0);
  assert.equal(await page.getByRole('textbox',{name:'Edit A1',exact:true}).count(),0);
  assert.equal(attempts,beforeNavigate);assert.equal(await cell('B2').innerText(),'');assert.equal(await cell('A1').innerText(),'14');
