@@ -21,11 +21,14 @@ try {
  const go=async name=>{await address.fill(name);await address.press('Enter');await cell(name).and(page.locator('[aria-selected="true"]')).waitFor();await page.waitForFunction(()=>!document.querySelector('input[aria-label="Formula input"]')?.disabled);};
  const text=async(name,expected)=>{await cell(name).filter({hasText:expected}).waitFor();assert.equal(await cell(name).innerText(),expected);};
  await grid().waitFor();await text('B1','4');const initialWidth=(await cell('B1').boundingBox()).width;
+ // Establish the existing formula-aware clipboard representation before changing presentation.
+ const copyReady=page.waitForResponse(r=>r.url().endsWith('/api/ranges/capture'));await go('B1');await(await copyReady).finished();
+ const copySelection=async()=>{await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));return grid().evaluate(el=>{const clipboardData=new DataTransfer();el.dispatchEvent(new ClipboardEvent('copy',{bubbles:true,clipboardData}));return clipboardData.getData('text/plain');});};
+ const baselineCopy=await copySelection();assert.equal(baselineCopy,'=A1*2');
  await toggle.click();await idle();assert.equal(await toggle.isChecked(),true);await text('B1','=A1*2');await text('C1','=1/0');await text('D1','=SEQUENCE(2,1)');await text('D2','2');await text('E1','literal text');assert.equal((await cell('B1').boundingBox()).width,initialWidth);assert.match(await cell('B1').getAttribute('title'),/Evaluated value: 4/);assert.match(await cell('C1').getAttribute('title'),/Evaluated value: #DIV\/0!/);
- const copyReady=page.waitForResponse(r=>r.url().endsWith('/api/ranges/capture'));await go('B1');await(await copyReady).finished();const summary=page.getByRole('region',{name:'Selection summary'});await summary.getByLabel('Selection sum',{exact:true}).filter({hasText:'4'}).waitFor();assert.equal(await summary.getByLabel('Selection sum',{exact:true}).innerText(),'4');
- // Copy still uses the cached values representation rather than on-screen formulas.
- await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
- const copied=await grid().evaluate(el=>{const clipboardData=new DataTransfer();el.dispatchEvent(new ClipboardEvent('copy',{bubbles:true,clipboardData}));return clipboardData.getData('text/plain');});assert.equal(copied,'4');
+ const summary=page.getByRole('region',{name:'Selection summary'});await summary.getByLabel('Selection sum',{exact:true}).filter({hasText:'4'}).waitFor();assert.equal(await summary.getByLabel('Selection sum',{exact:true}).innerText(),'4');
+ // Presentation must not change the existing formula-aware clipboard representation.
+ assert.equal(await copySelection(),baselineCopy);
  await page.getByRole('button',{name:'Find (Ctrl+F)',exact:true}).click();const find=page.getByRole('complementary',{name:'Find in workbook'});await find.getByLabel('Find text or number').fill('4');await find.getByLabel('Match entire cell',{exact:true}).check();await find.getByRole('button',{name:'Find all',exact:true}).click();await find.getByRole('button').filter({hasText:'Sheet1!B1'}).waitFor();await find.getByLabel('Find look in').selectOption('formulas');await find.getByLabel('Find text or number').fill('=A1*2');await find.getByRole('button',{name:'Find all',exact:true}).click();await find.getByRole('button').filter({hasText:'Sheet1!B1'}).waitFor();await find.getByRole('button',{name:'Close find'}).click();
  // Neither a grid draft nor a formula-bar draft may be committed by the label.
  let cellWrites=0;const countWrite=r=>{if(r.url().endsWith('/api/cells/set'))cellWrites++;};page.on('request',countWrite);
