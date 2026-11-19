@@ -44,6 +44,8 @@ To check where a balance comes from, select a cell and choose **Trace balance**.
 
 An index on the posting date (binary collation) and the primary key speeds ordered browsing. Scroll within a block, use the next/previous block controls, or jump directly to a row. Forward scrolling can seek from the current page; a distant jump still skips earlier rows in SQLite. If the source changes, reload the view so rows and totals agree. This read-only view does not write to the database or expose imported worksheet cells to formulas.
 
+For a sample with no real accounting data, run `python3 scripts/make-ledger-demo.py demo.sqlite` from the source checkout. It creates four million synthetic entries (roughly 270 MiB) and prints an account/date range and reference total for comparison. Connect the file and choose the `entries` table, `posted` date, `amount_cents` amount and `account` code. Use `--rows 10000` for a smaller file.
+
 ### Explain and review a calculation
 
 Use **Explain & Review** to inspect a cell's formula, captured inputs and available source-row provenance. Follow upstream inputs and downstream consumers, compare observed states, and attach supporting files with retained versions.

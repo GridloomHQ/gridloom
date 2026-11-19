@@ -1,3 +1,10 @@
+# 0.6.0
+
+- Browse multi-million-row SQLite journals without importing them into a worksheet. Counts and totals apply to all matching entries, and a changed source requires a reload.
+- Trace a worksheet balance to an account and date range, reconcile the exact difference, and save the trace link with the workbook.
+- Recover committed edits from private local autosave files without changing the named workbook or writing back to a database.
+- Generate a synthetic four-million-entry demo ledger with an exact reference total for a sample reconciliation.
+
 # 0.5.12
 
 - CEILING.MATH and FLOOR.MATH round exact remainders rather than a potentially rounded or overflowing quotient.
