@@ -77,7 +77,7 @@ pub fn compute_pivot(
                 let mut sum = Decimal::ZERO;
                 for v in &vals {
                     if let Ok(d) = v.to_decimal() {
-                        sum += d;
+                        sum = sum.checked_add(d).ok_or(CellError::Num)?;
                     }
                 }
                 Value::Decimal(sum)
@@ -87,7 +87,7 @@ pub fn compute_pivot(
                 let mut count = 0;
                 for v in &vals {
                     if let Ok(d) = v.to_decimal() {
-                        sum += d;
+                        sum = sum.checked_add(d).ok_or(CellError::Num)?;
                         count += 1;
                     }
                 }
@@ -129,4 +129,23 @@ pub fn compute_pivot(
         headers,
         rows: result_rows,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checked_aggregation_reports_overflow_without_panic() {
+        let def = PivotDefinition {
+            name: "Test".into(),
+            source_table: "Ledger".into(),
+            row_fields: vec![],
+            col_fields: vec![],
+            value_field: "Amount".into(),
+            aggregation: PivotAggregation::Sum,
+        };
+        let rows = [vec![Value::Decimal(Decimal::MAX)], vec![Value::Decimal(Decimal::ONE)]];
+        assert!(matches!(compute_pivot(&def, &["Amount".into()], &rows), Err(CellError::Num)));
+    }
 }

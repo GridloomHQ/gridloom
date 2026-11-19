@@ -37,6 +37,7 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route("/api/sheets", post(add_sheet))
         .route("/api/sheets/select", post(select_sheet))
+        .route("/api/sheets/insert-rows", post(crate::row_insert::insert_rows))
         .route("/api/sheets/rename", post(rename_sheet))
         .route("/api/sheets/column-width", post(set_column_width))
         .route("/api/sheets/freeze", post(set_freeze_panes))
@@ -45,6 +46,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/ranges/read", post(read_range))
         .route("/api/ranges/summary", post(selection_summary))
         .route("/api/ranges/capture", post(capture_range))
+        .route("/api/ranges/sort-filter", post(crate::range_view::sort_filter))
         .route("/api/ranges/format", post(format_range))
         .route("/api/ranges/format-attribute", post(format_range_attribute))
         .route("/api/ranges/copy", post(copy_range))
@@ -101,6 +103,7 @@ pub fn create_router(state: AppState) -> Router {
         // Pivots & Charts
         .route("/api/pivots", get(list_pivots).post(save_pivot))
         .route("/api/pivots/{name}/data", get(get_pivot_data))
+        .route("/api/pivots/refresh", post(refresh_pivot_data))
         .route("/api/charts", get(list_charts).post(save_chart))
         .route("/api/charts/{id}/data", get(get_chart_data))
         // Performance Acceptance Benchmark Runner
@@ -426,33 +429,55 @@ async fn get_viewport(
     Ok(Json(vp))
 }
 
+// Request decimals must be exact: Decimal's general-purpose deserializer can round.
+struct ExactStagingValue(Value);
+
+impl<'de> Deserialize<'de> for ExactStagingValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = serde_json::Value::deserialize(deserializer)?;
+        if wire.get("type").and_then(|value| value.as_str()) == Some("Decimal") {
+            let raw = wire.get("value").and_then(|value| value.as_str())
+                .ok_or_else(|| serde::de::Error::custom("Staged decimals must be exact strings."))?;
+            return rust_decimal::Decimal::from_str_exact(raw)
+                .map(|value| Self(Value::Decimal(value)))
+                .map_err(|_| serde::de::Error::custom("The staged decimal exceeds exact representable precision."));
+        }
+        serde_json::from_value(wire).map(Self).map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Deserialize)]
 struct StageEditRequest {
     connection_name: String,
     table_name: String,
     pk_columns: Vec<String>,
-    pk_values: Vec<Value>,
+    pk_values: Vec<ExactStagingValue>,
     column_name: String,
-    original_value: Value,
-    proposed_value: Value,
+    original_value: ExactStagingValue,
+    raw_input: Option<String>,
+    proposed_value: Option<ExactStagingValue>,
 }
 
 async fn stage_edit(
     State(state): State<AppState>,
     Json(req): Json<StageEditRequest>,
-) -> impl IntoResponse {
-    let mut wb = state.workbook.write().await;
-    let id = wb.staged.stage_edit(
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    use gridloom_core::db::input::SqlEditInput;
+    let input = match (req.raw_input, req.proposed_value) {
+        (Some(raw), None) => SqlEditInput::Raw(raw),
+        (None, Some(value)) => SqlEditInput::Typed(value.0),
+        _ => return Err((StatusCode::BAD_REQUEST, "Provide one raw input or explicit typed value.".into())),
+    };
+    let id = state.workbook.write().await.stage_sql_edit(
         req.connection_name,
         req.table_name,
         req.pk_columns,
-        req.pk_values,
+        req.pk_values.into_iter().map(|value| value.0).collect(),
         req.column_name,
-        req.original_value,
-        req.proposed_value,
-    );
-    wb.invalidate_changed_reviews();
-    Json(serde_json::json!({ "status": "staged", "id": id }))
+        req.original_value.0,
+        input,
+    ).map_err(|error| (StatusCode::BAD_REQUEST, error.message().into()))?;
+    Ok(Json(serde_json::json!({ "status": "staged", "id": id })))
 }
 
 async fn list_staged(State(state): State<AppState>) -> impl IntoResponse {
@@ -526,17 +551,25 @@ async fn list_audit_log(State(state): State<AppState>) -> impl IntoResponse {
 
 async fn list_pivots(State(state): State<AppState>) -> impl IntoResponse {
     let wb = state.workbook.read().await;
-    let pivots: Vec<_> = wb.pivots.values().cloned().collect();
+    let mut pivots: Vec<_> = wb.pivots.values().cloned().collect();
+    pivots.sort_by(|a, b| a.name.cmp(&b.name));
     Json(pivots)
 }
 
 async fn save_pivot(
     State(state): State<AppState>,
     Json(def): Json<PivotDefinition>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    if def.name.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Enter a pivot name".into()));
+    }
     let mut wb = state.workbook.write().await;
-    wb.pivots.insert(def.name.clone(), def.clone());
-    Json(serde_json::json!({ "status": "saved", "name": def.name }))
+    let result = wb
+        .preview_pivot(&def)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    let name = def.name.clone();
+    wb.pivots.insert(name.clone(), def);
+    Ok(Json(serde_json::json!({ "status": "saved", "name": name, "result": result })))
 }
 
 async fn get_pivot_data(
@@ -548,6 +581,23 @@ async fn get_pivot_data(
         .compute_pivot_result(&name)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     Ok(Json(res))
+}
+
+#[derive(Deserialize)]
+struct RefreshPivotRequest {
+    name: String,
+}
+
+async fn refresh_pivot_data(
+    State(state): State<AppState>,
+    Json(req): Json<RefreshPivotRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let wb = state.workbook.read_owned().await;
+    let result = tokio::task::spawn_blocking(move || wb.refresh_pivot_result(&req.name))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    Ok(Json(result))
 }
 
 async fn list_charts(State(state): State<AppState>) -> impl IntoResponse {
@@ -718,6 +768,7 @@ struct CopyRangeRequest {
     target: CellCoord,
     expected_values: Option<Vec<Vec<String>>>,
     expected_snapshot: Option<String>,
+    mode: Option<gridloom_core::spreadsheet::PasteMode>,
 }
 #[derive(Deserialize)]
 struct FillRangeRequest {
@@ -771,7 +822,19 @@ async fn copy_range(
     Json(req): Json<CopyRangeRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let mut wb = state.workbook.write().await;
-    if let Some(snapshot) = req.expected_snapshot {
+    if let Some(mode) = req.mode {
+        let snapshot = req
+            .expected_snapshot
+            .ok_or_else(|| bad_request("Paste Special needs a copied worksheet selection."))?;
+        wb.paste_special(
+            &req.sheet_name,
+            req.range,
+            &req.target_sheet,
+            req.target,
+            &snapshot,
+            mode,
+        )
+    } else if let Some(snapshot) = req.expected_snapshot {
         wb.copy_range_snapshot_checked(
             &req.sheet_name,
             req.range,

@@ -1,4 +1,5 @@
 pub mod duckdb;
+pub mod input;
 pub mod security;
 pub mod sqlite;
 

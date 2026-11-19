@@ -120,6 +120,22 @@ impl SqliteEngine {
         })
     }
 
+    pub(crate) fn check_column_writable(&self, table: &str, column: &str) -> Result<(), CellError> {
+        let conn = self.conn.lock().unwrap();
+        let hidden = conn.query_row(
+            "SELECT x.hidden FROM pragma_table_xinfo(?) x
+             JOIN sqlite_schema s ON s.name = ?2 COLLATE NOCASE AND s.type = 'table'
+             WHERE x.name = ?3 COLLATE NOCASE",
+            rusqlite::params![table, table, column],
+            |row| row.get::<_, i32>(0),
+        );
+        match hidden {
+            Ok(0) => Ok(()),
+            Ok(_) | Err(rusqlite::Error::QueryReturnedNoRows) => Err(CellError::Sql(format!("{column}: generated/hidden columns and views are read-only."))),
+            Err(err) => Err(CellError::Sql(format!("Unable to verify column {column}: {err}"))),
+        }
+    }
+
     pub fn execute_read_query(
         &self,
         sql: &str,

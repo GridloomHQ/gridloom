@@ -171,7 +171,8 @@ where
             SelectItem::ExprWithAlias { expr, alias } => {
                 let alias_name = alias.value.clone();
                 match expr {
-                    Expr::Identifier(ident) => {
+                    // The current writeback address is a base-column name, not an alias.
+                    Expr::Identifier(ident) if alias_name.eq_ignore_ascii_case(&ident.value) => {
                         let col_name = ident.value.clone();
                         if let Some(&is_pk) = base_col_set.get(&col_name.to_lowercase()) {
                             editable_columns.push(alias_name);

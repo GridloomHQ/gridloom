@@ -3,7 +3,8 @@ use crate::error::CellError;
 use crate::value::{CellCoord, CellRange, Value};
 use rust_decimal::Decimal;
 use std::iter::Peekable;
-use std::str::Chars;
+use std::ops::Range;
+use std::str::CharIndices;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
@@ -41,10 +42,23 @@ pub enum Token {
     Eof,
 }
 
+struct FormulaChars<'a>(Peekable<CharIndices<'a>>);
+impl FormulaChars<'_> {
+    fn peek(&mut self) -> Option<&char> {
+        self.0.peek().map(|(_, ch)| ch)
+    }
+    fn next(&mut self) -> Option<char> {
+        self.0.next().map(|(_, ch)| ch)
+    }
+    fn byte_offset(&mut self, length: usize) -> usize {
+        self.0.peek().map_or(length, |(at, _)| *at)
+    }
+}
+
 pub struct Lexer<'a> {
-    chars: Peekable<Chars<'a>>,
-    #[allow(dead_code)]
+    chars: FormulaChars<'a>,
     input: &'a str,
+    original_offset: usize,
 }
 
 impl<'a> Lexer<'a> {
@@ -56,9 +70,21 @@ impl<'a> Lexer<'a> {
             trimmed
         };
         Self {
-            chars: stripped.chars().peekable(),
+            chars: FormulaChars(stripped.char_indices().peekable()),
             input: stripped,
+            original_offset: input.len() - input.trim_start().len()
+                + usize::from(trimmed.starts_with('=')),
         }
+    }
+
+    /// Byte span relative to the original formula, excluding leading whitespace.
+    pub(crate) fn next_spanned(&mut self) -> Result<(Token, Range<usize>), CellError> {
+        self.skip_whitespace();
+        let base = self.original_offset;
+        let start = self.chars.byte_offset(self.input.len());
+        let token = self.next_token()?;
+        let end = self.chars.byte_offset(self.input.len());
+        Ok((token, (base + start)..(base + end)))
     }
 
     fn skip_whitespace(&mut self) {

@@ -1,3 +1,4 @@
+import { SortFilterPanel } from './components/SortFilterPanel';
 import { LedgerPanel } from './components/LedgerPanel';
 import {SelectionSummary} from './components/SelectionSummary';
 import {isCellLoaded} from './utils/frozenViewport';
@@ -11,6 +12,7 @@ import { OpenQuestions } from './components/OpenQuestions';
 import { Toolbar } from './components/Toolbar';
 import { FormulaBar } from './components/FormulaBar';
 import { Grid } from './components/Grid';
+import { PasteControls, type PasteMode } from './components/PasteControls';
 import { SchemaBrowserModal } from './components/SchemaBrowserModal';
 import { QueryEditorModal } from './components/QueryEditorModal';
 import { InsertTableModal } from './components/InsertTableModal';
@@ -23,11 +25,11 @@ import { api,getPendingMutations,subscribeMutations } from './api';
 import type {LedgerTarget} from './api';
 import {saveBlocker} from './utils/saveGuard';
 import { ViewportResponse, WorksheetTable, ReviewDraft, DependencyHighlight } from './types';
-import { parseEdit } from './utils/values';
 import { colIndexToName, coordToA1 } from './utils/coords';
 
 export const App: React.FC = () => {
   const [isFindOpen,setIsFindOpen]=useState(false);
+  const [sortFilterRange,setSortFilterRange]=useState<GridRange|null>(null);
   const [isLedgerOpen,setIsLedgerOpen]=useState(false);
   const [ledgerTarget,setLedgerTarget]=useState<LedgerTarget|undefined>();
   const [isCloseOpen, setIsCloseOpen] = useState(false);
@@ -45,6 +47,7 @@ export const App: React.FC = () => {
   const viewportSequence = useRef(0);
   const metadataSequence = useRef(0);
   const clipboard = useRef<{text:string;values:string[][];snapshot:string;sheet:string;range:GridRange} | null>(null);
+  const [pasteSpecialOpen, setPasteSpecialOpen] = useState(false);
   const [copyData, setCopyData] = useState<{text:string;values:string[][];snapshot:string;key:string} | null>(null);
   const reviewDrafts = useRef(new Map<string, ReviewDraft>());
   const [isExplainOpen, setIsExplainOpen] = useState(false);
@@ -145,7 +148,7 @@ export const App: React.FC = () => {
       ? prev : { startRow, startCol, endRow, endCol });
   }, []);
 
-  const handleCommitCell = async (row: number, col: number, rawInput: string): Promise<boolean> => {
+  const handleCommitCell = async (row: number, col: number, rawInput: string, asSqlNull=false): Promise<boolean> => {
     if(mutationLock.current)return false;mutationLock.current=true;setBusy(true);clipboard.current=null;
     try {
       setStatusMsg(`Setting ${coordToA1(row, col)}...`);
@@ -176,9 +179,15 @@ export const App: React.FC = () => {
 
               const origVal = src.last_result.rows[rowIdxInTable]?.[colIdxInTable];
               if (!origVal) throw new Error('Source row is no longer available; refresh the table');
-              const proposedVal = parseEdit(rawInput, origVal);
+              if ([origVal,...pkValues].some(value=>value.type==='Integer'&&!Number.isSafeInteger(value.value))) {
+                throw new Error('This source row has an integer that cannot be addressed exactly in the browser. No edit was staged.');
+              }
+              const names=src.last_result.columns.map(column=>column.name.toLowerCase());
+              if([targetColName,...pkCols].some(name=>names.filter(projected=>projected===name.toLowerCase()).length!==1)){
+                throw new Error('The query does not expose unique target and primary key column names.');
+              }
 
-              // Stage edit!
+              // The server parses raw text using the declared SQL type. It never uses the previous cell's type.
               await api.stageEdit({
                 connection_name: src.connection_name,
                 table_name: src.lineage.base_table || tbl.source_name,
@@ -186,7 +195,7 @@ export const App: React.FC = () => {
                 pk_values: pkValues,
                 column_name: targetColName,
                 original_value: origVal,
-                proposed_value: proposedVal,
+                ...(asSqlNull?{proposed_value:{type:'Null'} as const}:{raw_input:rawInput}),
               });
 
               setStatusMsg(`Staged edit for ${tbl.name}[${targetColName}]`);
@@ -199,6 +208,7 @@ export const App: React.FC = () => {
         throw new Error('This table column is read-only');
       }
       if (existing?.is_table_header) throw new Error('Table headers are read-only');
+      if(asSqlNull)throw new Error('Select a SQL source data cell to set NULL.');
 
       // Normal spreadsheet cell edit
       await api.setCell(sheetName, row, col, rawInput);
@@ -239,6 +249,27 @@ export const App: React.FC = () => {
     } catch(error:any){setStatusMsg(`Error: ${error.message}`);}
     finally{mutationLock.current=false;setBusy(false);}
   };
+  const insertSelectedRows = () => {
+    if (busy || apiPending || mutationLock.current || gridDraft || formulaDraft) return;
+    for (const draft of reviewDrafts.current.values()) {
+      if (draft.reviewer.trim() || draft.note.trim() || draft.evidence.length || draft.attachments?.length) {
+        setStatusMsg('Finish or discard your review drafts before inserting rows.');return;
+      }
+    }
+    const before=selection.start.row;
+    const count=selection.end.row-before+1;
+    const label=count===1?'one row':`${count} rows`;
+    if(count>1000){setStatusMsg('Select at most 1,000 rows to insert.');return;}
+    if(!window.confirm(`Insert ${label} above row ${before+1} in ${sheetName}? Existing rows and references will move. This clears Undo/Redo history and cannot be undone. Use Save As beforehand if you want a separate copy.`))return;
+    void mutate(`Inserted ${label} above row ${before+1}`, async()=>{
+      await api.insertRows(sheetName,before,count);
+      clearDependencyTrace();
+      reviewDrafts.current.clear();
+      setIsExplainOpen(false);
+      setIsQuestionsOpen(false);
+      selectCell(before,selectedCol);
+    });
+  };
   const resizeColumn = (column:number,width:number|null) => {
     if(width!==null&&(!Number.isInteger(width)||width<48||width>600)){setStatusMsg('Column width must be a whole number from 48 to 600 pixels.');return;}
     void mutate(`Resized column ${colIndexToName(column)}`,()=>api.setColumnWidth(sheetName,column,width),true);
@@ -276,6 +307,13 @@ export const App: React.FC = () => {
       :api.editRange(sheetName,selectedRow,selectedCol,decodeTsv(text)),true);
   };
   const handlePaste = (event:React.ClipboardEvent) => {event.preventDefault();pasteText(event.clipboardData.getData('text/plain'));};
+  const handlePasteSpecial = (mode: PasteMode) => {
+    if (gridDraft || formulaDraft || mutationLock.current) return;
+    const copied = clipboard.current;
+    if (!copied) { setStatusMsg('Copy a worksheet selection before using Paste Special.'); return; }
+    void mutate(mode === 'values' ? 'Pasted values only' : 'Pasted formulas only',
+      () => api.pasteSpecial(copied.sheet, copied.range, sheetName, {row:selectedRow,col:selectedCol}, copied.snapshot, mode), true);
+  };
   const handleFillDown = () => {if(!boundedSelection())return;void mutate('Filled selection down',()=>api.fillRange(sheetName,{start:selection.start,end:{row:selection.start.row,col:selection.end.col}},selection));};
   const handleFillRight = () => {if(!boundedSelection())return;void mutate('Filled selection right',()=>api.fillRange(sheetName,{start:selection.start,end:{row:selection.end.row,col:selection.start.col}},selection));};
   const changeSheet = (name:string) => void mutate(`Selected ${name}`,async()=>{await api.selectSheet(name);setViewport(null);selectCell(0,0);clearDependencyTrace();},true);
@@ -413,10 +451,16 @@ export const App: React.FC = () => {
         stagedCount={stagedCount}
       />
 
-      <div className="flex items-center gap-3 bg-white border-b px-3 py-1 text-xs"><button disabled={busy} onClick={()=>setIsFindOpen(true)} className="border rounded px-2 py-1">Find (Ctrl+F)</button>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 bg-white border-b px-3 py-1 text-xs"><button disabled={busy} onClick={()=>setIsFindOpen(true)} className="border rounded px-2 py-1">Find (Ctrl+F)</button>
+        <button disabled={busy||apiPending>0||gridDraft||formulaDraft} onMouseDown={e=>{if(gridDraft||formulaDraft)e.preventDefault();}} onClick={()=>setSortFilterRange(selection)} className="border rounded px-2 py-1">Sort &amp; filter</button>
         <button disabled={busy} onClick={()=>{setLedgerTarget(undefined);setIsLedgerOpen(true);}} className="border rounded px-2 py-1">SQLite ledger</button>
         <button disabled={busy||!selectedCellLoaded||gridDraft||formulaDraft} onClick={()=>{setLedgerTarget({sheet_name:sheetName,row:selectedRow,col:selectedCol});setIsLedgerOpen(true);}} className="border rounded px-2 py-1">Trace balance</button>
+        {activeCellData?.table_name&&!activeCellData.is_table_header&&<button disabled={busy||gridDraft||formulaDraft} onClick={()=>void handleCommitCell(selectedRow,selectedCol,'',true)} className="border rounded px-2 py-1" title="Stage SQL NULL; use a normal edit to enter empty or literal text">Set SQL NULL</button>}
         <button disabled={busy} onClick={()=>void handleRecoverWorkbook()} className="border rounded px-2 py-1">Recover autosave</button>
+        <PasteControls open={pasteSpecialOpen} onOpen={()=>setPasteSpecialOpen(true)} onClose={()=>setPasteSpecialOpen(false)}
+          onPaste={handlePasteSpecial} busy={busy||gridDraft||formulaDraft}
+          copySource={clipboard.current ? `${clipboard.current.sheet}!${coordToA1(clipboard.current.range.start.row,clipboard.current.range.start.col)}:${coordToA1(clipboard.current.range.end.row,clipboard.current.range.end.col)}` : null}/>
+        <button disabled={busy||apiPending>0||gridDraft||formulaDraft||!selectedCellLoaded} onClick={insertSelectedRows} className="border rounded px-2 py-1" title="Insert one blank row per selected row. Clears Undo/Redo.">Insert rows above</button>
         <form className="flex items-center gap-1" onSubmit={e=>{e.preventDefault();resizeColumn(selectedCol,Number(widthDraft));}}>
           <label htmlFor="column-width">Column {colIndexToName(selectedCol)} width</label><input id="column-width" aria-label="Column width in pixels" type="number" min="48" max="600" step="1" disabled={busy} value={widthDraft} onChange={e=>setWidthDraft(e.target.value)} className="w-16 border rounded p-1"/>
           <span>px</span><button disabled={busy} className="border rounded px-2 py-1">Set width</button><button type="button" disabled={busy} onClick={()=>resizeColumn(selectedCol,null)} className="border rounded px-2 py-1">Reset width</button>
@@ -452,10 +496,10 @@ export const App: React.FC = () => {
         selection={selection} busy={busy}
         traceHighlight={dependencyHighlight}
         onSelectCell={(row, col, extend) => { clearDependencyTrace(); selectCell(row, col, extend); }}
-        onCopy={handleCopy} onPaste={handlePaste}
+        onCopy={handleCopy} onPaste={handlePaste} onPasteSpecial={()=>setPasteSpecialOpen(true)}
         onUndo={() => void mutate('Undid worksheet edit',api.undo)}
         onRedo={() => void mutate('Redid worksheet edit',api.redo)}
-        onFillDown={handleFillDown}
+        onFillDown={handleFillDown} onFillRight={handleFillRight}
         onClear={handleClear}
         onCommitCell={handleCommitCell}
         onViewportChange={handleViewportChange}
@@ -488,7 +532,7 @@ export const App: React.FC = () => {
 
         {/* Calculation & System Status */}
         <div className="flex items-center gap-4 text-slate-500 text-[11px]">
-          <span role="status" className="truncate max-w-sm">{busy ? 'Working…' : statusMsg}</span>
+          <span role="status" className="truncate max-w-sm" title={statusMsg}>{busy ? 'Working…' : statusMsg}</span>
           <span className="font-mono text-slate-400">Gen #{viewport?.generation ?? 0}</span>
           {stagedCount > 0 && (
             <button
@@ -566,6 +610,9 @@ export const App: React.FC = () => {
         isOpen={isAuditLogOpen}
         onClose={() => setIsAuditLogOpen(false)}
       />
+
+      {sortFilterRange&&<SortFilterPanel sheetName={sheetName} range={sortFilterRange} onClose={()=>setSortFilterRange(null)}
+        onGoTo={(row,col)=>{clearDependencyTrace();selectCell(row,col);setSortFilterRange(null);}}/>}
 
       <BenchmarkModal
         isOpen={isBenchmarksOpen}

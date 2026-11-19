@@ -1,3 +1,12 @@
+# 0.7.0
+
+- Sort and filter bounded worksheet ranges without moving the underlying cells or changing formula references.
+- Insert worksheet rows and update supported references, including cross-sheet references. Gridloom blocks changes it cannot perform safely.
+- Paste typed values or adjusted formulas without changing destination formatting, and find common actions in the keyboard shortcut guide.
+- Refresh saved pivot layouts from their read-only source query without changing workbook snapshots or staged database edits.
+- Validate editable database cells against the declared SQLite or DuckDB column type before staging, without silent rounding.
+- Regression-test exact decimal reconciliations, cross-sheet recalculation and saved workbooks. No calculation precision was changed.
+
 # 0.6.0
 
 - Browse multi-million-row SQLite journals without importing them into a worksheet. Counts and totals apply to all matching entries, and a changed source requires a reload.

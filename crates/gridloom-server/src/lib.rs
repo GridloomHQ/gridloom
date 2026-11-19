@@ -1,6 +1,8 @@
 pub mod benchmark;
 mod ledger;
+mod range_view;
 mod recovery;
+mod row_insert;
 pub mod routes;
 pub mod sample_data;
 pub mod state;

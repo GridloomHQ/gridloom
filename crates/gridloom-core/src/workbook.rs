@@ -878,20 +878,50 @@ impl Workbook {
     }
 
     pub fn compute_pivot_result(&self, name: &str) -> Result<PivotResult, CellError> {
-        let pivot_def = self.pivots.get(name).ok_or_else(|| CellError::Name)?;
+        self.preview_pivot(self.pivots.get(name).ok_or(CellError::Name)?)
+    }
 
+    pub fn preview_pivot(&self, definition: &PivotDefinition) -> Result<PivotResult, CellError> {
         let source = self
             .named_sources
-            .get(&pivot_def.source_table)
-            .ok_or_else(|| CellError::Name)?;
-
-        let res = source
+            .get(&definition.source_table)
+            .ok_or(CellError::Name)?;
+        let result = source
             .last_result
             .as_ref()
-            .ok_or_else(|| CellError::Sql("No source query result".to_string()))?;
+            .ok_or_else(|| CellError::Sql("No source snapshot. Use Refresh from source.".into()))?;
+        let columns = result
+            .columns
+            .iter()
+            .map(|c| c.name.clone())
+            .collect::<Vec<_>>();
+        compute_pivot(definition, &columns, &result.rows)
+    }
 
-        let col_names: Vec<String> = res.columns.iter().map(|c| c.name.clone()).collect();
-        compute_pivot(pivot_def, &col_names, &res.rows)
+    /// Recompute a saved layout from its live read query, without overwriting its
+    /// workbook snapshot, resizing inserted tables, or applying staged changes.
+    pub fn refresh_pivot_result(&self, name: &str) -> Result<PivotResult, CellError> {
+        let definition = self.pivots.get(name).ok_or(CellError::Name)?;
+        let source = self
+            .named_sources
+            .get(&definition.source_table)
+            .ok_or(CellError::Name)?;
+        let connection = self
+            .connections
+            .get(&source.connection_name)
+            .ok_or(CellError::Ref)?;
+        if !source.parameters.is_empty() {
+            return Err(CellError::Sql(
+                "Parameterized pivot sources are not supported".into(),
+            ));
+        }
+        let result = connection.execute_read_query(&source.sql, &[])?;
+        let columns = result
+            .columns
+            .iter()
+            .map(|c| c.name.clone())
+            .collect::<Vec<_>>();
+        compute_pivot(definition, &columns, &result.rows)
     }
 
     pub fn compute_chart_data(&self, id: &str) -> Result<ChartData, CellError> {

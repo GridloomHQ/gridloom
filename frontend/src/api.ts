@@ -44,7 +44,7 @@ let pendingMutations=0;
 const mutationListeners=new Set<()=>void>();
 export const getPendingMutations=()=>pendingMutations;
 export const subscribeMutations=(listener:()=>void)=>{mutationListeners.add(listener);return()=>{mutationListeners.delete(listener);};};
-const readPostPaths=new Set(['/api/ledger/page','/api/ranges/summary','/api/ranges/capture','/api/ranges/read','/api/cells/find','/api/cells/explain','/api/cells/dependencies','/api/cells/viewport','/api/cells/viewport-panes','/api/query/analyze','/api/writeback/review','/api/benchmark/run']);
+const readPostPaths=new Set(['/api/ranges/sort-filter','/api/ledger/page','/api/pivots/refresh','/api/ranges/summary','/api/ranges/capture','/api/ranges/read','/api/cells/find','/api/cells/explain','/api/cells/dependencies','/api/cells/viewport','/api/cells/viewport-panes','/api/query/analyze','/api/writeback/review','/api/benchmark/run']);
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const changing=!!options?.method && options.method!=='GET' && !readPostPaths.has(url);
   if(changing){pendingMutations++;mutationListeners.forEach(listener=>listener());}
@@ -57,12 +57,15 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   setShowFormulas:(sheet_name:string,show_formulas:boolean)=>fetchJson('/api/sheets/show-formulas',{method:'POST',body:JSON.stringify({sheet_name,show_formulas})}),
+  rangeView:(sheet_name:string,range:CellRange,options:RangeViewOptions,signal:AbortSignal)=>fetchJson<RangeView>('/api/ranges/sort-filter',{method:'POST',body:JSON.stringify({sheet_name,range:wireRange(range),...options}),signal}),
   functionCatalog:()=>fetchJson<{functions:string[]}>('/api/functions'),
   rangeSummary: (sheet_name:string,range:CellRange) => fetchJson<RangeSummary>('/api/ranges/summary',{method:'POST',body:JSON.stringify({sheet_name,...wireRange(range)})}),
   setFreeze: (sheet_name:string,freeze_top_row:boolean,freeze_first_column:boolean) => fetchJson('/api/sheets/freeze',{method:'POST',body:JSON.stringify({sheet_name,freeze_top_row,freeze_first_column})}),
   setColumnWidth: (sheet_name:string,column:number,width:number|null) => fetchJson('/api/sheets/column-width',{method:'POST',body:JSON.stringify({sheet_name,column,width})}),
   findCells: (request: FindRequest) => fetchJson<FindResponse>('/api/cells/find', {method: 'POST', body: JSON.stringify(request)}),
   addSheet: (name: string) => fetchJson<{status: string}>('/api/sheets', { method: 'POST', body: JSON.stringify({name}) }),
+  insertRows: (sheet_name: string, before_row: number, count: number) =>
+    fetchJson<{status: string}>('/api/sheets/insert-rows', {method:'POST', body:JSON.stringify({sheet_name,before_row,count})}),
   selectSheet: (name: string) => fetchJson<{status: string}>('/api/sheets/select', { method: 'POST', body: JSON.stringify({name}) }),
   renameSheet: (old_name: string, new_name: string) => fetchJson<{status: string}>('/api/sheets/rename', { method: 'POST', body: JSON.stringify({old_name,new_name}) }),
   editRange: (sheet_name: string, row: number, col: number, values: string[][]) => fetchJson<{status: string}>('/api/ranges/edit', { method: 'POST', body: JSON.stringify({sheet_name,row,col,values}) }),
@@ -70,6 +73,7 @@ export const api = {
   readRange: (sheet_name: string, range: CellRange) => fetchJson<string[][]>('/api/ranges/read', { method: 'POST', body: JSON.stringify({sheet_name,range:wireRange(range)}) }),
   formatRangeAttribute: (sheet_name: string, range: CellRange, attribute: string, value: string) => fetchJson<{status: string}>('/api/ranges/format-attribute', {method:'POST', body:JSON.stringify({sheet_name,range:wireRange(range),attribute,value})}),
   formatRange: (sheet_name: string, range: CellRange, style: CellStyle) => fetchJson<{status: string}>('/api/ranges/format', { method: 'POST', body: JSON.stringify({sheet_name,range:wireRange(range),style}) }),
+  pasteSpecial: (sheet_name: string, range: CellRange, target_sheet: string, target: CellCoord, expected_snapshot: string, mode: 'values' | 'formulas') => fetchJson<{status: string}>('/api/ranges/copy', { method: 'POST', body: JSON.stringify({sheet_name,range:wireRange(range),target_sheet,target,expected_snapshot,mode}) }),
   copyRange: (sheet_name: string, range: CellRange, target_sheet: string, target: CellCoord, expected_values?: string[][], expected_snapshot?: string) => fetchJson<{status: string}>('/api/ranges/copy', { method: 'POST', body: JSON.stringify({sheet_name,range:wireRange(range),target_sheet,target,expected_values,expected_snapshot}) }),
   fillRange: (sheet_name: string, source: CellRange, target: CellRange) => fetchJson<{status: string}>('/api/ranges/fill', { method: 'POST', body: JSON.stringify({sheet_name,source:wireRange(source),target:wireRange(target)}) }),
   undo: () => fetchJson<{status: string}>('/api/history/undo', {method:'POST'}),
@@ -163,8 +167,7 @@ export const api = {
     pk_values: CellValue[];
     column_name: string;
     original_value: CellValue;
-    proposed_value: CellValue;
-  }) => fetchJson<{ status: string; id: string }>('/api/staged', { method: 'POST', body: JSON.stringify(data) }),
+  } & ({raw_input: string;proposed_value?:never}|{raw_input?:never;proposed_value:CellValue})) => fetchJson<{ status: string; id: string }>('/api/staged', { method: 'POST', body: JSON.stringify(data) }),
   discardStaged: (id: string) => fetchJson<{ status: string }>(`/api/staged/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   discardAllStaged: () => fetchJson<{ status: string }>('/api/staged', { method: 'DELETE' }),
 
@@ -176,10 +179,12 @@ export const api = {
     }),
   getAuditLog: () => fetchJson<AuditRecord[]>('/api/audit'),
 
-  getPivots: () => fetchJson<PivotDefinition[]>('/api/pivots'),
+  getPivots: (signal?: AbortSignal) => fetchJson<PivotDefinition[]>('/api/pivots', {signal}),
   savePivot: (def: PivotDefinition) =>
-    fetchJson<any>('/api/pivots', { method: 'POST', body: JSON.stringify(def) }),
-  getPivotData: (name: string) => fetchJson<PivotResult>(`/api/pivots/${encodeURIComponent(name)}/data`),
+    fetchJson<{status: string; name: string; result: PivotResult}>('/api/pivots', { method: 'POST', body: JSON.stringify(def) }),
+  getPivotData: (name: string, signal?: AbortSignal) => fetchJson<PivotResult>(`/api/pivots/${encodeURIComponent(name)}/data`, {signal}),
+  refreshPivot: (name: string, signal?: AbortSignal) =>
+    fetchJson<PivotResult>('/api/pivots/refresh', {method: 'POST', body: JSON.stringify({name}), signal}),
 
   getCharts: () => fetchJson<ChartDefinition[]>('/api/charts'),
   saveChart: (def: ChartDefinition) =>
@@ -195,3 +200,7 @@ export type LedgerPage = {session:string;columns:string[];rows:(string|null)[][]
 
 export type LedgerTarget = {sheet_name:string;row:number;col:number};
 export type LedgerTrace = {link:LedgerSpec|null;source_changed:boolean;balance_cents:string|null};
+
+export type RangeViewFilter = 'contains' | 'equals' | 'empty' | 'non_empty' | 'at_least' | 'at_most';
+export type RangeViewOptions = {first_row_header:boolean;sort:{col:number;descending:boolean}|null;filter:{col:number;mode:RangeViewFilter;text:string}|null};
+export type RangeView = {generation:number;headers:string[];total_rows:number;rows:{row:number;values:string[]}[]};

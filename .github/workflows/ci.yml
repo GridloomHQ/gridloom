@@ -142,6 +142,22 @@ jobs:
         working-directory: frontend
         run: node tests/show-formulas-smoke.mjs
 
+      - name: Real browser safe row insertion
+        working-directory: frontend
+        run: node tests/row-insert-smoke.mjs
+
+      - name: Real browser worksheet sort and filter
+        working-directory: frontend
+        run: node tests/sort-filter-smoke.mjs
+
+      - name: Real browser Paste Special
+        working-directory: frontend
+        run: node tests/paste-special-smoke.mjs
+
+      - name: Real browser saved pivot refresh
+        working-directory: frontend
+        run: node tests/pivot-refresh-smoke.mjs
+
       - name: Native window-open smoke
         if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
         run: scripts/native-window-smoke.sh

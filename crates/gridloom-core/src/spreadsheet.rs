@@ -11,6 +11,13 @@ pub struct CellStyle {
     pub fill: Option<String>,
     pub number_format: Option<String>,
 }
+/// Gridloom-only paste modes. Ordinary copy still carries formula and styling.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PasteMode {
+    Values,
+    Formulas,
+}
 #[derive(Debug, Clone, Serialize)]
 pub struct RangeCapture {
     pub values: Vec<Vec<String>>,
@@ -536,6 +543,93 @@ impl Workbook {
                 Ok((dest, data))
             })
             .collect::<Result<Vec<_>, CellError>>()?;
+        self.commit_cells(target_sheet, changes, true)
+    }
+    /// Paste source values or formulas into an ordinary range, without changing
+    /// destination styles. A snapshot binds the operation to the copied content.
+    pub fn paste_special(
+        &mut self,
+        name: &str,
+        range: CellRange,
+        target_sheet: &str,
+        target: CellCoord,
+        expected_snapshot: &str,
+        mode: PasteMode,
+    ) -> Result<(), CellError> {
+        if self.capture_range(name, range)?.snapshot != expected_snapshot
+            || (matches!(mode, PasteMode::Values) && self.stale_calculation_sheets.contains(name))
+        {
+            return Err(CellError::Value);
+        }
+        let source = self.sheets.get(name).ok_or(CellError::Ref)?;
+        let dest_sheet = self.sheets.get(target_sheet).ok_or(CellError::Ref)?;
+        let bottom = target
+            .row
+            .checked_add(range.end_row - range.start_row)
+            .ok_or(CellError::Ref)?;
+        let right = target
+            .col
+            .checked_add(range.end_col - range.start_col)
+            .ok_or(CellError::Ref)?;
+        if bottom >= dest_sheet.max_rows || right >= dest_sheet.max_cols {
+            return Err(CellError::Ref);
+        }
+        let viewport = self.clipboard_viewport(name, range)?;
+        let mut changes = Vec::new();
+        for coord in coords(range)? {
+            let dest = CellCoord::new(
+                target.row + (coord.row - range.start_row),
+                target.col + (coord.col - range.start_col),
+            );
+            let mut data = match mode {
+                PasteMode::Values => {
+                    let value = viewport
+                        .cells
+                        .get(&coord.to_a1())
+                        .map(|cell| cell.raw_value.clone())
+                        .unwrap_or(Value::Blank);
+                    // Never parse display strings: "0012", "=literal", exact
+                    // decimals, SQL NULL and dates must retain their types.
+                    CellData {
+                        coord: dest,
+                        raw_input: value.to_string_repr(),
+                        evaluated_value: value,
+                        formula: None,
+                        is_dirty: false,
+                        style: Default::default(),
+                        number_format: None,
+                    }
+                }
+                PasteMode::Formulas => {
+                    if source_is_materialized(source, coord) {
+                        continue;
+                    }
+                    let Some(formula) = source
+                        .get_cell(&coord)
+                        .and_then(|cell| cell.formula.as_ref())
+                    else {
+                        continue;
+                    };
+                    CellData::new(
+                        dest,
+                        rewrite_formula(
+                            formula,
+                            i64::from(dest.row) - i64::from(coord.row),
+                            i64::from(dest.col) - i64::from(coord.col),
+                            None,
+                        )?,
+                    )
+                }
+            };
+            if let Some(old) = dest_sheet.get_cell(&dest) {
+                data.style = old.style.clone();
+                data.number_format = old.number_format.clone();
+            }
+            changes.push((dest, Some(data)));
+        }
+        if changes.is_empty() {
+            return Err(CellError::Value);
+        }
         self.commit_cells(target_sheet, changes, true)
     }
     pub fn fill_range(

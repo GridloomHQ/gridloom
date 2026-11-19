@@ -96,6 +96,29 @@ impl DuckDbEngine {
         })
     }
 
+    pub(crate) fn check_column_writable(&self, table: &str, column: &str) -> Result<(), CellError> {
+        use sqlparser::{ast::{ColumnOption, Statement}, dialect::DuckDbDialect, parser::Parser};
+        let conn = self.conn.lock().unwrap();
+        // DuckDB's information_schema does not currently expose generated-column status.
+        // Parse trusted engine catalog DDL. Unverifiable expressions stay read-only.
+        let ddl = conn.query_row(
+            "SELECT sql FROM duckdb_tables()
+             WHERE database_name = current_database() AND schema_name = current_schema() AND lower(table_name) = lower(?)",
+            [table],
+            |row| row.get::<_, String>(0),
+        ).map_err(|err| CellError::Sql(format!("Unable to verify writable base table {table}: {err}")))?;
+        let statements=Parser::parse_sql(&DuckDbDialect {}, &ddl)
+            .map_err(|err| CellError::Sql(format!("Unable to verify column {column} from the DuckDB catalog: {err}")))?;
+        if let [Statement::CreateTable(table)]=statements.as_slice() {
+            if let Some(def)=table.columns.iter().find(|def| def.name.value.eq_ignore_ascii_case(column)) {
+                if !def.options.iter().any(|option| matches!(&option.option, ColumnOption::Generated { .. } | ColumnOption::Identity(_))) {
+                    return Ok(());
+                }
+            }
+        }
+        Err(CellError::Sql(format!("{column}: generated/hidden columns and views are read-only.")))
+    }
+
     pub fn execute_read_query(
         &self,
         sql: &str,
@@ -280,7 +303,11 @@ impl DuckDbEngine {
         );
 
         let mut update_params = Vec::new();
-        update_params.push(DuckDbParam(proposed_val.clone()));
+        update_params.push(DuckDbParam(match proposed_val {
+            // Binding the decimal as DOUBLE silently changes values before the SQL cast.
+            Value::Decimal(decimal) => Value::Text(decimal.to_string()),
+            value => value.clone(),
+        }));
         update_params.extend(check_params);
 
         let updated_rows = tx
@@ -332,6 +359,10 @@ fn decode_value(val_ref: ValueRef<'_>) -> Value {
         ValueRef::SmallInt(i) => Value::Integer(i as i64),
         ValueRef::Int(i) => Value::Integer(i as i64),
         ValueRef::BigInt(i) => Value::Integer(i),
+        ValueRef::UTinyInt(i) => Value::Integer(i.into()),
+        ValueRef::USmallInt(i) => Value::Integer(i.into()),
+        ValueRef::UInt(i) => Value::Integer(i.into()),
+        ValueRef::UBigInt(i) => i64::try_from(i).map_or_else(|_| Value::Decimal(Decimal::from(i)), Value::Integer),
         ValueRef::HugeInt(h) => {
             let s = h.to_string();
             if let Ok(d) = Decimal::from_str_exact(&s) {

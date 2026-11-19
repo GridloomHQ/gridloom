@@ -4,6 +4,7 @@ import { editableCellInput } from '../utils/cellInput';
 import { colIndexToName, coordToA1 } from '../utils/coords';
 import { containsCell, GridRange } from '../utils/selection';
 import { gridNavigation, NavigationKey } from '../utils/gridNavigation';
+import { gridShortcut } from '../utils/gridShortcuts';
 import { columnGeometry, clampColumnWidth } from '../utils/columnGeometry';
 import { paneIndices, paneOffset, paneLayer, revealAxis } from '../utils/frozenPanes';
 import { isCellLoaded } from '../utils/frozenViewport';
@@ -19,7 +20,7 @@ interface GridProps {
   onCopy: (event: React.ClipboardEvent) => void;
   onPaste: (event: React.ClipboardEvent) => void;
   onUndo: () => void; onRedo: () => void; onFillDown: () => void;
-  onClear: () => void;
+  onClear: () => void; onFillRight: () => void; onPasteSpecial: () => void;
   onDraftChange:(active:boolean)=>void;
   columnWidths: Record<number,number>;
   showFormulas:boolean;
@@ -128,7 +129,12 @@ export const Grid: React.FC<GridProps> = (props) => {
     const generation = editGeneration.current;
     committing.current=true;
     let success = false;
-    try { success = await onCommitCell(target.selectedRow,target.selectedCol,edit); }
+    try {
+      // A typed value pasted from a formula may look like a formula, number or
+      // boolean in the editor. Opening and closing an unchanged draft isn't an edit.
+      const original=editableCellInput(viewport?.cells[coordToA1(target.selectedRow,target.selectedCol)]);
+      success = original===edit || await onCommitCell(target.selectedRow,target.selectedCol,edit);
+    }
     catch { /* Parent reports mutation failures. Keep the draft available for retry. */ }
     finally { committing.current=false; }
     const after = currentTarget.current;
@@ -163,7 +169,15 @@ export const Grid: React.FC<GridProps> = (props) => {
     if(busy || committing.current || resize.current)return;
     const move = navigation(e);
     if (move) { e.preventDefault();onSelectCell(move.row,move.col,move.extend);return; }
-    if(e.ctrlKey||e.metaKey){if(e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?props.onRedo():props.onUndo();}else if(e.key.toLowerCase()==='y'){e.preventDefault();props.onRedo();}else if(e.key.toLowerCase()==='d'){e.preventDefault();props.onFillDown();}return;}
+    if(e.ctrlKey||e.metaKey){
+      const shortcut=gridShortcut(e);
+      if(shortcut) {
+        e.preventDefault();
+        const actions={undo:props.onUndo,redo:props.onRedo,'fill-down':props.onFillDown,'fill-right':props.onFillRight,'paste-special':props.onPasteSpecial};
+        actions[shortcut]();
+      }
+      return;
+    }
     if(e.key==='F2'){e.preventDefault();begin();}
     else if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();props.onClear();}
     else if(e.key.length===1&&!e.altKey){e.preventDefault();begin(e.key);}

@@ -15,9 +15,11 @@ It is aimed at accounting and financial models where understanding **where a num
 
 - Use multiple sheets, cross-sheet formulas, named table references and dynamic array spills.
 - Select, copy and paste ranges; fill formulas; format numbers and cells; undo and redo supported cell operations.
+- Use **Paste Special** on a worksheet selection copied in Gridloom: paste typed values without formulas, or paste formulas with adjusted relative references. Both keep destination formatting; formulas-only paste skips source constants and blanks. See **Keyboard shortcuts** above the grid.
 - Find cached values or formula inputs, jump to a cell, resize columns, freeze the first row or column, and show formulas directly in the grid.
 - Get selection totals, complete supported function names in the formula bar, and cycle relative/absolute references with F4.
-- Build pivot tables and column, bar, line, pie or scatter charts.
+- Select a worksheet range and open **Sort & filter** for a read-only view. You can use the first row as headers, sort and filter on different columns, and jump back to a result’s original row. Formulas, database links and staging are unchanged. Each view supports up to 1,000 rows, 50 columns and 5,000 cells.
+- Build pivot tables and column, bar, line, pie or scatter charts. Reopen a saved pivot and choose **Refresh from source** to rerun its read query without changing its layout, the workbook snapshot, or any staged database edits.
 - Save and reopen `.gridloom` workbooks, including layouts, calculations and pending source edits.
 
 The formula engine includes arithmetic, statistics, logic, text, date, lookup and financial functions, plus `SQLVALUE` and `SQLTABLE`. Examples include `SUMIFS`, `SUMPRODUCT`, `XLOOKUP`, `FILTER`, `PMT` and `NPV`. The formula bar's suggestions and the local `/api/functions` endpoint expose the engine's supported function names and aliases.
@@ -34,6 +36,8 @@ Connect an existing **SQLite** or **DuckDB** file, run a read-only query, and in
 
 The database stays in its original format. Eligible single-table projections with direct column mappings and declared primary keys can support staged edits. Joined, aggregated or ambiguous results remain read-only.
 
+When you edit an eligible source-backed cell, Gridloom checks the declared SQL column type before staging. For example, an integer rejects fractions, a decimal rejects excess scale rather than rounding, and text keeps leading zeroes. Use **Set SQL NULL** for a nullable cell; it is distinct from empty text. Unsupported types are read-only. The database still checks its remaining constraints when you apply edits.
+
 Editing a source-backed cell does **not** immediately change the database. **Review Edits** shows original and proposed values before an explicit apply. Applying a changeset checks for conflicting external changes and uses a database transaction; a conflict or error rolls back that changeset. Saving a workbook is separate from applying its source edits.
 
 ### Browse a large SQLite ledger
@@ -45,6 +49,12 @@ To check where a balance comes from, select a cell and choose **Trace balance**.
 An index on the posting date (binary collation) and the primary key speeds ordered browsing. Scroll within a block, use the next/previous block controls, or jump directly to a row. Forward scrolling can seek from the current page; a distant jump still skips earlier rows in SQLite. If the source changes, reload the view so rows and totals agree. This read-only view does not write to the database or expose imported worksheet cells to formulas.
 
 For a sample with no real accounting data, run `python3 scripts/make-ledger-demo.py demo.sqlite` from the source checkout. It creates four million synthetic entries (roughly 270 MiB) and prints an account/date range and reference total for comparison. Connect the file and choose the `entries` table, `posted` date, `amount_cents` amount and `account` code. Use `--rows 10000` for a smaller file.
+
+### Insert worksheet rows
+
+Select a row or a range and choose **Insert rows above**. Gridloom adds one blank row per selected row, moves the existing rows and follows direct A1 references across the workbook, including absolute references. Ranges that cross the insertion point expand. A whole table can move, but an insertion cannot split a table.
+
+If a formula or workbook structure cannot be updated safely, the insertion is rejected without changing the workbook. This includes active spills, computed references, affected historical review anchors, and Monthly close sheets. Row insertion clears the existing Undo/Redo history; use **Save As** first if you want a separate copy.
 
 ### Explain and review a calculation
 
@@ -142,8 +152,8 @@ Set `GRIDLOOM_RECOVERY_DIR` to choose a private recovery directory. By default i
 
 ## Important boundaries
 
-- **Not Excel compatibility.** There is no general `.xlsx` import/export or complete Excel function/coercion compatibility. For example, `ROUND` uses half-even rounding; some functions and aliases intentionally retain Gridloom-specific coercions and behavior.
-- **Calculation and rounding.** Gridloom stores numbers as fixed-precision decimals. Some formulas use floating-point math internally, so rounding can differ from Excel or an arbitrary-precision calculator. Check formulas and rounding policies before relying on a model for reporting.
+- **Native workbook model.** Save the working model as `.gridloom`, which retains its source links, review notes and evidence. Use the reporting tools for CSV, HTML or JSON outputs where available. Gridloom does not import or export Excel workbooks.
+- **Calculation and rounding.** Gridloom keeps exact integers and fixed-precision decimal values without rounding them to Excel’s display or file conventions. `ROUND` uses half-even rounding; some finance and statistical formulas use floating-point math internally. Results can differ from other spreadsheet tools. Check formulas and rounding policies before relying on a model for reporting.
 - **Review packs.** Use packs to share your reconciliations, review notes and attached evidence. Reviewer names are entered by users, not verified signatures. Keep your source records and database backups separately.
 - **Protect the files.** Workbooks and embedded evidence are unencrypted. Connection paths refer to the machine running the server; source databases are not embedded backups. Keep the local service private rather than exposing it as a multi-user server.
 - **Save deliberately.** Use Save or Save As for your named workbook. Recovery may not include changes made just before a crash, and there is no universal native-window-close guard.
