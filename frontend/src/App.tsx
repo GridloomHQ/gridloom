@@ -34,7 +34,9 @@ export const App: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [gridDraft,setGridDraft]=useState(false),[formulaDraft,setFormulaDraft]=useState(false);
   const [filePath,setFilePath]=useState<string|null>(null);
-  const [replacement,setReplacement]=useState<'new'|'open'|null>(null);
+  const [replacement,setReplacement]=useState<'new'|'open'|'recover'|null>(null);
+  const [recoveryCopies,setRecoveryCopies]=useState<{id:string;modified:string}[]>([]);
+  const [recoveryId,setRecoveryId]=useState('');
   const [apiPending,setApiPending]=useState(getPendingMutations());
   useEffect(()=>subscribeMutations(()=>setApiPending(getPendingMutations())),[]);
   const mutationLock = useRef(false);
@@ -321,19 +323,29 @@ export const App: React.FC = () => {
   const continueReplacement=async(save:boolean)=>{
     if(!replacement||!readyForFileAction())return;
     const kind=replacement;
+    if(kind==='recover'&&!recoveryId)return;
     if(save&&!await handleSaveWorkbook())return;
     const path=kind==='open'?prompt('Enter path of .gridloom file to open:',filePath??'my_workbook.gridloom'):null;
     if(kind==='open'&&!path?.trim())return;
     if(!readyForFileAction())return;
     setReplacement(null);
-    await mutate(kind==='new'?'Created new workbook':`Opened workbook from ${path}`,async()=>{
-      if(kind==='new')await api.newWorkbook();else await api.openWorkbook(path!);
+    await mutate(kind==='new'?'Created new workbook':kind==='recover'?'Recovered workbook. Use Save As to keep a named copy.':`Opened workbook from ${path}`,async()=>{
+      if(kind==='new')await api.newWorkbook();else if(kind==='recover')await api.restoreRecovery(recoveryId);else await api.openWorkbook(path!);
       viewportSequence.current++;setViewport(null);selectCell(0,0);
       setWorkbookEpoch(e=>e+1);reviewDrafts.current.clear();clearDependencyTrace();
     });
   };
   const handleNewWorkbook=()=>requestReplacement('new');
   const handleOpenWorkbook=()=>requestReplacement('open');
+  const handleRecoverWorkbook=async()=>{
+    if(!readyForFileAction())return;
+    try {
+      const copies=await api.listRecovery();
+      if(!readyForFileAction())return;
+      if(!copies.length){setStatusMsg('No recovery copies from earlier workbooks or sessions.');return;}
+      setRecoveryCopies(copies);setRecoveryId(copies[0].id);setReplacement('recover');
+    } catch(err:any){setStatusMsg(`Cannot list recovery copies: ${err.message}`);}
+  };
 
   const handleRefreshAll = async () => {
     await mutate('All sources refreshed successfully', async () => {
@@ -367,6 +379,7 @@ export const App: React.FC = () => {
         <div className="bg-white rounded shadow-xl p-5 max-w-lg space-y-3">
           <h2 className="font-semibold">Replace current workbook?</h2>
           <p>This always asks before replacing the workbook. Choose whether to save its current committed content first. Unsubmitted cell, review and dialog drafts are not saved. Saving does not apply staged database edits.</p>
+          {replacement==='recover'&&<label className="block">Recovery copy <select value={recoveryId} onChange={e=>setRecoveryId(e.target.value)}>{recoveryCopies.map(copy=><option key={copy.id} value={copy.id}>{new Date(copy.modified).toLocaleString()} ({copy.id.slice(0,8)})</option>)}</select></label>}
           <div className="flex gap-2"><button disabled={busy||apiPending>0} onClick={()=>void continueReplacement(true)}>Save and continue</button><button disabled={busy||apiPending>0} onClick={()=>void continueReplacement(false)}>Discard and continue</button><button autoFocus disabled={busy} onClick={()=>setReplacement(null)}>Cancel</button></div>
         </div>
       </div>}
@@ -400,6 +413,7 @@ export const App: React.FC = () => {
 
       <div className="flex items-center gap-3 bg-white border-b px-3 py-1 text-xs"><button disabled={busy} onClick={()=>setIsFindOpen(true)} className="border rounded px-2 py-1">Find (Ctrl+F)</button>
         <button disabled={busy} onClick={()=>setIsLedgerOpen(true)} className="border rounded px-2 py-1">SQLite ledger</button>
+        <button disabled={busy} onClick={()=>void handleRecoverWorkbook()} className="border rounded px-2 py-1">Recover autosave</button>
         <form className="flex items-center gap-1" onSubmit={e=>{e.preventDefault();resizeColumn(selectedCol,Number(widthDraft));}}>
           <label htmlFor="column-width">Column {colIndexToName(selectedCol)} width</label><input id="column-width" aria-label="Column width in pixels" type="number" min="48" max="600" step="1" disabled={busy} value={widthDraft} onChange={e=>setWidthDraft(e.target.value)} className="w-16 border rounded p-1"/>
           <span>px</span><button disabled={busy} className="border rounded px-2 py-1">Set width</button><button type="button" disabled={busy} onClick={()=>resizeColumn(selectedCol,null)} className="border rounded px-2 py-1">Reset width</button>

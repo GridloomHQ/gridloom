@@ -1,5 +1,6 @@
 pub mod benchmark;
 mod ledger;
+mod recovery;
 pub mod routes;
 pub mod sample_data;
 pub mod state;
@@ -40,7 +41,11 @@ pub async fn build_app(open_samples: bool) -> anyhow::Result<axum::Router> {
         }
     }
 
-    let state = AppState::new(workbook);
+    let mut state = AppState::new(workbook);
+    state.recovery = Some(std::sync::Arc::new(tokio::sync::Mutex::new(
+        recovery::Recovery::new(recovery::default_dir()?),
+    )));
+    recovery::start_worker(&state);
     let mut router = routes::create_router(state).layer(middleware::from_fn(local_boundary));
 
     // Installed bundles work outside the source checkout; the launcher also supports

@@ -958,6 +958,19 @@ impl Workbook {
 
     /// Atomic file package save
     pub fn save_to_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), CellError> {
+        self.write_workbook_file(path, true)
+    }
+
+    /// Write a recovery copy without changing the path used by explicit Save.
+    pub fn save_recovery_copy<P: AsRef<Path>>(&mut self, path: P) -> Result<(), CellError> {
+        self.write_workbook_file(path, false)
+    }
+
+    fn write_workbook_file<P: AsRef<Path>>(
+        &mut self,
+        path: P,
+        set_path: bool,
+    ) -> Result<(), CellError> {
         self.invalidate_changed_reviews();
         let p = path.as_ref().to_path_buf();
         let parent = p
@@ -969,18 +982,32 @@ impl Workbook {
         // Bounded name length also permits destinations near a filesystem's filename limit.
         let tmp_path = parent.join(format!(".gridloom-save-{}.tmp", uuid::Uuid::new_v4()));
 
-        let serialized = SerializedWorkbook {
-            reviews: self.reviews.clone(),
-            close_periods: self.close_periods.clone(),
-            stale_sources: self.stale_sources.clone(),
-            stale_calculation_sheets: self.stale_calculation_sheets.clone(),
-            sheets: self.sheets.clone(),
-            active_sheet: self.active_sheet.clone(),
-            connection_configs: self.connection_configs.clone(),
-            named_sources: self.named_sources.clone(),
-            staged: self.staged.clone(),
-            pivots: self.pivots.clone(),
-            charts: self.charts.clone(),
+        #[derive(Serialize)]
+        struct Snapshot<'a> {
+            reviews: &'a Vec<ReviewRecord>,
+            close_periods: &'a Vec<crate::close::ClosePeriod>,
+            stale_sources: &'a BTreeSet<String>,
+            stale_calculation_sheets: &'a BTreeSet<String>,
+            sheets: &'a HashMap<String, Sheet>,
+            active_sheet: &'a String,
+            connection_configs: &'a HashMap<String, ConnectionConfig>,
+            named_sources: &'a HashMap<String, NamedSource>,
+            staged: &'a StagedRepository,
+            pivots: &'a HashMap<String, PivotDefinition>,
+            charts: &'a HashMap<String, ChartDefinition>,
+        }
+        let serialized = Snapshot {
+            reviews: &self.reviews,
+            close_periods: &self.close_periods,
+            stale_sources: &self.stale_sources,
+            stale_calculation_sheets: &self.stale_calculation_sheets,
+            sheets: &self.sheets,
+            active_sheet: &self.active_sheet,
+            connection_configs: &self.connection_configs,
+            named_sources: &self.named_sources,
+            staged: &self.staged,
+            pivots: &self.pivots,
+            charts: &self.charts,
         };
 
         // create_new rejects pre-existing files and symlinks instead of truncating them.
@@ -1043,7 +1070,9 @@ impl Workbook {
         if let Err(error) = File::open(parent).and_then(|directory| directory.sync_all()) {
             tracing::warn!(path = %parent.display(), %error, "Workbook replaced; directory durability could not be confirmed");
         }
-        self.file_path = Some(p);
+        if set_path {
+            self.file_path = Some(p);
+        }
         Ok(())
     }
 

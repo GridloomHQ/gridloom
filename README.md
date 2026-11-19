@@ -130,13 +130,19 @@ For frontend development, run the server in one terminal and `cd frontend && npm
 
 Start with the sample databases to explore SQL tables, or use **Monthly close** for a trial balance. Add a formula outside any occupied table or spill range, select its result, and open **Explain & Review**. Save the workbook before closing the application. Use **Save As** to keep a separate copy.
 
+### Recover unsaved edits
+
+Gridloom periodically saves committed workbook changes (approximately every two seconds) to local recovery files. After reopening the app or switching workbooks, choose **Recover autosave** to open a recovered copy, then **Save As** to keep it as a named workbook. Text still being typed or pending inside an unsubmitted dialog is not recoverable. Copies from previous editing sessions remain available, including after an explicit save; check their timestamps before restoring. A new workbook cannot silently overwrite an older recovery copy. Recovery copies never update the database; refreshing sources and applying staged database changes are separate steps.
+
+Set `GRIDLOOM_RECOVERY_DIR` to choose a private recovery directory. By default it is under the operating system's user-specific state/application-data directory. Recovery files can contain workbook data and should be protected like the original workbook.
+
 ## Important boundaries
 
 - **Not Excel compatibility.** There is no general `.xlsx` import/export or complete Excel function/coercion compatibility. For example, `ROUND` uses half-even rounding; some functions and aliases intentionally retain Gridloom-specific coercions and behavior.
-- **Fixed precision, not arbitrary precision.** Decimal values support accounting-oriented calculations, but some functions use floating-point operations or fixed-precision rounding. Numeric hardening is ongoing; this is not a guarantee that every calculation is exact.
-- **Local working papers, not assurance.** Reviewer names are self-reported, not authenticated signatures. A review pack does not prove ledger completeness, provide audit assurance or replace an external database backup.
+- **Calculation and rounding.** Gridloom stores numbers as fixed-precision decimals. Some formulas use floating-point math internally, so rounding can differ from Excel or an arbitrary-precision calculator. Check formulas and rounding policies before relying on a model for reporting.
+- **Review packs.** Use packs to share your reconciliations, review notes and attached evidence. Reviewer names are entered by users, not verified signatures. Keep your source records and database backups separately.
 - **Protect the files.** Workbooks and embedded evidence are unencrypted. Connection paths refer to the machine running the server; source databases are not embedded backups. Keep the local service private rather than exposing it as a multi-user server.
-- **Save deliberately.** There is no autosave or universal native-window-close protection. Save/Discard/Cancel guards cover supported in-app replacement flows, not every way a process can exit.
+- **Save deliberately.** Use Save or Save As for your named workbook. Recovery may not include changes made just before a crash, and there is no universal native-window-close guard.
 - **Know the scale.** The grid is virtualized. SQL results imported into worksheet tables are fully materialized; the read-only SQLite ledger view loads pages instead. Source refresh is explicit, not automatic monitoring. Find and bulk worksheet operations have bounded limits.
 - **Standards are not implemented.** IFRS/XBRL taxonomy validation and an add-on system are not current capabilities.
 

@@ -96,6 +96,8 @@ export const api = {
   getReviews: () => fetchJson<ReviewRecord[]>('/api/reviews'),
   saveReview: (data: ReviewInput) =>
     fetchJson<ReviewRecord>('/api/reviews', { method: 'POST', body: JSON.stringify(data) }),
+  listRecovery: () => fetchJson<{id:string; modified:string}[]>('/api/workbook/recovery'),
+  restoreRecovery: (id:string) => fetchJson<{status:string}>(`/api/workbook/recovery/${encodeURIComponent(id)}`, {method:'POST'}),
   getWorkbook: () => fetchJson<WorkbookSummary>('/api/workbook'),
   newWorkbook: () => fetchJson<{ status: string }>('/api/workbook/new', { method: 'POST' }),
   openWorkbook: (path: string) => fetchJson<any>('/api/workbook/open', { method: 'POST', body: JSON.stringify({ path }) }),

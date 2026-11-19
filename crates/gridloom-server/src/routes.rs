@@ -30,6 +30,11 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/workbook/new", post(new_workbook))
         .route("/api/workbook/open", post(open_workbook))
         .route("/api/workbook/save", post(save_workbook))
+        .route("/api/workbook/recovery", get(crate::recovery::list))
+        .route(
+            "/api/workbook/recovery/{id}",
+            post(crate::recovery::restore),
+        )
         .route("/api/sheets", post(add_sheet))
         .route("/api/sheets/select", post(select_sheet))
         .route("/api/sheets/rename", post(rename_sheet))
@@ -100,6 +105,10 @@ pub fn create_router(state: AppState) -> Router {
         // Performance Acceptance Benchmark Runner
         .route("/api/benchmark/run", post(run_benchmarks))
         .layer(DefaultBodyLimit::max(40 * 1024 * 1024))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::recovery::track_mutations,
+        ))
         .with_state(state)
 }
 
