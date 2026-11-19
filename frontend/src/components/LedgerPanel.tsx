@@ -93,7 +93,7 @@ export function LedgerPanel({onClose,target}:{onClose:()=>void;target?:LedgerTar
     &&!!active.account&&!!active.from&&!!active.through&&!isSaved&&!loading&&!saving;
   const changeTable=(value:string)=>{ST(value);SD('');SA('');setAccountColumn('');setAccount('');};
   const changeConnection=(value:string)=>{SC(value);changeTable('');};
-  const select=(name:string,value:string,set:(v:string)=>void,options:string[])=><label className="flex flex-col text-sm">{name}<select className="border rounded p-1" value={value} onChange={e=>set(e.target.value)}><option value="">Choose…</option>{options.map(v=><option key={v}>{v}</option>)}</select></label>;
+  const select=(name:string,value:string,set:(v:string)=>void,options:string[])=><label className="flex flex-col text-sm">{name}<select aria-label={name} className="border rounded p-1" value={value} onChange={e=>set(e.target.value)}><option value="">Choose…</option>{options.map(v=><option key={v}>{v}</option>)}</select></label>;
   const visible=ledgerBlockRows(page?.count??0,base);
   const widths=page?.columns.map(()=>160)??[];
   return <div role="dialog" aria-modal="true" aria-label="SQLite ledger" onKeyDown={e=>{if(e.key==="Escape"){e.stopPropagation();onClose();}}} className="absolute inset-4 z-50 bg-white border rounded shadow-xl flex flex-col p-4 gap-3 min-h-0">
