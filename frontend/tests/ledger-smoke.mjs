@@ -18,8 +18,10 @@ try {
   let base;
   while(Date.now()<deadline && server.exitCode===null && !(base=log.match(/Server running at (http:\/\/127\.0\.0\.1:\d+)/)?.[1])) await new Promise(r=>setTimeout(r,50));
   assert(base,log);
-  browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined),args:['--no-sandbox']});
-  const page=await browser.newPage();
+  const bundled=chromium.executablePath();
+  const executablePath=process.env.CHROMIUM_PATH ?? (existsSync(bundled) ? undefined : existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
+  browser=await chromium.launch({headless:true,executablePath});
+  const page=await browser.newPage({locale:'en-US',viewport:{width:1280,height:800}});
   const connected=await page.request.post(base+'/api/connections',{data:{name:'Test ledger',kind:'sqlite',path:db}});
   assert(connected.ok(),await connected.text());
   await page.goto(base);
@@ -32,29 +34,42 @@ try {
   await dialog.getByRole('button',{name:'Load / reload'}).click();
   await dialog.getByText('2,000,000 matching rows · total: 10000000 cents',{exact:true}).waitFor();
   const scroller=dialog.locator('div.overflow-auto');
+  const rowInViewport=async row=>{
+    const key=dialog.getByText(String(row),{exact:true}).first();
+    await key.waitFor({state:'visible'});
+    await key.evaluate((el, label)=>{
+      const viewport=el.closest('div.overflow-auto');
+      const rowRect=el.getBoundingClientRect(), viewportRect=viewport.getBoundingClientRect();
+      if(rowRect.bottom<=viewportRect.top+30 || rowRect.top>=viewportRect.bottom)throw new Error(`Row ${label} is not in the ledger viewport`);
+    },row);
+  };
   await Promise.all([page.waitForResponse(r=>r.url().endsWith('/api/ledger/page')&&r.request().postDataJSON().offset===100),scroller.evaluate(el=>el.scrollTop=130*30)]);
+  await rowInViewport(132);
   await dialog.getByRole('button',{name:'Next block'}).click();
   await dialog.getByText('Block 200,001–400,000',{exact:true}).waitFor();
+  await rowInViewport(200001);
   const jump=async (row,offset,key=row)=>{
     await dialog.getByLabel('Go to row').fill(String(row));
     const [res]=await Promise.all([page.waitForResponse(r=>r.url().endsWith('/api/ledger/page')&&r.request().postDataJSON().offset===offset),dialog.getByRole('button',{name:'Go',exact:true}).click()]);
     assert(res.ok(),await res.text());
     const result=await res.json();
     assert.equal(result.rows[row-1-offset][0],String(key));
-    await dialog.getByText(String(row),{exact:true}).first().waitFor({state:'visible'});
+    await rowInViewport(row);
     assert((await scroller.evaluate(el=>el.scrollHeight))<=6000040);
   };
   await jump(1048576,1048500);
   // The two rows share the current bounded page: no duplicate fetch on nearby jump.
   await dialog.getByLabel('Go to row').fill('1048577');
   await dialog.getByRole('button',{name:'Go',exact:true}).click();
-  await dialog.getByText('1048577',{exact:true}).first().waitFor({state:'visible'});
+  await rowInViewport(1048577);
   await jump(2000000,1999900);
   await dialog.getByRole('button',{name:'Previous block'}).click();
   await dialog.getByText('Block 1,600,001–1,800,000',{exact:true}).waitFor();
+  await rowInViewport(1600001);
   sql('UPDATE entries SET cents=9 WHERE id=3;');
   await dialog.getByRole('button',{name:'Next block'}).click();
   await dialog.getByRole('alert').filter({hasText:'Ledger changed'}).waitFor();
+  assert.equal(await dialog.getByText(/matching rows/).count(),0,'Stale results must not retain a visible total');
   await dialog.getByRole('button',{name:'Load / reload'}).click();
   await dialog.getByText('2,000,000 matching rows · total: 10000004 cents',{exact:true}).waitFor();
   await dialog.getByLabel('From',{exact:true}).fill('2026-11-19');

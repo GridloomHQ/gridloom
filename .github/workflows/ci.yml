@@ -87,6 +87,10 @@ jobs:
         working-directory: ./frontend
         run: npm run test:browser
 
+      - name: Real browser two-million-row SQLite ledger
+        working-directory: ./frontend
+        run: npm run test:ledger
+
       - name: Real browser worksheet usability
         working-directory: ./frontend
         run: npm run test:usability
