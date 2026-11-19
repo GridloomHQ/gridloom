@@ -103,6 +103,8 @@ export const api = {
   openWorkbook: (path: string) => fetchJson<any>('/api/workbook/open', { method: 'POST', body: JSON.stringify({ path }) }),
   saveWorkbook: (path: string) => fetchJson<any>('/api/workbook/save', { method: 'POST', body: JSON.stringify({ path }) }),
 
+  getLedgerTrace: (target: LedgerTarget, signal?: AbortSignal) => fetchJson<LedgerTrace>("/api/ledger/trace?" + new URLSearchParams({sheet_name:target.sheet_name,row:String(target.row),col:String(target.col)}),{signal}),
+  setLedgerTrace: (target: LedgerTarget, session: string|null, signal?: AbortSignal) => fetchJson<LedgerTrace>("/api/ledger/trace",{method:"POST",body:JSON.stringify({target,session}),signal}),
   ledgerPage: (input: LedgerRequest, signal?: AbortSignal) => fetchJson<LedgerPage>("/api/ledger/page", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(input), signal}),
   getConnections: () => fetchJson<{ name: string; kind: string; path: string }[]>('/api/connections'),
   connectDb: (name: string, kind: string, path: string) =>
@@ -187,6 +189,9 @@ export const api = {
   runBenchmarks: () => fetchJson<BenchmarkSuiteReport>('/api/benchmark/run', { method: 'POST' }),
 };
 
-export type LedgerSpec = {connection:string;table:string;date:string;cents:string;from:string|null;through:string|null};
+export type LedgerSpec = {connection:string;table:string;date:string;cents:string;from:string|null;through:string|null;account?:{column:string;value:string}|null};
 export type LedgerRequest = {spec:LedgerSpec;session:string|null;offset:number;limit:number};
 export type LedgerPage = {session:string;columns:string[];rows:(string|null)[][];count:number;total_cents:string};
+
+export type LedgerTarget = {sheet_name:string;row:number;col:number};
+export type LedgerTrace = {link:LedgerSpec|null;source_changed:boolean;balance_cents:string|null};

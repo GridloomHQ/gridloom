@@ -100,6 +100,31 @@ fn parse_literal_or_text(input: &str) -> Value {
     Value::Text(input.to_string())
 }
 
+/// Exact account filter for the read-only SQLite journal.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LedgerAccount {
+    pub column: String,
+    pub value: String,
+}
+
+/// Reproducible definition of a local journal query, not a cached result.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LedgerSpec {
+    pub connection: String,
+    pub table: String,
+    pub date: String,
+    pub cents: String,
+    pub from: Option<String>,
+    pub through: Option<String>,
+    pub account: Option<LedgerAccount>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LedgerLink {
+    pub spec: LedgerSpec,
+    pub source_path: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sheet {
     pub name: String,
@@ -117,6 +142,8 @@ pub struct Sheet {
     pub freeze_first_column: bool,
     #[serde(default)]
     pub show_formulas: bool,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub ledger_links: HashMap<String, LedgerLink>,
 }
 
 impl Sheet {
@@ -132,6 +159,7 @@ impl Sheet {
             freeze_top_row: false,
             freeze_first_column: false,
             show_formulas: false,
+            ledger_links: HashMap::new(),
         }
     }
 

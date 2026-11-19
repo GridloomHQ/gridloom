@@ -20,6 +20,7 @@ import { ChartModal } from './components/ChartModal';
 import { AuditLogModal } from './components/AuditLogModal';
 import { BenchmarkModal } from './components/BenchmarkModal';
 import { api,getPendingMutations,subscribeMutations } from './api';
+import type {LedgerTarget} from './api';
 import {saveBlocker} from './utils/saveGuard';
 import { ViewportResponse, WorksheetTable, ReviewDraft, DependencyHighlight } from './types';
 import { parseEdit } from './utils/values';
@@ -28,6 +29,7 @@ import { colIndexToName, coordToA1 } from './utils/coords';
 export const App: React.FC = () => {
   const [isFindOpen,setIsFindOpen]=useState(false);
   const [isLedgerOpen,setIsLedgerOpen]=useState(false);
+  const [ledgerTarget,setLedgerTarget]=useState<LedgerTarget|undefined>();
   const [isCloseOpen, setIsCloseOpen] = useState(false);
   const [sheets, setSheets] = useState<string[]>(['Sheet1']);
   const [anchor, setAnchor] = useState({row: 0, col: 0});
@@ -412,7 +414,8 @@ export const App: React.FC = () => {
       />
 
       <div className="flex items-center gap-3 bg-white border-b px-3 py-1 text-xs"><button disabled={busy} onClick={()=>setIsFindOpen(true)} className="border rounded px-2 py-1">Find (Ctrl+F)</button>
-        <button disabled={busy} onClick={()=>setIsLedgerOpen(true)} className="border rounded px-2 py-1">SQLite ledger</button>
+        <button disabled={busy} onClick={()=>{setLedgerTarget(undefined);setIsLedgerOpen(true);}} className="border rounded px-2 py-1">SQLite ledger</button>
+        <button disabled={busy||!selectedCellLoaded||gridDraft||formulaDraft} onClick={()=>{setLedgerTarget({sheet_name:sheetName,row:selectedRow,col:selectedCol});setIsLedgerOpen(true);}} className="border rounded px-2 py-1">Trace balance</button>
         <button disabled={busy} onClick={()=>void handleRecoverWorkbook()} className="border rounded px-2 py-1">Recover autosave</button>
         <form className="flex items-center gap-1" onSubmit={e=>{e.preventDefault();resizeColumn(selectedCol,Number(widthDraft));}}>
           <label htmlFor="column-width">Column {colIndexToName(selectedCol)} width</label><input id="column-width" aria-label="Column width in pixels" type="number" min="48" max="600" step="1" disabled={busy} value={widthDraft} onChange={e=>setWidthDraft(e.target.value)} className="w-16 border rounded p-1"/>
@@ -458,7 +461,7 @@ export const App: React.FC = () => {
         onViewportChange={handleViewportChange}
       />
 
-      {isLedgerOpen && <LedgerPanel key={workbookEpoch} onClose={()=>setIsLedgerOpen(false)}/>}
+      {isLedgerOpen && <LedgerPanel key={workbookEpoch} target={ledgerTarget} onClose={()=>setIsLedgerOpen(false)}/>}
       {isFindOpen && <FindPanel key={workbookEpoch} sheetName={sheetName} revision={`${workbookEpoch}:${reviewRevision}`} busy={busy} onNavigate={findNavigate} onClose={()=>setIsFindOpen(false)}/> }
       {isExplainOpen && <ExplainReviewPanel
         key={`${workbookEpoch}:${sheetName}:${selectedRow}:${selectedCol}`}

@@ -40,6 +40,8 @@ Editing a source-backed cell does **not** immediately change the database. **Rev
 
 Use **SQLite ledger** to browse a connected SQLite file without importing the rows into a worksheet. Choose a physical table with a single integer primary key, a posting-date column stored as `YYYY-MM-DD` text, and an amount stored as integer cents. Optional dates filter in SQLite. The count and total cover the full matching ledger, not just loaded rows. Totals outside SQLite’s signed 64-bit integer range produce an error.
 
+To check where a balance comes from, select a cell and choose **Trace balance**. Choose the ledger, the account column and code, and both dates, then load the results. Gridloom compares the cell’s underlying value in currency units (an exact integer or decimal, with no fractions of a cent) with the matching journal total and shows the difference. **Save link to cell** keeps the query in the workbook after you save it; it does not store the journal rows or change SQLite. A saved link runs against live data when opened again. If a source changes during browsing, reload before relying on the comparison.
+
 An index on the posting date (binary collation) and the primary key speeds ordered browsing. Scroll within a block, use the next/previous block controls, or jump directly to a row. Forward scrolling can seek from the current page; a distant jump still skips earlier rows in SQLite. If the source changes, reload the view so rows and totals agree. This read-only view does not write to the database or expose imported worksheet cells to formulas.
 
 ### Explain and review a calculation

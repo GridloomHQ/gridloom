@@ -1,7 +1,18 @@
 //! Read-only browsing of file-backed SQLite ledgers without materializing the result.
 use crate::state::AppState;
-use axum::{extract::State, http::StatusCode, Json};
-use rusqlite::{params, types::ValueRef, Connection, OpenFlags};
+use axum::{
+    extract::{Query, State},
+    http::StatusCode,
+    Json,
+};
+use gridloom_core::{
+    db::EngineKind,
+    virtual_view::ViewportRequest,
+    workbook::{LedgerLink, LedgerSpec},
+    CellCoord, Value, Workbook,
+};
+use rusqlite::types::Value as SqlValue;
+use rusqlite::{types::ValueRef, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -11,15 +22,6 @@ use std::{
 };
 use uuid::Uuid;
 
-#[derive(Clone, Deserialize, PartialEq, Eq)]
-pub struct LedgerSpec {
-    connection: String,
-    table: String,
-    date: String,
-    cents: String,
-    from: Option<String>,
-    through: Option<String>,
-}
 #[derive(Deserialize)]
 pub struct Request {
     spec: LedgerSpec,
@@ -76,7 +78,13 @@ fn same_file(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
     }
     a.len() == b.len() && a.modified().ok() == b.modified().ok()
 }
-fn predicate(s: &LedgerSpec) -> String {
+fn account_clause(s: &LedgerSpec, parameter: usize) -> String {
+    s.account
+        .as_ref()
+        .map(|a| format!(" AND {} COLLATE BINARY = ?{parameter}", ident(&a.column)))
+        .unwrap_or_default()
+}
+fn predicate(s: &LedgerSpec, account_parameter: usize) -> String {
     let d = ident(&s.date);
     let mut filters = vec![];
     if s.from.is_some() {
@@ -85,7 +93,7 @@ fn predicate(s: &LedgerSpec) -> String {
     if s.through.is_some() {
         filters.push(format!("{d} COLLATE BINARY <= ?2"));
     }
-    if filters.is_empty() {
+    let date_filters: String = if filters.is_empty() {
         "?1 IS NULL AND ?2 IS NULL".into()
     } else if s.through.is_none() {
         format!("{} AND ?2 IS NULL", filters[0])
@@ -94,7 +102,11 @@ fn predicate(s: &LedgerSpec) -> String {
             filters.push("?1 IS NULL".into());
         }
         filters.join(" AND ")
-    }
+    };
+    date_filters + &account_clause(s, account_parameter)
+}
+fn filter_values(s: &LedgerSpec) -> Vec<SqlValue> {
+    vec![s.from.clone().into(), s.through.clone().into()]
 }
 impl Ledger {
     fn open(spec: LedgerSpec, path: PathBuf) -> Result<Self, Failure> {
@@ -141,14 +153,25 @@ impl Ledger {
         if !fields.iter().any(|f| f.0 == spec.date) || !fields.iter().any(|f| f.0 == spec.cents) {
             return Err(bad("Select existing posting date and amount columns"));
         }
+        if spec
+            .account
+            .as_ref()
+            .is_some_and(|a| !fields.iter().any(|f| f.0 == a.column))
+        {
+            return Err(bad("Select an existing account column"));
+        }
         let table = ident(&spec.table);
         let key = ident(&keys[0].0);
         let date = ident(&spec.date);
         let amount = ident(&spec.cents);
-        let where_sql = predicate(&spec);
+        let where_sql = predicate(&spec, 3);
+        let mut filters = filter_values(&spec);
+        if let Some(a) = &spec.account {
+            filters.push(a.value.clone().into());
+        }
         let sql=format!("SELECT count(*), coalesce(sum(CASE WHEN typeof({amount})='integer' THEN {amount} END),0), count(CASE WHEN typeof({amount})!='integer' OR typeof({date})!='text' OR {date} NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' OR typeof({key})!='integer' THEN 1 END) FROM main.{table} WHERE {where_sql}");
         let (count, total, invalid): (i64, i64, i64) = db
-            .query_row(&sql, params![spec.from, spec.through], |r| {
+            .query_row(&sql, rusqlite::params_from_iter(filters), |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?))
             })
             .map_err(bad)?;
@@ -185,7 +208,7 @@ impl Ledger {
     fn page(&mut self, id: Uuid, offset: u64, limit: u32) -> Result<Page, Failure> {
         self.check()?;
         let table = ident(&self.spec.table);
-        let where_sql = predicate(&self.spec);
+        let where_sql = predicate(&self.spec, 5);
         let anchor = offset
             .checked_sub(self.last.0 + 1)
             .and_then(|i| self.last.1.get(i as usize));
@@ -200,11 +223,12 @@ impl Ledger {
             } else {
                 "AND ?2 IS NULL".to_string()
             };
+            let account = account_clause(&self.spec, 7);
             // Separate indexed ranges let SQLite seek on both keys inside a large tie group.
             format!("SELECT * FROM (
-                SELECT * FROM (SELECT * FROM main.{table} WHERE ?1 IS ?1 AND ?4=0 AND {date} COLLATE BINARY = ?5 AND {key} > ?6 ORDER BY {order} LIMIT ?3)
+                SELECT * FROM (SELECT * FROM main.{table} WHERE ?1 IS ?1 AND ?4=0 AND {date} COLLATE BINARY = ?5 AND {key} > ?6 {account} ORDER BY {order} LIMIT ?3)
                 UNION ALL
-                SELECT * FROM (SELECT * FROM main.{table} WHERE {date} COLLATE BINARY > ?5 {upper} ORDER BY {order} LIMIT ?3)
+                SELECT * FROM (SELECT * FROM main.{table} WHERE {date} COLLATE BINARY > ?5 {upper} {account} ORDER BY {order} LIMIT ?3)
             ) ORDER BY {order} LIMIT ?3")
         } else {
             format!(
@@ -230,6 +254,9 @@ impl Ledger {
         if let Some((d, k)) = anchor {
             q.push(d.clone().into());
             q.push((*k).into());
+        }
+        if let Some(a) = &self.spec.account {
+            q.push(a.value.clone().into());
         }
         let vals = stmt
             .query_map(rusqlite::params_from_iter(q), |row| {
@@ -279,6 +306,16 @@ pub async fn browse(
     if !(1..=200).contains(&input.limit) || input.offset > i64::MAX as u64 {
         return Err(bad("Invalid page size or offset"));
     }
+    if input
+        .spec
+        .account
+        .as_ref()
+        .is_some_and(|a| a.column.is_empty() || a.value.is_empty() || a.value.len() > 1024)
+    {
+        return Err(bad(
+            "Use an account code of 1 to 1024 bytes and an account column",
+        ));
+    }
     for date in [&input.spec.from, &input.spec.through]
         .into_iter()
         .flatten()
@@ -297,9 +334,7 @@ pub async fn browse(
             .connection_configs
             .get(&input.spec.connection)
             .ok_or_else(|| bad("Unknown connection"))?;
-        if !matches!(config.kind, gridloom_core::db::EngineKind::Sqlite)
-            || config.path == ":memory:"
-        {
+        if !matches!(config.kind, EngineKind::Sqlite) || config.path == ":memory:" {
             return Err(bad("Use a file-backed SQLite connection"));
         }
         PathBuf::from(&config.path)
@@ -334,6 +369,147 @@ pub async fn browse(
     .map_err(bad)?
 }
 
+#[derive(Deserialize)]
+pub struct Target {
+    sheet_name: String,
+    row: u32,
+    col: u32,
+}
+#[derive(Deserialize)]
+pub struct UpdateLink {
+    target: Target,
+    session: Option<Uuid>,
+}
+#[derive(Serialize)]
+pub struct Trace {
+    link: Option<LedgerSpec>,
+    source_changed: bool,
+    balance_cents: Option<String>,
+}
+fn exact_cents(value: Value) -> Option<i128> {
+    match value {
+        Value::Integer(n) => Some(i128::from(n) * 100),
+        Value::Decimal(n) => {
+            let divisor = 10_i128.pow(n.scale());
+            let cents = n.mantissa() * 100;
+            (cents % divisor == 0).then_some(cents / divisor)
+        }
+        _ => None,
+    }
+}
+fn trace(wb: &Workbook, target: &Target) -> Result<Trace, Failure> {
+    let sheet = wb
+        .sheets
+        .get(&target.sheet_name)
+        .ok_or_else(|| bad("Unknown sheet"))?;
+    if target.row >= sheet.max_rows || target.col >= sheet.max_cols {
+        return Err(bad("Cell is outside the worksheet"));
+    }
+    let a1 = CellCoord::new(target.row, target.col).to_a1();
+    let link = sheet.ledger_links.get(&a1);
+    let source_changed = link.is_some_and(|l| {
+        !wb.connection_configs
+            .get(&l.spec.connection)
+            .is_some_and(|cfg| matches!(cfg.kind, EngineKind::Sqlite) && cfg.path == l.source_path)
+    });
+    let balance_cents = if wb.stale_calculation_sheets.contains(&target.sheet_name) {
+        None
+    } else {
+        let view = wb
+            .get_viewport(&ViewportRequest {
+                sheet_name: target.sheet_name.clone(),
+                start_row: target.row,
+                end_row: target.row,
+                start_col: target.col,
+                end_col: target.col,
+                overscan: 0,
+            })
+            .map_err(bad)?;
+        view.cells
+            .into_iter()
+            .find_map(|(key, cell)| {
+                (key == a1 && !cell.is_staged)
+                    .then(|| exact_cents(cell.raw_value))
+                    .flatten()
+            })
+            .map(|v| v.to_string())
+    };
+    Ok(Trace {
+        link: link.map(|l| l.spec.clone()),
+        source_changed,
+        balance_cents,
+    })
+}
+
+pub async fn get_trace(
+    State(state): State<AppState>,
+    Query(target): Query<Target>,
+) -> Result<Json<Trace>, Failure> {
+    let wb = state.workbook.read().await;
+    trace(&wb, &target).map(Json)
+}
+
+pub async fn update_trace(
+    State(state): State<AppState>,
+    Json(input): Json<UpdateLink>,
+) -> Result<Json<Trace>, Failure> {
+    let link = if let Some(id) = input.session {
+        let ledgers = state.ledgers.clone();
+        let link = tokio::task::spawn_blocking(move || {
+            let sessions = ledgers.0.lock().map_err(bad)?;
+            let ledger = sessions
+                .get(&id)
+                .filter(|l| l.touched.elapsed() < Duration::from_secs(600))
+                .ok_or_else(stale)?;
+            ledger.check()?;
+            if ledger.spec.account.is_none()
+                || ledger.spec.from.is_none()
+                || ledger.spec.through.is_none()
+            {
+                return Err(bad(
+                    "Choose an account and both dates to save a ledger link",
+                ));
+            }
+            Ok(LedgerLink {
+                spec: ledger.spec.clone(),
+                source_path: ledger.path.to_string_lossy().into_owned(),
+            })
+        })
+        .await
+        .map_err(bad)??;
+        Some(link)
+    } else {
+        None
+    };
+    let mut wb = state.workbook.write().await;
+    let before = trace(&wb, &input.target)?;
+    if let Some(l) = &link {
+        if before.balance_cents.is_none() {
+            return Err(bad(
+                "Select a committed exact numeric cell in currency units with no fractional cents",
+            ));
+        }
+        if !wb
+            .connection_configs
+            .get(&l.spec.connection)
+            .is_some_and(|c| matches!(c.kind, EngineKind::Sqlite) && c.path == l.source_path)
+        {
+            return Err(stale());
+        }
+    }
+    let sheet = wb
+        .sheets
+        .get_mut(&input.target.sheet_name)
+        .ok_or_else(|| bad("Unknown sheet"))?;
+    let key = CellCoord::new(input.target.row, input.target.col).to_a1();
+    if let Some(l) = link {
+        sheet.ledger_links.insert(key, l);
+    } else {
+        sheet.ledger_links.remove(&key);
+    }
+    trace(&wb, &input.target).map(Json)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,6 +534,7 @@ mod tests {
             cents: "cents".into(),
             from: None,
             through: None,
+            account: None,
         }
     }
     #[test]
