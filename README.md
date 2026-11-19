@@ -36,6 +36,12 @@ The database stays in its original format. Eligible single-table projections wit
 
 Editing a source-backed cell does **not** immediately change the database. **Review Edits** shows original and proposed values before an explicit apply. Applying a changeset checks for conflicting external changes and uses a database transaction; a conflict or error rolls back that changeset. Saving a workbook is separate from applying its source edits.
 
+### Browse a large SQLite ledger
+
+Use **SQLite ledger** to browse a connected SQLite file without importing the rows into a worksheet. Choose a physical table with a single integer primary key, a posting-date column stored as `YYYY-MM-DD` text, and an amount stored as integer cents. Optional dates filter in SQLite. The count and total cover the full matching ledger, not just loaded rows. Totals outside SQLite’s signed 64-bit integer range produce an error.
+
+An index on the posting date (binary collation) and the primary key speeds ordered browsing. Scroll within a block, use the next/previous block controls, or jump directly to a row. Forward scrolling can seek from the current page; a distant jump still skips earlier rows in SQLite. If the source changes, reload the view so rows and totals agree. This read-only view does not write to the database or expose imported worksheet cells to formulas.
+
 ### Explain and review a calculation
 
 Use **Explain & Review** to inspect a cell's formula, captured inputs and available source-row provenance. Follow upstream inputs and downstream consumers, compare observed states, and attach supporting files with retained versions.
@@ -131,7 +137,7 @@ Start with the sample databases to explore SQL tables, or use **Monthly close** 
 - **Local working papers, not assurance.** Reviewer names are self-reported, not authenticated signatures. A review pack does not prove ledger completeness, provide audit assurance or replace an external database backup.
 - **Protect the files.** Workbooks and embedded evidence are unencrypted. Connection paths refer to the machine running the server; source databases are not embedded backups. Keep the local service private rather than exposing it as a multi-user server.
 - **Save deliberately.** There is no autosave or universal native-window-close protection. Save/Discard/Cancel guards cover supported in-app replacement flows, not every way a process can exit.
-- **Know the scale.** The grid is virtualized, but SQL results are fully materialized in memory. Source refresh is explicit, not automatic monitoring. Find and bulk worksheet operations have bounded limits.
+- **Know the scale.** The grid is virtualized. SQL results imported into worksheet tables are fully materialized; the read-only SQLite ledger view loads pages instead. Source refresh is explicit, not automatic monitoring. Find and bulk worksheet operations have bounded limits.
 - **Standards are not implemented.** IFRS/XBRL taxonomy validation and an add-on system are not current capabilities.
 
 ## Development and verification
@@ -150,6 +156,8 @@ cargo run --locked -p gridloom-server -- --bench
 ```
 
 `test:browser` exercises a synthetic monthly close. [CI](.github/workflows/ci.yml) also runs dedicated worksheet, save-safety and formula regression suites, a native window-startup smoke test, and exact-commit package integrity/relocation checks. Native startup coverage is not comprehensive interactive desktop testing.
+
+To smoke-test the connected ledger in a browser, run `(cd frontend && npm run test:ledger)` after building the server and frontend. The ignored server test `ledger_benchmark` recreates the two-million-row synthetic dataset with `GRIDLOOM_LEDGER_BENCH_MODE=fixture`; rerun with `paged` and `eager` in separate processes using the same fresh `GRIDLOOM_LEDGER_BENCH_PATH` to compare timings and peak RSS.
 
 The benchmark command checks four bounded workloads and resource budgets. Linux memory measurement uses the process peak RSS; these checks are smoke tests, not a production-scale performance guarantee. On hosts without the required memory measurement, the resource gate is unavailable and the command exits unsuccessfully.
 

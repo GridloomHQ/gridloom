@@ -44,7 +44,7 @@ let pendingMutations=0;
 const mutationListeners=new Set<()=>void>();
 export const getPendingMutations=()=>pendingMutations;
 export const subscribeMutations=(listener:()=>void)=>{mutationListeners.add(listener);return()=>{mutationListeners.delete(listener);};};
-const readPostPaths=new Set(['/api/ranges/summary','/api/ranges/capture','/api/ranges/read','/api/cells/find','/api/cells/explain','/api/cells/dependencies','/api/cells/viewport','/api/cells/viewport-panes','/api/query/analyze','/api/writeback/review','/api/benchmark/run']);
+const readPostPaths=new Set(['/api/ledger/page','/api/ranges/summary','/api/ranges/capture','/api/ranges/read','/api/cells/find','/api/cells/explain','/api/cells/dependencies','/api/cells/viewport','/api/cells/viewport-panes','/api/query/analyze','/api/writeback/review','/api/benchmark/run']);
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const changing=!!options?.method && options.method!=='GET' && !readPostPaths.has(url);
   if(changing){pendingMutations++;mutationListeners.forEach(listener=>listener());}
@@ -101,6 +101,7 @@ export const api = {
   openWorkbook: (path: string) => fetchJson<any>('/api/workbook/open', { method: 'POST', body: JSON.stringify({ path }) }),
   saveWorkbook: (path: string) => fetchJson<any>('/api/workbook/save', { method: 'POST', body: JSON.stringify({ path }) }),
 
+  ledgerPage: (input: LedgerRequest, signal?: AbortSignal) => fetchJson<LedgerPage>("/api/ledger/page", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(input), signal}),
   getConnections: () => fetchJson<{ name: string; kind: string; path: string }[]>('/api/connections'),
   connectDb: (name: string, kind: string, path: string) =>
     fetchJson<any>('/api/connections', {
@@ -183,3 +184,7 @@ export const api = {
 
   runBenchmarks: () => fetchJson<BenchmarkSuiteReport>('/api/benchmark/run', { method: 'POST' }),
 };
+
+export type LedgerSpec = {connection:string;table:string;date:string;cents:string;from:string|null;through:string|null};
+export type LedgerRequest = {spec:LedgerSpec;session:string|null;offset:number;limit:number};
+export type LedgerPage = {session:string;columns:string[];rows:(string|null)[][];count:number;total_cents:string};

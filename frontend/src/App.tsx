@@ -1,3 +1,4 @@
+import { LedgerPanel } from './components/LedgerPanel';
 import {SelectionSummary} from './components/SelectionSummary';
 import {isCellLoaded} from './utils/frozenViewport';
 import { FindPanel, FindMatch } from './components/FindPanel';
@@ -26,6 +27,7 @@ import { colIndexToName, coordToA1 } from './utils/coords';
 
 export const App: React.FC = () => {
   const [isFindOpen,setIsFindOpen]=useState(false);
+  const [isLedgerOpen,setIsLedgerOpen]=useState(false);
   const [isCloseOpen, setIsCloseOpen] = useState(false);
   const [sheets, setSheets] = useState<string[]>(['Sheet1']);
   const [anchor, setAnchor] = useState({row: 0, col: 0});
@@ -397,6 +399,7 @@ export const App: React.FC = () => {
       />
 
       <div className="flex items-center gap-3 bg-white border-b px-3 py-1 text-xs"><button disabled={busy} onClick={()=>setIsFindOpen(true)} className="border rounded px-2 py-1">Find (Ctrl+F)</button>
+        <button disabled={busy} onClick={()=>setIsLedgerOpen(true)} className="border rounded px-2 py-1">SQLite ledger</button>
         <form className="flex items-center gap-1" onSubmit={e=>{e.preventDefault();resizeColumn(selectedCol,Number(widthDraft));}}>
           <label htmlFor="column-width">Column {colIndexToName(selectedCol)} width</label><input id="column-width" aria-label="Column width in pixels" type="number" min="48" max="600" step="1" disabled={busy} value={widthDraft} onChange={e=>setWidthDraft(e.target.value)} className="w-16 border rounded p-1"/>
           <span>px</span><button disabled={busy} className="border rounded px-2 py-1">Set width</button><button type="button" disabled={busy} onClick={()=>resizeColumn(selectedCol,null)} className="border rounded px-2 py-1">Reset width</button>
@@ -441,6 +444,7 @@ export const App: React.FC = () => {
         onViewportChange={handleViewportChange}
       />
 
+      {isLedgerOpen && <LedgerPanel key={workbookEpoch} onClose={()=>setIsLedgerOpen(false)}/>}
       {isFindOpen && <FindPanel key={workbookEpoch} sheetName={sheetName} revision={`${workbookEpoch}:${reviewRevision}`} busy={busy} onNavigate={findNavigate} onClose={()=>setIsFindOpen(false)}/> }
       {isExplainOpen && <ExplainReviewPanel
         key={`${workbookEpoch}:${sheetName}:${selectedRow}:${selectedCol}`}

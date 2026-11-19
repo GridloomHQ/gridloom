@@ -11,6 +11,7 @@
     "test:summary": "node tests/selection-summary-smoke.mjs",
     "test:usability": "node tests/usability-smoke.mjs",
     "test:browser": "node tests/browser-smoke.mjs",
+    "test:ledger": "node tests/ledger-smoke.mjs",
     "test:product-mod": "node tests/product-mod-smoke.mjs",
     "test:sumproduct": "node tests/sumproduct-smoke.mjs",
     "test:ceiling-floor": "node tests/ceiling-floor-smoke.mjs"

@@ -63,6 +63,7 @@ pub fn create_router(state: AppState) -> Router {
         )
         // Query Execution & Lineage
         .route("/api/query/execute", post(execute_query))
+        .route("/api/ledger/page", post(crate::ledger::browse))
         .route("/api/query/analyze", post(analyze_query))
         // Named Data Sources
         .route("/api/sources", get(list_sources).post(create_source))
