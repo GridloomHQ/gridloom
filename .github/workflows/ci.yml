@@ -103,6 +103,9 @@ jobs:
         working-directory: ./frontend
         run: node tests/save-smoke.mjs
 
+      - name: Autosave recovery after process kill
+        run: python3 scripts/recovery-crash-smoke.py target/debug/gridloom-server
+
       - name: Real browser autosave recovery
         working-directory: ./frontend
         run: node tests/recovery-smoke.mjs
@@ -155,7 +158,6 @@ jobs:
             target/usability-smoke/*
             target/selection-summary-smoke/*
             target/save-smoke/*
-            target/recovery-smoke/*
             target/formula-reference-smoke/*
             target/lookup-smoke/*
             target/function-completion-smoke/*
