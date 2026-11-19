@@ -170,6 +170,7 @@ pub async fn track_mutations(
             | "/api/ranges/capture"
             | "/api/query/execute"
             | "/api/query/analyze"
+            | "/api/ledger/page"
             | "/api/cells/viewport"
             | "/api/cells/viewport-panes"
             | "/api/cells/find"
@@ -375,6 +376,40 @@ mod tests {
                 .unwrap(),
             11
         );
+    }
+
+    #[tokio::test]
+    async fn ledger_browsing_leaves_workbook_recovery_clean() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("ledger.db");
+        rusqlite::Connection::open(&db)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE entries (id INTEGER PRIMARY KEY, posted TEXT, amount INTEGER);
+                 INSERT INTO entries VALUES (1, '2026-11-19', 11);",
+            )
+            .unwrap();
+        let mut workbook = Workbook::new();
+        workbook.add_sqlite_connection("Ledger", &db).unwrap();
+        let mut state = AppState::new(workbook);
+        let copies = dir.path().join("recovery");
+        let recovery = Arc::new(tokio::sync::Mutex::new(Recovery::new(copies.clone())));
+        state.recovery = Some(recovery.clone());
+        let app = crate::routes::create_router(state.clone());
+        let (status, result) = call(
+            &app,
+            "POST",
+            "/api/ledger/page",
+            json!({
+                "spec":{"connection":"Ledger","table":"entries","date":"posted","cents":"amount"},
+                "offset":0,"limit":1
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{result:?}");
+        assert_eq!(result["total_cents"], "11");
+        checkpoint(state.workbook.clone(), recovery).await.unwrap();
+        assert!(!copies.exists());
     }
 
     #[tokio::test]

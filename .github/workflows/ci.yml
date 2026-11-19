@@ -99,6 +99,10 @@ jobs:
         working-directory: ./frontend
         run: node tests/save-smoke.mjs
 
+      - name: Real browser autosave recovery
+        working-directory: ./frontend
+        run: node tests/recovery-smoke.mjs
+
       - name: Real browser formula reference locks
         working-directory: ./frontend
         run: node tests/formula-reference-smoke.mjs
@@ -147,6 +151,7 @@ jobs:
             target/usability-smoke/*
             target/selection-summary-smoke/*
             target/save-smoke/*
+            target/recovery-smoke/*
             target/formula-reference-smoke/*
             target/lookup-smoke/*
             target/function-completion-smoke/*
