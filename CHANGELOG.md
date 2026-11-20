@@ -1,3 +1,14 @@
+# 0.8.0
+
+- Group worksheet commands and simplify Explain & Review without changing the underlying trace or review rules.
+- Add the **fx** function picker, inline completion, keyboard range picking in F2 edits, and live formula-reference highlighting.
+- Format source-backed worksheet tables without editing the source or staging writeback.
+- Freeze a row and column boundary at the current selection, or set each axis independently.
+- Render signed bar and column charts and configure chart and pivot fields by drag-and-drop or keyboard.
+- Generate and browse a ten-million-row SQLite sample on demand from **Help → About → Sample**. No large sample ships with the app.
+- Make Monthly close an opt-in add-on and preserve existing close workpapers.
+- Open the native Linux desktop window on Wayland as well as X11.
+
 # 0.7.0
 
 - Sort and filter bounded worksheet ranges without moving the underlying cells or changing formula references.

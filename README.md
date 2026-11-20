@@ -16,10 +16,10 @@ It is aimed at accounting and financial models where understanding **where a num
 - Use multiple sheets, cross-sheet formulas, named table references and dynamic array spills.
 - Select, copy and paste ranges; fill formulas; format numbers and cells; undo and redo supported cell operations.
 - Use **Paste Special** on a worksheet selection copied in Gridloom: paste typed values without formulas, or paste formulas with adjusted relative references. Both keep destination formatting; formulas-only paste skips source constants and blanks. See **Keyboard shortcuts** above the grid.
-- Find cached values or formula inputs, jump to a cell, resize columns, freeze the first row or column, and show formulas directly in the grid.
-- Get selection totals, complete supported function names in the formula bar, and cycle relative/absolute references with F4.
+- Find cached values or formula inputs, jump to a cell, resize columns, freeze the rows above or columns to the left of the current cell from **View**, and show formulas directly in the grid.
+- Get selection totals, browse functions with **fx**, and complete function names in either editor. In an F2 edit, use arrows where a formula expects a reference and hold Shift to extend the range. Referenced cells are outlined while you edit. F4 cycles relative and absolute references.
 - Select a worksheet range and open **Sort & filter** for a read-only view. You can use the first row as headers, sort and filter on different columns, and jump back to a result’s original row. Formulas, database links and staging are unchanged. Each view supports up to 1,000 rows, 50 columns and 5,000 cells.
-- Build pivot tables and column, bar, line, pie or scatter charts. Reopen a saved pivot and choose **Refresh from source** to rerun its read query without changing its layout, the workbook snapshot, or any staged database edits.
+- Build pivots and charts by dragging fields into the layout wells, or use the field pickers by keyboard. Choose signed bar and column charts, lines, pies or scatterplots. Reopen a saved pivot and choose **Refresh from source** to rerun its read query without changing its layout, the workbook snapshot, or any staged database edits.
 - Save and reopen `.gridloom` workbooks, including layouts, calculations and pending source edits.
 
 The formula engine includes arithmetic, statistics, logic, text, date, lookup and financial functions, plus `SQLVALUE` and `SQLTABLE`. Examples include `SUMIFS`, `SUMPRODUCT`, `XLOOKUP`, `FILTER`, `PMT` and `NPV`. The formula bar's suggestions and the local `/api/functions` endpoint expose the engine's supported function names and aliases.
@@ -34,7 +34,7 @@ Connect an existing **SQLite** or **DuckDB** file, run a read-only query, and in
 =SQLVALUE("SalesDB", "SELECT SUM(amount) FROM invoices WHERE customer_name = ?", A2)
 ```
 
-The database stays in its original format. Eligible single-table projections with direct column mappings and declared primary keys can support staged edits. Joined, aggregated or ambiguous results remain read-only.
+Apply worksheet presentation formatting to source-backed cells without staging data edits. The database stays in its original format. Eligible single-table projections with direct column mappings and declared primary keys can support staged edits. Joined, aggregated or ambiguous results remain read-only.
 
 When you edit an eligible source-backed cell, Gridloom checks the declared SQL column type before staging. For example, an integer rejects fractions, a decimal rejects excess scale rather than rounding, and text keeps leading zeroes. Use **Set SQL NULL** for a nullable cell; it is distinct from empty text. Unsupported types are read-only. The database still checks its remaining constraints when you apply edits.
 

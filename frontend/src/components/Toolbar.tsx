@@ -10,7 +10,7 @@ interface ToolbarProps {
   onOpenAuditLog: () => void; onOpenBenchmarks: () => void;
   onNewWorkbook: () => void; onSaveWorkbook: () => void; onSaveAsWorkbook: () => void;
   onOpenWorkbook: () => void; onRefreshAll: () => void; onApplyFormat: (format: string) => void;
-  stagedCount: number; onOpenAbout?: () => void;
+  stagedCount: number; onOpenAbout: () => void;
   fileExtras: ReactNode; homeExtras: ReactNode; insertExtras: ReactNode; dataExtras: ReactNode; viewExtras: ReactNode;
 }
 
@@ -22,6 +22,7 @@ function Group({ name, children }: {name: string; children: ReactNode}) {
 }
 
 export function Toolbar(p: ToolbarProps) {
+  const [helpOpen, setHelpOpen] = useState(false);
   const [addonsOpen, setAddonsOpen] = useState(false);
   const command = (label: string, run: () => void, title?: string) => <button type="button" disabled={p.busy}
     onMouseDown={e => e.preventDefault()} onClick={run} title={title}
@@ -65,13 +66,17 @@ export function Toolbar(p: ToolbarProps) {
       </Group>
       <Group name="View">{p.viewExtras}</Group>
       <Group name="Help">
-        {p.onOpenAbout && command('About', p.onOpenAbout)}
-        {command('Benchmarks', p.onOpenBenchmarks, 'Performance Acceptance Protocol')}
+        <button type="button" disabled={p.busy} aria-expanded={helpOpen} aria-controls="worksheet-help"
+          onClick={() => setHelpOpen(open => !open)} className="rounded px-2 py-1 hover:bg-slate-100">Help</button>
         <button type="button" disabled={p.busy} aria-expanded={addonsOpen} aria-controls="worksheet-addons"
           onClick={() => setAddonsOpen(open => !open)} className="rounded px-2 py-1 hover:bg-slate-100">Add-ons</button>
         {p.closeAddon && command('Monthly close', p.onOpenClose)}
       </Group>
     </div>
+    {helpOpen && <div id="worksheet-help" className="flex items-center gap-2 border-t px-2 py-1" onKeyDown={event => { if(event.key==='Escape')setHelpOpen(false); }}>
+      {command('About', () => {setHelpOpen(false);p.onOpenAbout();})}
+      {command('Benchmarks', () => {setHelpOpen(false);p.onOpenBenchmarks();}, 'Performance Acceptance Protocol')}
+    </div>}
     {addonsOpen && <div id="worksheet-addons" className="flex flex-wrap items-center gap-2 border-t px-2 py-2">
       <label className="flex items-center gap-2"><input type="checkbox" checked={p.closeAddon} disabled={p.busy}
         onChange={e => p.onToggleCloseAddon(e.target.checked)} />Enable Monthly close add-on</label>
