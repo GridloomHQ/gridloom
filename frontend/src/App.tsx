@@ -10,11 +10,11 @@ import { normalizedRange, encodeTsv, decodeTsv, boundedRangeDimensions, ordinary
 import { displayValue } from './utils/values';
 import { ExplainReviewPanel } from './components/ExplainReviewPanel';
 import { OpenQuestions } from './components/OpenQuestions';
-import { Toolbar } from './components/Toolbar';
+import { Toolbar, worksheetCommandClass } from './components/Toolbar';
 import { SheetTabs } from './components/SheetTabs';
 import { FormulaBar } from './components/FormulaBar';
 import { Grid } from './components/Grid';
-import { PasteControls, type PasteMode } from './components/PasteControls';
+import { KeyboardShortcutsDialog, PasteSpecialDialog, type PasteMode } from './components/PasteControls';
 import { SchemaBrowserModal } from './components/SchemaBrowserModal';
 import { QueryEditorModal } from './components/QueryEditorModal';
 import { InsertTableModal } from './components/InsertTableModal';
@@ -70,6 +70,7 @@ export const App: React.FC = () => {
   const metadataSequence = useRef(0);
   const clipboard = useRef<{text:string;values:string[][];snapshot:string;sheet:string;range:GridRange} | null>(null);
   const [pasteSpecialOpen, setPasteSpecialOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [copyData, setCopyData] = useState<{text:string;values:string[][];snapshot:string;key:string} | null>(null);
   const reviewDrafts = useRef(new Map<string, ReviewDraft>());
   const [isExplainOpen, setIsExplainOpen] = useState(false);
@@ -538,42 +539,49 @@ export const App: React.FC = () => {
         onRefreshAll={handleRefreshAll}
         onApplyFormat={handleApplyFormat}
         fileExtras={<>
-        <button disabled={busy} onClick={()=>void handleRecoverWorkbook()} className="border rounded px-2 py-1">Recover autosave</button>
+        <button disabled={busy} onClick={()=>void handleRecoverWorkbook()} className={worksheetCommandClass}>Recover autosave</button>
         </>}
         homeExtras={<>
-        <button disabled={busy} onClick={()=>setIsFindOpen(true)} className="border rounded px-2 py-1">Find (Ctrl+F)</button>
-        <PasteControls open={pasteSpecialOpen} onOpen={()=>setPasteSpecialOpen(true)} onClose={()=>setPasteSpecialOpen(false)}
-          onPaste={handlePasteSpecial} busy={busy||gridDraft||formulaDraft}
-          copySource={clipboard.current ? `${clipboard.current.sheet}!${coordToA1(clipboard.current.range.start.row,clipboard.current.range.start.col)}:${coordToA1(clipboard.current.range.end.row,clipboard.current.range.end.col)}` : null}/>
+        <button disabled={busy} onClick={()=>setIsFindOpen(true)} className={worksheetCommandClass}>Find (Ctrl+F)</button>
+        <button type="button" className={worksheetCommandClass} disabled={busy||gridDraft||formulaDraft}
+          aria-haspopup="dialog" aria-keyshortcuts="Control+Alt+V Meta+Alt+V"
+          onClick={()=>setPasteSpecialOpen(true)} title="Ctrl/Command + Alt/Option + V">Paste Special</button>
+        <button type="button" className={worksheetCommandClass} aria-haspopup="dialog"
+          onClick={()=>setShortcutsOpen(true)}>Keyboard shortcuts</button>
         </>}
         insertExtras={<>
-<button disabled={busy||apiPending>0||gridDraft||formulaDraft||!selectedCellLoaded} onClick={insertSelectedRows} className="border rounded px-2 py-1" title="Insert one blank row per selected row. Clears Undo/Redo.">Insert rows above</button>
+<button disabled={busy||apiPending>0||gridDraft||formulaDraft||!selectedCellLoaded} onClick={insertSelectedRows} className={worksheetCommandClass} title="Insert one blank row per selected row. Clears Undo/Redo.">Insert rows above</button>
         </>}
         dataExtras={<>
-<button disabled={busy||apiPending>0||gridDraft||formulaDraft} onMouseDown={e=>{if(gridDraft||formulaDraft)e.preventDefault();}} onClick={()=>setSortFilterRange(selection)} className="border rounded px-2 py-1">Sort &amp; filter</button>
-        <button disabled={busy} onClick={()=>{setLedgerTarget(undefined);setIsLedgerOpen(true);}} className="border rounded px-2 py-1">SQLite ledger</button>
-        <button disabled={busy||!selectedCellLoaded||gridDraft||formulaDraft} onClick={()=>{setLedgerTarget({sheet_name:sheetName,row:selectedRow,col:selectedCol});setIsLedgerOpen(true);}} className="border rounded px-2 py-1">Trace balance</button>
-        {activeCellData?.table_name&&!activeCellData.is_table_header&&<button disabled={busy||gridDraft||formulaDraft} onClick={()=>void handleCommitCell(selectedRow,selectedCol,'',true)} className="border rounded px-2 py-1" title="Stage SQL NULL; use a normal edit to enter empty or literal text">Set SQL NULL</button>}
+<button disabled={busy||apiPending>0||gridDraft||formulaDraft} onMouseDown={e=>{if(gridDraft||formulaDraft)e.preventDefault();}} onClick={()=>setSortFilterRange(selection)} className={worksheetCommandClass}>Sort &amp; filter</button>
+        <button disabled={busy} onClick={()=>{setLedgerTarget(undefined);setIsLedgerOpen(true);}} className={worksheetCommandClass}>SQLite ledger</button>
+        <button disabled={busy||!selectedCellLoaded||gridDraft||formulaDraft} onClick={()=>{setLedgerTarget({sheet_name:sheetName,row:selectedRow,col:selectedCol});setIsLedgerOpen(true);}} className={worksheetCommandClass}>Trace balance</button>
+        {activeCellData?.table_name&&!activeCellData.is_table_header&&<button disabled={busy||gridDraft||formulaDraft} onClick={()=>void handleCommitCell(selectedRow,selectedCol,'',true)} className={worksheetCommandClass} title="Stage SQL NULL; use a normal edit to enter empty or literal text">Set SQL NULL</button>}
         </>}
         viewExtras={<>
         <form className="flex items-center gap-1" onSubmit={e=>{e.preventDefault();resizeColumn(selectedCol,Number(widthDraft));}}>
           <label htmlFor="column-width">Column {colIndexToName(selectedCol)} width</label><input id="column-width" aria-label="Column width in pixels" type="number" min="48" max="600" step="1" disabled={busy} value={widthDraft} onChange={e=>setWidthDraft(e.target.value)} className="w-16 border rounded p-1"/>
-          <span>px</span><button disabled={busy} className="border rounded px-2 py-1">Set width</button><button type="button" disabled={busy} onClick={()=>resizeColumn(selectedCol,null)} className="border rounded px-2 py-1">Reset width</button>
+          <span>px</span><button disabled={busy} className={worksheetCommandClass}>Set width</button><button type="button" disabled={busy} onClick={()=>resizeColumn(selectedCol,null)} className={worksheetCommandClass}>Reset width</button>
         </form>
-        <label className="flex items-center gap-1" onMouseDown={e=>e.preventDefault()} title={gridDraft||formulaDraft?'Finish or cancel the current cell edit before changing formula view.':'Show formula text without changing values, clipboard, Find or exports.'}>
+        <label className="flex items-center gap-1 rounded border border-slate-300 px-2 py-1" onMouseDown={e=>e.preventDefault()} title={gridDraft||formulaDraft?'Finish or cancel the current cell edit before changing formula view.':'Show formula text without changing values, clipboard, Find or exports.'}>
           <input type="checkbox" checked={showFormulas} disabled={busy||apiPending>0||gridDraft||formulaDraft}
             onChange={e=>{if(gridDraft||formulaDraft||mutationLock.current||getPendingMutations()>0)return;void mutate('Updated formula view',()=>api.setShowFormulas(sheetName,e.target.checked),true);}}/>Show formulas
         </label>
-        <label className="flex items-center gap-1"><input type="checkbox" checked={frozenRows===1} disabled={freezeDisabled} onChange={e=>updateFreeze(e.target.checked?1:0,frozenColumns)}/>Freeze top row</label>
-        <label className="flex items-center gap-1"><input type="checkbox" checked={frozenColumns===1} disabled={freezeDisabled} onChange={e=>updateFreeze(frozenRows,e.target.checked?1:0)}/>Freeze first column</label>
-        <button type="button" className="border rounded px-2 py-1" disabled={freezeDisabled||selectedRow===0} onClick={()=>updateFreeze(selectedRow,frozenColumns)}>Freeze rows above</button>
-        <button type="button" className="border rounded px-2 py-1" disabled={freezeDisabled||selectedCol===0} onClick={()=>updateFreeze(frozenRows,selectedCol)}>Freeze columns to the left</button>
-        <button type="button" className="border rounded px-2 py-1" disabled={freezeDisabled||(selectedRow===0&&selectedCol===0)} onClick={()=>updateFreeze(selectedRow,selectedCol)}>Freeze at selection</button>
-        {frozenRows>1&&<button type="button" className="border rounded px-2 py-1" disabled={freezeDisabled} onClick={()=>updateFreeze(0,frozenColumns)}>Unfreeze {frozenRows} rows</button>}
-        {frozenColumns>1&&<button type="button" className="border rounded px-2 py-1" disabled={freezeDisabled} onClick={()=>updateFreeze(frozenRows,0)}>Unfreeze {frozenColumns} columns</button>}
+        <label className="flex items-center gap-1 rounded border border-slate-300 px-2 py-1"><input type="checkbox" checked={frozenRows===1} disabled={freezeDisabled} onChange={e=>updateFreeze(e.target.checked?1:0,frozenColumns)}/>Freeze top row</label>
+        <label className="flex items-center gap-1 rounded border border-slate-300 px-2 py-1"><input type="checkbox" checked={frozenColumns===1} disabled={freezeDisabled} onChange={e=>updateFreeze(frozenRows,e.target.checked?1:0)}/>Freeze first column</label>
+        <button type="button" className={worksheetCommandClass} disabled={freezeDisabled||selectedRow===0} onClick={()=>updateFreeze(selectedRow,frozenColumns)}>Freeze rows above</button>
+        <button type="button" className={worksheetCommandClass} disabled={freezeDisabled||selectedCol===0} onClick={()=>updateFreeze(frozenRows,selectedCol)}>Freeze columns to the left</button>
+        <button type="button" className={worksheetCommandClass} disabled={freezeDisabled||(selectedRow===0&&selectedCol===0)} onClick={()=>updateFreeze(selectedRow,selectedCol)}>Freeze at selection</button>
+        {frozenRows>1&&<button type="button" className={worksheetCommandClass} disabled={freezeDisabled} onClick={()=>updateFreeze(0,frozenColumns)}>Unfreeze {frozenRows} rows</button>}
+        {frozenColumns>1&&<button type="button" className={worksheetCommandClass} disabled={freezeDisabled} onClick={()=>updateFreeze(frozenRows,0)}>Unfreeze {frozenColumns} columns</button>}
         </>}
         stagedCount={stagedCount}
       />
+
+      {pasteSpecialOpen && <PasteSpecialDialog onClose={()=>setPasteSpecialOpen(false)}
+        onPaste={handlePasteSpecial} busy={busy||gridDraft||formulaDraft}
+        copySource={clipboard.current ? `${clipboard.current.sheet}!${coordToA1(clipboard.current.range.start.row,clipboard.current.range.start.col)}:${coordToA1(clipboard.current.range.end.row,clipboard.current.range.end.col)}` : null}/>}
+      {shortcutsOpen && <KeyboardShortcutsDialog onClose={()=>setShortcutsOpen(false)}/>}
 
       {/* Formula Bar */}
       <FormulaBar sheetName={sheetName} onDraftChange={setFormulaDraft} onDraftText={setFormulaDraftText}

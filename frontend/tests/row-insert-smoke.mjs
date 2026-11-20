@@ -37,6 +37,7 @@ try {
   await page.goto(base);
   const cell = addr => page.getByRole('gridcell', {name:addr,exact:true});
   await cell('A2').click();
+  await page.getByRole('tab',{name:'Insert',exact:true}).click();
   const insert = page.getByRole('button', {name:'Insert rows above',exact:true});
   let confirmText;
   page.once('dialog', async dialog => {

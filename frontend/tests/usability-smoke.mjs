@@ -60,7 +60,7 @@ try {
  // Add a second sheet through the UI and seed a matching literal.
  page.once('dialog',d=>d.accept('Search Other'));await page.getByRole('button',{name:'Add worksheet',exact:true}).click();await page.getByRole('grid',{name:'Search Other worksheet'}).waitFor();await edit('A1','needle');
  await page.getByRole('button',{name:'Sheet1',exact:true}).click();await page.getByRole('grid',{name:'Sheet1 worksheet'}).waitFor();
- await page.getByRole('button',{name:'Find (Ctrl+F)',exact:true}).click();let panel=page.getByRole('complementary',{name:'Find in workbook'});const query=()=>panel.getByRole('textbox',{name:'Find text or number'});
+ await page.getByRole('tab',{name:'Home',exact:true}).click();await page.getByRole('button',{name:'Find (Ctrl+F)',exact:true}).click();let panel=page.getByRole('complementary',{name:'Find in workbook'});const query=()=>panel.getByRole('textbox',{name:'Find text or number'});
  const find=async text=>{await query().fill(text);await panel.getByRole('button',{name:'Find all',exact:true}).click();};
  await find('needle');await panel.getByText('2 matches',{exact:true}).waitFor();await panel.getByLabel('Match entire cell',{exact:true}).check();await panel.getByRole('button',{name:'Find all',exact:true}).click();await panel.getByText('1 matches',{exact:true}).waitFor();
  await panel.getByLabel('Find scope',{exact:true}).selectOption('workbook');await panel.getByRole('button',{name:'Find all',exact:true}).click();await panel.getByText('2 matches',{exact:true}).waitFor();await panel.getByRole('button').filter({hasText:'Search Other!A1'}).click();await page.getByRole('grid',{name:'Search Other worksheet'}).waitFor();await selected('A1');
@@ -72,7 +72,7 @@ try {
    const started=deferred(),resume=deferred(),done=deferred();
    const stale=async route=>{started.resolve();await resume.promise;await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(stalePayload)});done.resolve();};await page.route('**/api/cells/find',stale);
    await find('old request');await started.promise;
-   if(close){await panel.getByRole('button',{name:'Close find'}).click();await page.getByRole('button',{name:'Find (Ctrl+F)',exact:true}).click();panel=page.getByRole('complementary',{name:'Find in workbook'});}else{await query().fill('new request');}
+   if(close){await panel.getByRole('button',{name:'Close find'}).click();await page.getByRole('tab',{name:'Home',exact:true}).click();await page.getByRole('button',{name:'Find (Ctrl+F)',exact:true}).click();panel=page.getByRole('complementary',{name:'Find in workbook'});}else{await query().fill('new request');}
    const staleResponse=page.waitForResponse(response=>response.url().endsWith('/api/cells/find'));
    resume.resolve();await done.promise;await staleResponse;await page.unroute('**/api/cells/find',stale);
    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
@@ -82,7 +82,7 @@ try {
  }
  await query().press('Escape');assert.equal(await panel.count(),0);
  // Column presentation is independent per sheet and persists without changing values.
- await go('A1');const widthField=page.getByRole('spinbutton',{name:'Column width in pixels',exact:true});
+ await go('A1');await page.getByRole('tab',{name:'View',exact:true}).click();const widthField=page.getByRole('spinbutton',{name:'Column width in pixels',exact:true});
  const expectWidth=async width=>{
    await page.waitForFunction(width=>document.querySelector('[role="gridcell"][aria-label="A1"]')?.getBoundingClientRect().width===width,width);
    const a=await cell('A1').boundingBox(),b=await cell('B1').boundingBox();assert(a&&b);assert.equal(a.width,width);assert.equal(b.x-a.x,width);
@@ -96,10 +96,10 @@ try {
  await widthField.fill('350');await page.getByRole('button',{name:'Set width',exact:true}).click();await page.getByText(/Error:.*Synthetic width failure/).waitFor();await idle();await expectWidth(300);await page.unroute('**/api/sheets/column-width',rejectWidth);
  await page.getByRole('button',{name:'Search Other',exact:true}).click();await page.getByRole('grid',{name:'Search Other worksheet'}).waitFor();await idle();await expectWidth(110);
  await page.getByRole('button',{name:'Sheet1',exact:true}).click();await page.getByRole('grid',{name:'Sheet1 worksheet'}).waitFor();await idle();await expectWidth(300);
- const widthSave=path.join(artifacts,'column-widths.gridloom');page.once('dialog',d=>d.accept(widthSave));await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByText(`Saved workbook to ${widthSave}`,{exact:true}).waitFor();
- await widthField.fill('110');await page.getByRole('button',{name:'Set width',exact:true}).click();await idle();await expectWidth(110);
- page.once('dialog',d=>d.accept(widthSave));await page.getByRole('button',{name:'Open',exact:true}).click();await page.getByRole('button',{name:'Discard and continue',exact:true}).click();await page.getByText(`Opened workbook from ${widthSave}`,{exact:true}).waitFor();await idle();await expectWidth(300);
- await page.getByRole('button',{name:'Reset width',exact:true}).click();await idle();await expectWidth(110);assert.equal(await cell('A1').innerText(),'14');
+ const widthSave=path.join(artifacts,'column-widths.gridloom');page.once('dialog',d=>d.accept(widthSave));await page.getByRole('tab',{name:'File',exact:true}).click();await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByText(`Saved workbook to ${widthSave}`,{exact:true}).waitFor();
+ await page.getByRole('tab',{name:'View',exact:true}).click();await widthField.fill('110');await page.getByRole('button',{name:'Set width',exact:true}).click();await idle();await expectWidth(110);
+ page.once('dialog',d=>d.accept(widthSave));await page.getByRole('tab',{name:'File',exact:true}).click();await page.getByRole('button',{name:'Open',exact:true}).click();await page.getByRole('button',{name:'Discard and continue',exact:true}).click();await page.getByText(`Opened workbook from ${widthSave}`,{exact:true}).waitFor();await idle();await expectWidth(300);
+ await page.getByRole('tab',{name:'View',exact:true}).click();await page.getByRole('button',{name:'Reset width',exact:true}).click();await idle();await expectWidth(110);assert.equal(await cell('A1').innerText(),'14');
  await go('Z200');await page.waitForFunction(()=>!document.querySelector('input[aria-label="Formula input"]')?.disabled);await edit('Z200','horizontal navigation works');await selected('Z201');await go('Z200');await cell('Z200').filter({hasText:'horizontal navigation works'}).waitFor();
  await go('Z1');await page.waitForFunction(()=>!document.querySelector('input[aria-label="Formula input"]')?.disabled);await edit('Z1','frozen top label');
  await go('A200');await page.waitForFunction(()=>!document.querySelector('input[aria-label="Formula input"]')?.disabled);await edit('A200','frozen left label');await go('Z200');
@@ -119,8 +119,8 @@ try {
  await go('A1');await widthField.fill('180');await page.getByRole('button',{name:'Set width',exact:true}).click();await idle();await go('Z200');await cell('A1').filter({hasText:'16'}).waitFor();assert.equal((await cell('A1').boundingBox()).width,180);
  await page.getByRole('button',{name:'Search Other',exact:true}).click();await page.getByRole('grid',{name:'Search Other worksheet'}).waitFor();await idle();assert.equal(await freezeTop.isChecked(),false);assert.equal(await freezeLeft.isChecked(),false);
  await page.getByRole('button',{name:'Sheet1',exact:true}).click();await page.getByRole('grid',{name:'Sheet1 worksheet'}).waitFor();await idle();assert.equal(await freezeTop.isChecked(),true);assert.equal(await freezeLeft.isChecked(),true);
- const freezeSave=path.join(artifacts,'frozen-panes.gridloom');page.once('dialog',d=>d.accept(freezeSave));await page.getByRole('button',{name:'Save As',exact:true}).click();await page.getByText(`Saved workbook to ${freezeSave}`,{exact:true}).waitFor();
- await freezeTop.click();await idle();await freezeLeft.click();await idle();page.once('dialog',d=>d.accept(freezeSave));await page.getByRole('button',{name:'Open',exact:true}).click();await page.getByRole('button',{name:'Discard and continue',exact:true}).click();await page.getByText(`Opened workbook from ${freezeSave}`,{exact:true}).waitFor();await idle();assert.equal(await freezeTop.isChecked(),true);assert.equal(await freezeLeft.isChecked(),true);
+ const freezeSave=path.join(artifacts,'frozen-panes.gridloom');page.once('dialog',d=>d.accept(freezeSave));await page.getByRole('tab',{name:'File',exact:true}).click();await page.getByRole('button',{name:'Save As',exact:true}).click();await page.getByText(`Saved workbook to ${freezeSave}`,{exact:true}).waitFor();
+ await page.getByRole('tab',{name:'View',exact:true}).click();await freezeTop.click();await idle();await freezeLeft.click();await idle();page.once('dialog',d=>d.accept(freezeSave));await page.getByRole('tab',{name:'File',exact:true}).click();await page.getByRole('button',{name:'Open',exact:true}).click();await page.getByRole('button',{name:'Discard and continue',exact:true}).click();await page.getByText(`Opened workbook from ${freezeSave}`,{exact:true}).waitFor();await idle();await page.getByRole('tab',{name:'View',exact:true}).click();assert.equal(await freezeTop.isChecked(),true);assert.equal(await freezeLeft.isChecked(),true);
  await go('Z200');await cell('A1').filter({hasText:'16'}).waitFor();
  await freezeTop.click();await idle();assert.equal(await freezeLeft.isChecked(),true);await cell('A200').filter({hasText:'frozen left label'}).waitFor();assert.equal(await cell('Z1').count(),0);
  await freezeTop.click();await idle();await freezeLeft.click();await idle();await cell('Z1').filter({hasText:'frozen top label'}).waitFor();assert.equal(await cell('A200').count(),0);

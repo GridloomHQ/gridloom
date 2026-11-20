@@ -25,7 +25,7 @@ try {
   const connected=await page.request.post(base+'/api/connections',{data:{name:'Test ledger',kind:'sqlite',path:db}});
   assert(connected.ok(),await connected.text());
   await page.goto(base);
-  await page.getByRole('button',{name:'SQLite ledger',exact:true}).click();
+  await page.getByRole('tab',{name:'Data',exact:true}).click();await page.getByRole('button',{name:'SQLite ledger',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'SQLite ledger'});
   await dialog.getByRole('combobox',{name:'Connection',exact:true}).selectOption('Test ledger');
   await dialog.getByRole('combobox',{name:'Table',exact:true}).selectOption('entries');

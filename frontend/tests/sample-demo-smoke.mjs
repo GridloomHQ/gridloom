@@ -22,7 +22,7 @@ try{
   browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH||(existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined),args:['--no-sandbox']});
   const page=await browser.newPage({locale:'en-US'});
   await page.goto(base);
-  await page.getByRole('button',{name:'Help',exact:true}).click();
+  await page.getByRole('tab',{name:'Help',exact:true}).click();
   await page.getByText('About',{exact:true}).click();
   const about=page.getByRole('dialog',{name:'About Gridloom'});
   await about.getByRole('button',{name:'Generate 10-million-row sample'}).click();
