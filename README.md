@@ -15,10 +15,11 @@ It is aimed at accounting and financial models where understanding **where a num
 
 - Use multiple sheets, cross-sheet formulas, named table references and dynamic array spills.
 - Select, copy and paste ranges; fill formulas; format numbers and cells; undo and redo supported cell operations.
+- Use the tabs in the command bar to switch tool groups without adding another row. Right-click a worksheet tab to rename or delete it. You cannot delete the only worksheet, a worksheet referenced by another sheet, or one with recorded reviews or managed close data.
 - Use Ctrl+Arrow to jump to the end of a populated run, across a gap to the next populated cell, or to the worksheet edge if there is no more data. Hold Shift to extend the selection. Ctrl+Space selects the current column; Shift+Space selects the current row.
-- Use **Paste Special** on a worksheet selection copied in Gridloom: paste typed values without formulas, or paste formulas with adjusted relative references. Both keep destination formatting; formulas-only paste skips source constants and blanks. See **Keyboard shortcuts** above the grid.
+- Use **Paste Special** on a worksheet selection copied in Gridloom: paste typed values without formulas, or paste formulas with adjusted relative references. Both keep destination formatting; formulas-only paste skips source constants and blanks. See **Home → Keyboard shortcuts**.
 - Find cached values or formula inputs, jump to a cell, resize columns, freeze the rows above or columns to the left of the current cell from **View**, and show formulas directly in the grid.
-- Get selection totals, browse functions with **fx**, and complete function names in either editor. In an F2 edit, use arrows where a formula expects a reference and hold Shift to extend the range. Referenced cells are outlined while you edit. F4 cycles relative and absolute references.
+- Get selection totals, browse functions by category, syntax, arguments and return values with **fx**, and complete function names in either editor. In an F2 edit, use arrows where a formula expects a reference and hold Shift to extend the range. Referenced cells are outlined while you edit. F4 cycles relative and absolute references.
 - Select a worksheet range and open **Sort & filter** for a read-only view. You can use the first row as headers, sort and filter on different columns, and jump back to a result’s original row. Formulas, database links and staging are unchanged. Each view supports up to 1,000 rows, 50 columns and 5,000 cells.
 - Build pivots and charts by dragging fields into the layout wells, or use the field pickers by keyboard. Choose signed bar and column charts, lines, pies or scatterplots. Reopen a saved pivot and choose **Refresh from source** to rerun its read query without changing its layout, the workbook snapshot, or any staged database edits.
 - Save and reopen `.gridloom` workbooks, including layouts, calculations and pending source edits.
@@ -65,7 +66,7 @@ Record a review or circle up an open question. Questions can be resolved or reop
 
 ### Prepare accounting working papers
 
-Enable **Monthly close** in **Help → Add-ons** for a focused trial-balance workflow. It is off by default; switching it off leaves existing workbooks and close records intact.
+Enable **Monthly close** in **Add-ons** for a focused trial-balance workflow. It is off by default; switching it off leaves existing workbooks and close records intact.
 
 1. Import a trial-balance CSV and map accounts to a report.
 2. Define entity, currency, units and report hierarchy.

@@ -126,6 +126,14 @@ jobs:
         working-directory: frontend
         run: node tests/function-completion-smoke.mjs
 
+      - name: Real browser worksheet keyboard navigation
+        working-directory: frontend
+        run: node tests/grid-keyboard-smoke.mjs
+
+      - name: Real browser function browser
+        working-directory: frontend
+        run: node tests/function-browser-smoke.mjs
+
       - name: Real browser rounding correctness
         working-directory: frontend
         run: node tests/rounding-smoke.mjs
