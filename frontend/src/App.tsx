@@ -10,6 +10,7 @@ import { displayValue } from './utils/values';
 import { ExplainReviewPanel } from './components/ExplainReviewPanel';
 import { OpenQuestions } from './components/OpenQuestions';
 import { Toolbar } from './components/Toolbar';
+import { SheetTabs } from './components/SheetTabs';
 import { FormulaBar } from './components/FormulaBar';
 import { Grid } from './components/Grid';
 import { PasteControls, type PasteMode } from './components/PasteControls';
@@ -372,7 +373,46 @@ export const App: React.FC = () => {
     });
   };
   const addSheet = () => {const name=prompt('New worksheet name:',`Sheet${sheets.length+1}`);if(name)void mutate(`Added ${name}`,async()=>{await api.addSheet(name);await api.selectSheet(name);selectCell(0,0);clearDependencyTrace();});};
-  const renameSheet = () => {const name=prompt('Rename worksheet:',sheetName);if(name&&name!==sheetName)void mutate(`Renamed to ${name}`,()=>api.renameSheet(sheetName,name));};
+  const canChangeSheetStructure = () => {
+    if (busy || apiPending || mutationLock.current || gridDraft || formulaDraft) {
+      setStatusMsg('Finish the current edit before changing worksheets.');
+      return false;
+    }
+    for (const draft of reviewDrafts.current.values()) {
+      if (draft.reviewer.trim() || draft.note.trim() || draft.evidence.length || draft.attachments?.length) {
+        setStatusMsg('Finish or discard your review drafts before changing worksheets.');
+        return false;
+      }
+    }
+    return true;
+  };
+  const closeSheetReview = () => {
+    clearDependencyTrace();
+    setIsExplainOpen(false);
+    setIsQuestionsOpen(false);
+    reviewDrafts.current.clear();
+  };
+  const renameSheet = (current: string) => {
+    if (!canChangeSheetStructure()) return;
+    const name = prompt('Rename worksheet:', current)?.trim();
+    if (name && name !== current) void mutate(`Renamed ${current} to ${name}`, async () => {
+      await api.renameSheet(current, name);
+      closeSheetReview();
+    });
+  };
+  const deleteSheet = (name: string) => {
+    if (sheets.length <= 1 || !canChangeSheetStructure()) return;
+    if (!window.confirm(`Delete worksheet "${name}"? This removes its cells and tables from the workbook, but does not change the database. It cannot be undone and clears worksheet Undo/Redo history.`)) return;
+    void mutate(`Deleted ${name}`, async () => {
+      const { active_sheet } = await api.deleteSheet(name);
+      closeSheetReview();
+      if (active_sheet !== sheetName) {
+        setViewport(null);
+        setSheetName(active_sheet);
+        selectCell(0, 0);
+      }
+    });
+  };
 
   const draftProblem=()=>saveBlocker(gridDraft,formulaDraft,
     isCloseOpen||isExplainOpen||isQuestionsOpen||isSchemaBrowserOpen||isQueryEditorOpen||isInsertTableOpen||isStagedReviewOpen||isPivotsOpen||isChartsOpen||isAuditLogOpen||isBenchmarksOpen,
@@ -580,12 +620,8 @@ export const App: React.FC = () => {
       <SelectionSummary key={workbookEpoch} sheetName={sheetName} range={selection} revision={`${workbookEpoch}:${reviewRevision}`} busy={busy}/>
       {/* Bottom Sheet Tabs & Status Bar */}
       <div className="flex items-center justify-between border-t border-slate-300 bg-white px-3 py-1 text-xs select-none shadow-inner">
-        {/* Sheet Tabs */}
-        <div className="flex items-center gap-1">
-          {sheets.map(name=><button key={name} disabled={busy} onClick={()=>changeSheet(name)} onDoubleClick={()=>{if(name===sheetName)renameSheet();}} aria-current={name===sheetName?'page':undefined} className={`px-3 py-1 rounded-t ${name===sheetName?'bg-emerald-50 text-emerald-800 font-bold border-b-2 border-emerald-600':'hover:bg-slate-100'}`}>{name}</button>)}
-          <button disabled={busy} onClick={addSheet} aria-label="Add worksheet" className="px-2 py-1 font-bold">+</button>
-          <button disabled={busy} onClick={renameSheet} className="px-2 py-1 text-slate-500">Rename</button>
-        </div>
+        <SheetTabs sheets={sheets} active={sheetName} busy={busy} onSelect={changeSheet}
+          onAdd={addSheet} onRename={renameSheet} onDelete={deleteSheet}/>
 
         {/* Calculation & System Status */}
         <div className="flex items-center gap-4 text-slate-500 text-[11px]">

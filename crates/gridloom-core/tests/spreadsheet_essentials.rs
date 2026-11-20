@@ -531,3 +531,39 @@ fn invalid_format_attributes_or_collisions_reject_whole_range() {
     assert!(w.sheets["Sheet1"].cells["A1"].style.italic);
     assert_eq!(value(&w, "Sheet1", "A1"), "");
 }
+
+#[test]
+fn sheet_delete_preserves_remaining_data_and_keeps_at_least_one_sheet() {
+    let mut w = Workbook::new();
+    set(&mut w, "Sheet1", "B1", "24");
+    w.add_sheet("Inputs").unwrap();
+    set(&mut w, "Inputs", "A1", "7");
+    w.delete_sheet("Inputs").unwrap();
+    assert_eq!(w.active_sheet, "Sheet1");
+    assert!(!w.sheets.contains_key("Inputs"));
+    assert_eq!(value(&w, "Sheet1", "B1"), "24");
+    assert!(w.undo_sheet_edit().is_err());
+    assert!(w
+        .delete_sheet("Sheet1")
+        .unwrap_err()
+        .contains("at least one"));
+    assert!(w.delete_sheet("Missing").unwrap_err().contains("not found"));
+}
+
+#[test]
+fn sheet_delete_leaves_active_sheet_and_rejects_live_formula_references() {
+    let mut w = Workbook::new();
+    w.add_sheet("Inputs").unwrap();
+    w.add_sheet("Report").unwrap();
+    set(&mut w, "Inputs", "A1", "7");
+    set(&mut w, "Report", "A1", "=IF(1=1, Inputs!A1, 0)");
+    set(&mut w, "Report", "B1", "=\"Inputs!A1\"");
+    let generation = w.dep_graph.generation;
+    assert!(w.delete_sheet("Inputs").unwrap_err().contains("Report!A1"));
+    assert_eq!(w.dep_graph.generation, generation);
+    assert_eq!(value(&w, "Report", "A1"), "7");
+    set(&mut w, "Report", "A1", "7");
+    w.delete_sheet("Inputs").unwrap();
+    assert_eq!(w.active_sheet, "Report");
+    assert_eq!(value(&w, "Report", "B1"), "Inputs!A1");
+}
