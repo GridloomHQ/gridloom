@@ -66,7 +66,7 @@ export function SampleDemo({onClose}:{onClose:()=>void}){
     if(e.key==='Escape')onClose();
     if(e.key==='Tab'){
       const focusable=Array.from(e.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled])'));
-      const first=focusable[0],last=focusable.at(-1);
+      const first=focusable[0],last=focusable[focusable.length-1];
       if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}
       if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}
     }
