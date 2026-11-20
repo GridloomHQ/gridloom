@@ -6,30 +6,35 @@ import {compareLedgerBalance,sameLedgerSpec} from './ledgerTrace';
 
 import {LEDGER_PAGE_ROWS as PAGE, LEDGER_ROW_PX as ROW, LEDGER_BLOCK_ROWS as WINDOW, ledgerLocation, ledgerOffset, ledgerBlockRows} from './ledgerNavigation';
 
-export function LedgerPanel({onClose,target}:{onClose:()=>void;target?:LedgerTarget}) {
+const SAMPLE_SPEC: LedgerSpec={
+  connection:'10M-row sample',table:'entries',date:'posted',cents:'amount_cents',
+  from:null,through:null,account:null,
+};
+
+export function LedgerPanel({onClose,target,sample=false}:{onClose:()=>void;target?:LedgerTarget;sample?:boolean}) {
   const [connections,C]=useState<string[]>([]), [tables,T]=useState<string[]>([]), [columns,K]=useState<string[]>([]);
-  const [connection,SC]=useState(''),[table,ST]=useState(''),[date,SD]=useState(''),[cents,SA]=useState(''),[from,SF]=useState(''),[through,SE]=useState('');
-  const [accountColumn,setAccountColumn]=useState(''), [account,setAccount]=useState('');
+  const [connection,SC]=useState(sample?SAMPLE_SPEC.connection:''),[table,ST]=useState(sample?SAMPLE_SPEC.table:''),[date,SD]=useState(sample?SAMPLE_SPEC.date:''),[cents,SA]=useState(sample?SAMPLE_SPEC.cents:''),[from,SF]=useState(''),[through,SE]=useState('');
+  const [accountColumn,setAccountColumn]=useState(sample?'account':''), [account,setAccount]=useState('');
   const [trace,setTrace]=useState<LedgerTrace|null>(null),[traceError,setTraceError]=useState(''),[saving,setSaving]=useState(false);
   const [balance,setBalance]=useState<string|null>(null);
   const traceRequest=useRef<AbortController|null>(null);
   useEffect(()=>()=>traceRequest.current?.abort(),[]);
-  const [active,A]=useState<LedgerSpec|null>(null),[page,P]=useState<LedgerPage|null>(null),[error,E]=useState(''),[loading,L]=useState(false);
+  const [active,A]=useState<LedgerSpec|null>(sample?SAMPLE_SPEC:null),[page,P]=useState<LedgerPage|null>(null),[error,E]=useState(''),[loading,L]=useState(false);
   const [base,B]=useState(0),[row,R]=useState(0),[jump,J]=useState(''),[pageOffset,O]=useState(0);
   const session=useRef<string|null>(null), viewport=useRef<HTMLDivElement|null>(null);
-  useEffect(()=>{let live=true;api.getConnections().then(v=>{if(live)C(v.filter(c=>c.kind.toLowerCase()==='sqlite'&&c.path!==':memory:').map(c=>c.name));}).catch(e=>{if(live)E(String(e));});return()=>{live=false;};},[]);
-  useEffect(()=>{let live=true;T([]);if(connection)api.getTables(connection).then(v=>{if(live)T(v);}).catch(e=>{if(live)E(String(e));});return()=>{live=false;};},[connection]);
-  useEffect(()=>{let live=true;K([]);if(connection&&table)api.getTableSchema(connection,table).then(v=>{if(live)K(v.columns.map(c=>c.name));}).catch(e=>{if(live)E(String(e));});return()=>{live=false;};},[connection,table]);
+  useEffect(()=>{if(sample)return;let live=true;api.getConnections().then(v=>{if(live)C(v.filter(c=>c.kind.toLowerCase()==='sqlite'&&c.path!==':memory:').map(c=>c.name));}).catch(e=>{if(live)E(String(e));});return()=>{live=false;};},[sample]);
+  useEffect(()=>{if(sample)return;let live=true;T([]);if(connection)api.getTables(connection).then(v=>{if(live)T(v);}).catch(e=>{if(live)E(String(e));});return()=>{live=false;};},[connection,sample]);
+  useEffect(()=>{if(sample)return;let live=true;K([]);if(connection&&table)api.getTableSchema(connection,table).then(v=>{if(live)K(v.columns.map(c=>c.name));}).catch(e=>{if(live)E(String(e));});return()=>{live=false;};},[connection,table,sample]);
   const offset=ledgerOffset(base,row);
   useEffect(()=>{
     if(!active || error) return;
     const controller=new AbortController();
     L(true);
-    const timer=setTimeout(()=>{void api.ledgerPage({spec:active,session:session.current,offset,limit:PAGE},controller.signal)
+    const timer=setTimeout(()=>{void (sample?api.samplePage:api.ledgerPage)({spec:active,session:session.current,offset,limit:PAGE},controller.signal)
       .then(v=>{if(!controller.signal.aborted){session.current=v.session;P(v);O(offset);L(false);}})
       .catch(e=>{if(!controller.signal.aborted){P(null);E(String(e));L(false);}});},session.current?65:0);
     return()=>{clearTimeout(timer);controller.abort();};
-  },[active,offset,error]);
+  },[active,offset,error,sample]);
   const pendingScroll=useRef<number|null>(null);
   useLayoutEffect(()=>{if(pendingScroll.current!==null && viewport.current){viewport.current.scrollTop=pendingScroll.current;pendingScroll.current=null;} });
   const move=(to:number)=>{
@@ -97,16 +102,19 @@ export function LedgerPanel({onClose,target}:{onClose:()=>void;target?:LedgerTar
   const visible=ledgerBlockRows(page?.count??0,base);
   const widths=page?.columns.map(()=>160)??[];
   return <div role="dialog" aria-modal="true" aria-label="SQLite ledger" onKeyDown={e=>{if(e.key==="Escape"){e.stopPropagation();onClose();}}} className="absolute inset-4 z-50 bg-white border rounded shadow-xl flex flex-col p-4 gap-3 min-h-0">
-    <header className="flex justify-between"><h2 className="text-lg font-semibold">{target ? `Trace balance: ${presentedTarget}` : "Read-only SQLite ledger"}</h2><button onClick={onClose} className="border rounded px-2">Close</button></header>
+    <header className="flex justify-between"><h2 className="text-lg font-semibold">{sample ? "10-million-row sample ledger" : target ? `Trace balance: ${presentedTarget}` : "Read-only SQLite ledger"}</h2><button onClick={onClose} className="border rounded px-2">Close</button></header>
     <form className="flex flex-wrap items-end gap-3" onSubmit={e=>{e.preventDefault();void open();}}>
+      {!sample&&<>
       {select('Connection',connection,changeConnection,connections)}{select('Table',table,changeTable,tables)}
       {select('Posting date (ISO text)',date,SD,columns)}{select('Amount (integer cents)',cents,SA,columns)}
       {select('Account column',accountColumn,value=>{setAccountColumn(value);if(!value)setAccount('');},columns)}
+      </>}
       <label className="flex flex-col text-sm">Account code<input className="border rounded p-1" maxLength={1024} value={account} disabled={!accountColumn} onChange={e=>setAccount(e.target.value)}/></label>
       <label className="flex flex-col text-sm">From<input type="date" value={from} onChange={e=>SF(e.target.value)}/></label>
       <label className="flex flex-col text-sm">Through<input type="date" value={through} onChange={e=>SE(e.target.value)}/></label>
-      <button className="border rounded px-2 py-1" disabled={!connection||!table||!date||!cents||(!!accountColumn!==!!account.length)||saving||(!!target&&!trace&&!traceError)}>Load / reload</button>
+      <button className="border rounded px-2 py-1" disabled={!connection||!table||!date||!cents||(!sample&&!!accountColumn!==!!account.length)||saving||(!!target&&!trace&&!traceError)}>Load / reload</button>
     </form>
+    {sample&&<p className="text-xs text-slate-600">Synthetic data, paged from SQLite. Try a date range, account 1100, or jump to row 10000000.</p>}
     {target&&<div className="text-sm space-y-2">
       <p>Compares the selected cell in currency units with the sum of matching ledger entries in integer cents. Reload to read the current cell and source again.</p>
       {trace?.source_changed&&<p role="alert" className="text-amber-800">The saved connection has changed. Review the replacement source, then load and save a new link.</p>}

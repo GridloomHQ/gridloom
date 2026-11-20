@@ -171,6 +171,8 @@ pub async fn track_mutations(
             | "/api/query/execute"
             | "/api/query/analyze"
             | "/api/ledger/page"
+            | "/api/sample"
+            | "/api/sample/ledger"
             | "/api/pivots/refresh"
             | "/api/ranges/sort-filter"
             | "/api/cells/viewport"

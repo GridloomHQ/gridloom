@@ -303,6 +303,36 @@ pub async fn browse(
     State(state): State<AppState>,
     Json(input): Json<Request>,
 ) -> Result<Json<Page>, Failure> {
+    let path = {
+        let wb = state.workbook.read().await;
+        let config = wb
+            .connection_configs
+            .get(&input.spec.connection)
+            .ok_or_else(|| bad("Unknown connection"))?;
+        if !matches!(config.kind, EngineKind::Sqlite) || config.path == ":memory:" {
+            return Err(bad("Use a file-backed SQLite connection"));
+        }
+        PathBuf::from(&config.path)
+    };
+    browse_path(state, input, path).await
+}
+
+pub async fn browse_sample(
+    State(state): State<AppState>,
+    Json(mut input): Json<Request>,
+) -> Result<Json<Page>, Failure> {
+    let path = state.demo.ready_path()?;
+    input.spec.connection = String::from("10M-row sample");
+    input.spec.table = String::from("entries");
+    input.spec.date = String::from("posted");
+    input.spec.cents = String::from("amount_cents");
+    if let Some(account) = &mut input.spec.account {
+        account.column = String::from("account");
+    }
+    browse_path(state, input, path).await
+}
+
+async fn browse_path(state: AppState, input: Request, path: PathBuf) -> Result<Json<Page>, Failure> {
     if !(1..=200).contains(&input.limit) || input.offset > i64::MAX as u64 {
         return Err(bad("Invalid page size or offset"));
     }
@@ -328,17 +358,6 @@ pub async fn browse(
     if matches!((&input.spec.from,&input.spec.through),(Some(a),Some(b)) if a>b) {
         return Err(bad("Start date must not follow end date"));
     }
-    let path = {
-        let wb = state.workbook.read().await;
-        let config = wb
-            .connection_configs
-            .get(&input.spec.connection)
-            .ok_or_else(|| bad("Unknown connection"))?;
-        if !matches!(config.kind, EngineKind::Sqlite) || config.path == ":memory:" {
-            return Err(bad("Use a file-backed SQLite connection"));
-        }
-        PathBuf::from(&config.path)
-    };
     tokio::task::spawn_blocking(move || {
         // Bound concurrent work and retained SQLite page caches. Requests are local.
         let mut sessions = state.ledgers.0.lock().map_err(bad)?;

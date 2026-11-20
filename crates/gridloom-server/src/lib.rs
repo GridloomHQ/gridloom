@@ -1,5 +1,6 @@
 pub mod benchmark;
 mod ledger;
+mod ledger_demo;
 mod range_view;
 mod recovery;
 mod row_insert;
