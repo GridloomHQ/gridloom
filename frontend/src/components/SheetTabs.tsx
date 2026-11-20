@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 
 interface SheetTabsProps {
   sheets: string[];
-  active: string;
+  active?: string;
+  children?: React.ReactNode;
   busy: boolean;
   onSelect: (name: string) => void;
   onAdd: () => void;
@@ -13,7 +14,7 @@ interface SheetTabsProps {
 
 interface MenuPosition { name: string; x: number; y: number; }
 
-export function SheetTabs({ sheets, active, busy, onSelect, onAdd, onRename, onDelete }: SheetTabsProps) {
+export function SheetTabs({ sheets, active, busy, onSelect, onAdd, onRename, onDelete, children }: SheetTabsProps) {
   const [menu, setMenu] = useState<MenuPosition | null>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -75,6 +76,7 @@ export function SheetTabs({ sheets, active, busy, onSelect, onAdd, onRename, onD
       </button>)}
       <button type="button" disabled={busy} onClick={onAdd} aria-label="Add worksheet"
         title="Add worksheet" className="shrink-0 rounded px-2 py-1 font-bold hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-600">+</button>
+      {children}
     </div>
     {menu && createPortal(<div ref={menuRef} role="menu" aria-label={`Worksheet actions for ${menu.name}`}
       className="fixed z-[100] min-w-40 rounded-md border border-slate-200 bg-white p-1 text-xs shadow-lg"

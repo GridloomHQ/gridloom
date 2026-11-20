@@ -77,6 +77,7 @@ pub fn create_router(state: AppState) -> Router {
                 .post(crate::ledger_demo::start)
                 .delete(crate::ledger_demo::cancel),
         )
+        .route("/api/sample/query", post(crate::ledger_demo::query))
         .route("/api/sample/ledger", post(crate::ledger::browse_sample))
         .route("/api/ledger/page", post(crate::ledger::browse))
         .route("/api/ledger/trace", get(crate::ledger::get_trace).post(crate::ledger::update_trace))

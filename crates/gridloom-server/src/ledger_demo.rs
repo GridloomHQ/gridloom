@@ -289,9 +289,166 @@ fn measure(path: &Path, expected_rows: u32, generation_ms: Option<f64>) -> anyho
     })
 }
 
+#[derive(serde::Deserialize)]
+pub struct SampleQueryRequest {
+    sql: String,
+}
+
+#[derive(Serialize)]
+pub struct SampleQueryResult {
+    columns: Vec<String>,
+    rows: Vec<Vec<Option<String>>>,
+    truncated: bool,
+}
+
+pub async fn query(
+    State(state): State<AppState>,
+    Json(input): Json<SampleQueryRequest>,
+) -> Result<Json<SampleQueryResult>, Failure> {
+    let path = state.demo.ready_path()?;
+    tokio::task::spawn_blocking(move || run_query(&path, &input.sql).map(Json))
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
+        .map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))
+}
+
+fn run_query(path: &Path, sql: &str) -> anyhow::Result<SampleQueryResult> {
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+    use rusqlite::limits::Limit;
+    use rusqlite::types::ValueRef;
+    use std::time::Duration;
+
+    const MAX_ROWS: usize = 200;
+    const MAX_COLUMNS: i32 = 32;
+    const MAX_CELL_TEXT_CHARS: usize = 512;
+    if sql.len() > 16_384 {
+        bail!("Sample SQL is limited to 16 KiB.");
+    }
+    gridloom_core::db::security::validate_read_only_sql(sql, "sqlite")
+        .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+    let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    db.execute_batch("PRAGMA trusted_schema=OFF; PRAGMA query_only=ON; PRAGMA cache_size=-2048; PRAGMA temp_store=FILE;")?;
+    db.set_limit(Limit::SQLITE_LIMIT_LENGTH, 262_144)?;
+    db.set_limit(Limit::SQLITE_LIMIT_COLUMN, MAX_COLUMNS)?;
+    let start = Instant::now();
+    db.progress_handler(
+        10_000,
+        Some(move || start.elapsed() > Duration::from_secs(5)),
+    )?;
+    db.authorizer(Some(|ctx: AuthContext<'_>| match ctx.action {
+        AuthAction::Select | AuthAction::Recursive => Authorization::Allow,
+        AuthAction::Read {
+            table_name: "entries",
+            ..
+        } if matches!(ctx.database_name, Some("main") | None) => Authorization::Allow,
+        AuthAction::Function { function_name }
+            if matches!(
+                function_name.to_ascii_lowercase().as_str(),
+                "abs"
+                    | "avg"
+                    | "coalesce"
+                    | "count"
+                    | "date"
+                    | "ifnull"
+                    | "length"
+                    | "lower"
+                    | "max"
+                    | "min"
+                    | "nullif"
+                    | "round"
+                    | "strftime"
+                    | "substr"
+                    | "substring"
+                    | "sum"
+                    | "total"
+                    | "trim"
+                    | "typeof"
+                    | "upper"
+            ) =>
+        {
+            Authorization::Allow
+        }
+        _ => Authorization::Deny,
+    }))?;
+    // The subquery forces single-statement SELECT semantics and caps rows at the source.
+    let statement = format!(
+        "SELECT * FROM (\n{}\n) LIMIT {}",
+        sql.trim().trim_end_matches(';'),
+        MAX_ROWS + 1
+    );
+    let mut stmt = db.prepare(&statement)?;
+    let columns: Vec<_> = stmt
+        .column_names()
+        .into_iter()
+        .map(|name| name.chars().take(MAX_CELL_TEXT_CHARS).collect())
+        .collect();
+    let mut cursor = stmt.query([])?;
+    let mut rows = Vec::new();
+    let mut truncated = false;
+    while let Some(row) = cursor.next()? {
+        if rows.len() == MAX_ROWS {
+            truncated = true;
+            break;
+        }
+        let mut cells = Vec::with_capacity(columns.len());
+        for column in 0..columns.len() {
+            cells.push(match row.get_ref(column)? {
+                ValueRef::Null => None,
+                ValueRef::Integer(value) => Some(value.to_string()),
+                ValueRef::Real(value) => Some(value.to_string()),
+                ValueRef::Text(value) => {
+                    let text = String::from_utf8_lossy(value);
+                    let mut chars = text.chars();
+                    let mut preview: String = chars.by_ref().take(MAX_CELL_TEXT_CHARS).collect();
+                    if chars.next().is_some() {
+                        preview.push('…');
+                    }
+                    Some(preview)
+                }
+                ValueRef::Blob(value) => Some(format!("<{} byte blob>", value.len())),
+            });
+        }
+        rows.push(cells);
+    }
+    Ok(SampleQueryResult {
+        columns,
+        rows,
+        truncated,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sample_query_is_bounded_and_read_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(FILE_NAME);
+        build_or_reuse(&path, 250, |_, _| Ok(()), || false).unwrap();
+        let query = |sql| run_query(&path, sql).unwrap();
+        let result = query("SELECT COUNT(*) AS entry_count, MAX(id) AS last FROM entries;");
+        assert_eq!(result.columns, ["entry_count", "last"]);
+        assert_eq!(result.rows, [vec![Some("250".into()), Some("250".into())]]);
+        let all = query("SELECT id FROM entries ORDER BY id");
+        assert!(all.truncated);
+        assert_eq!(all.rows.len(), 200);
+        assert_eq!(all.rows.last().unwrap()[0].as_deref(), Some("200"));
+        let limited = query("SELECT id FROM entries ORDER BY id DESC LIMIT 200");
+        assert!(!limited.truncated);
+        assert_eq!(limited.rows[0][0].as_deref(), Some("250"));
+        for invalid in [
+            "DELETE FROM entries",
+            "SELECT name FROM sqlite_master",
+            "SELECT 1; SELECT 2",
+        ] {
+            assert!(run_query(&path, invalid).is_err());
+        }
+        assert_eq!(
+            query("SELECT count(*) FROM entries").rows[0][0].as_deref(),
+            Some("250")
+        );
+    }
 
     #[test]
     fn deterministic_amounts_and_existing_sample_reuse() {

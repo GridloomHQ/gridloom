@@ -1,3 +1,4 @@
+import { SampleWorksheet } from './components/SampleWorksheet';
 import { SampleDemo } from './components/SampleDemo';
 import { SortFilterPanel } from './components/SortFilterPanel';
 import { LedgerPanel } from './components/LedgerPanel';
@@ -33,6 +34,8 @@ const MonthlyClosePanel = lazy(() => import('./components/MonthlyClosePanel').th
 const CLOSE_ADDON = 'gridloom:addon:monthly-close';
 
 export const App: React.FC = () => {
+  const [sampleWorksheet,setSampleWorksheet]=useState(false);
+  const [sampleActive,setSampleActive]=useState(false);
   const [isFindOpen,setIsFindOpen]=useState(false);
   const [sortFilterRange,setSortFilterRange]=useState<GridRange|null>(null);
   const [isLedgerOpen,setIsLedgerOpen]=useState(false);
@@ -511,6 +514,7 @@ export const App: React.FC = () => {
         </div>
       </div>}
       <div className="contents" inert={replacement?true:undefined}>
+      <div className={sampleActive?"hidden":"contents"}>
       {/* Top Application Toolbar */}
       <Toolbar
         busy={busy}
@@ -635,10 +639,17 @@ export const App: React.FC = () => {
       </div>
 
       <SelectionSummary key={workbookEpoch} sheetName={sheetName} range={selection} revision={`${workbookEpoch}:${reviewRevision}`} busy={busy}/>
+      </div>
+      {sampleActive&&<SampleWorksheet onBack={()=>setSampleActive(false)}/>}
       {/* Bottom Sheet Tabs & Status Bar */}
       <div className="flex items-center justify-between border-t border-slate-300 bg-white px-3 py-1 text-xs select-none shadow-inner">
-        <SheetTabs sheets={sheets} active={sheetName} busy={busy} onSelect={changeSheet}
-          onAdd={addSheet} onRename={renameSheet} onDelete={deleteSheet}/>
+        <SheetTabs sheets={sheets} active={sampleActive ? undefined : sheetName} busy={busy}
+          onSelect={name=>{setSampleActive(false);if(name!==sheetName)changeSheet(name);}}
+          onAdd={()=>{setSampleActive(false);addSheet();}} onRename={renameSheet} onDelete={deleteSheet}>
+          {sampleWorksheet && <button type="button" aria-current={sampleActive ? 'page' : undefined}
+            onClick={()=>setSampleActive(true)}
+            className={`shrink-0 whitespace-nowrap rounded-t px-3 py-1 ${sampleActive ? 'border-b-2 border-emerald-600 bg-emerald-50 font-semibold text-emerald-800' : 'hover:bg-slate-100'}`}>Sample ledger (read-only)</button>}
+        </SheetTabs>
 
         {/* Calculation & System Status */}
         <div className="flex items-center gap-4 text-slate-500 text-[11px]">
@@ -656,7 +667,7 @@ export const App: React.FC = () => {
         </div>
       </div>
 
-      {isAboutOpen && <SampleDemo onClose={()=>setIsAboutOpen(false)}/>}
+      {isAboutOpen && <SampleDemo onClose={()=>setIsAboutOpen(false)} onOpenWorksheet={()=>{setIsAboutOpen(false);setSampleWorksheet(true);setSampleActive(true);}}/>}
       {closeAddon && isCloseOpen && <Suspense fallback={<p role="status" className="fixed bottom-4 right-4 bg-white border p-2">Loading Monthly close…</p>}><MonthlyClosePanel onClose={()=>setIsCloseOpen(false)} onChanged={()=>{clipboard.current=null;void refreshMetadata();void fetchViewportData(visibleBounds.startRow,visibleBounds.startCol,visibleBounds.endRow,visibleBounds.endCol);}} onSelectCell={(sheet,row,col)=>moveToExplanation(row,col,sheet,()=>{clearDependencyTrace();setIsCloseOpen(false);})}/></Suspense>}
       {isQuestionsOpen && <OpenQuestions onClose={() => setIsQuestionsOpen(false)} onNavigate={question => {
         moveToExplanation(question.coord.row, question.coord.col, question.sheet_name, () => {

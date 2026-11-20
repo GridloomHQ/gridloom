@@ -101,8 +101,8 @@ export function LedgerPanel({onClose,target,sample=false}:{onClose:()=>void;targ
   const select=(name:string,value:string,set:(v:string)=>void,options:string[])=><label className="flex flex-col text-sm">{name}<select aria-label={name} className="border rounded p-1" value={value} onChange={e=>set(e.target.value)}><option value="">Choose…</option>{options.map(v=><option key={v}>{v}</option>)}</select></label>;
   const visible=ledgerBlockRows(page?.count??0,base);
   const widths=page?.columns.map(()=>160)??[];
-  return <div role="dialog" aria-modal="true" aria-label="SQLite ledger" onKeyDown={e=>{if(e.key==="Escape"){e.stopPropagation();onClose();}}} className="absolute inset-4 z-50 bg-white border rounded shadow-xl flex flex-col p-4 gap-3 min-h-0">
-    <header className="flex justify-between"><h2 className="text-lg font-semibold">{sample ? "10-million-row sample ledger" : target ? `Trace balance: ${presentedTarget}` : "Read-only SQLite ledger"}</h2><button onClick={onClose} className="border rounded px-2">Close</button></header>
+  return <div role={sample?"region":"dialog"} aria-modal={sample?undefined:true} aria-label={sample?"Sample ledger rows":"SQLite ledger"} onKeyDown={e=>{if(e.key==="Escape"){e.stopPropagation();onClose();}}} className={sample?"bg-white flex flex-col flex-1 min-h-0 p-3 gap-3":"absolute inset-4 z-50 bg-white border rounded shadow-xl flex flex-col p-4 gap-3 min-h-0"}>
+    {!sample&&<header className="flex justify-between"><h2 className="text-lg font-semibold">{sample ? "10-million-row sample ledger" : target ? `Trace balance: ${presentedTarget}` : "Read-only SQLite ledger"}</h2><button onClick={onClose} className="border rounded px-2">Close</button></header>}
     <form className="flex flex-wrap items-end gap-3" onSubmit={e=>{e.preventDefault();void open();}}>
       {!sample&&<>
       {select('Connection',connection,changeConnection,connections)}{select('Table',table,changeTable,tables)}
