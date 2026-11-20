@@ -35,6 +35,33 @@ try {
  await formula.press('Escape');
  await formula.fill('=SUM(A1)');await caret(3);await list.getByRole('option',{name:'SUM',exact:true}).waitFor();await caret(7);await formula.press('F4');await value('=SUM($A$1)');await formula.press('Escape');
  const reject=route=>route.fulfill({status:409,contentType:'text/plain',body:'Synthetic completion failure'});await page.route('**/api/cells/set',reject);await formula.fill('=RO');await list.getByRole('option',{name:'ROUND',exact:true}).click();await value('=ROUND(');await formula.fill('=ROUND(A1,0)');await formula.press('Enter');await idle();await page.getByText(/Error: Synthetic completion failure/).waitFor();await value('=ROUND(A1,0)');await formula.press('Escape');await page.unroute('**/api/cells/set',reject);
+ // The same catalog is available through fx and direct cell typing.
+ await cell('B2').click();
+ await page.getByRole('button',{name:'Insert function',exact:true}).click();
+ const picker=page.getByRole('dialog',{name:'Insert function'});
+ await picker.getByRole('textbox',{name:'Search functions'}).fill('STDEV.S');
+ await picker.getByRole('button',{name:'STDEV.S',exact:true}).click();
+ await value('=STDEV.S(');
+ await formula.fill('=SUM(A1:A3,B1)');
+ assert.equal(await cell('A2').getAttribute('data-formula-reference'),'1');
+ assert.equal(await cell('B1').getAttribute('data-formula-reference'),'2');
+ await formula.press('Escape');
+ assert.equal(await cell('A2').getAttribute('data-formula-reference'),null);
+ await cell('B1').click();
+ await grid().press('F2');
+ const inline=page.getByRole('textbox',{name:'Edit B1',exact:true});
+ await inline.fill('=SU');await list.getByRole('option',{name:'SUM',exact:true}).waitFor();
+ await inline.press('Tab');assert.equal(await inline.inputValue(),'=SUM(');
+ const beforeInline=writes;
+ await inline.press('ArrowLeft');assert.equal(await inline.inputValue(),'=SUM(A1');
+ await inline.press('Shift+ArrowDown');await inline.press('Shift+ArrowDown');
+ assert.equal(await inline.inputValue(),'=SUM(A1:A3');
+ assert.equal(await cell('A2').getAttribute('data-formula-reference'),'1');
+ assert.equal(await cell('B1').getAttribute('aria-selected'),'true');
+ assert.equal(writes,beforeInline,'Reference picking must never write or change the edit target');
+ await inline.press('End');await inline.press(')');
+ await inline.press('Enter');await idle();assert.equal(await cell('B1').innerText(),'6');
+ assert.equal(await cell('A2').getAttribute('data-formula-reference'),null);
  // Catalogue availability is optional: ordinary manual formula entry still works.
  await page.route('**/api/functions',route=>route.fulfill({status:503,body:'Unavailable'}));await page.reload();await grid().waitFor();await cell('B1').click();await formula.fill('=SUM(A1:A3)');await formula.press('Enter');await idle();assert.equal(await cell('B1').innerText(),'6');assert.equal(await list.count(),0);
  await page.screenshot({path:path.join(artifacts,'completion.png'),fullPage:true});assert.deepEqual(errors,[]);console.log('PASS authoritative/dotted/nested autocomplete, keyboard acceptance without submit, suffix/caret preservation, lexical exclusions, Escape/failed draft retention, unavailable-catalogue fallback.');

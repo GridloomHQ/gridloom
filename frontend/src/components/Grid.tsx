@@ -10,6 +10,9 @@ import { paneIndices, paneOffset, paneLayer, revealAxis } from '../utils/frozenP
 import { isCellLoaded } from '../utils/frozenViewport';
 import {cycleReference} from '../utils/referenceCycle';
 import {cellPresentation} from '../utils/cellPresentation';
+import {applyFunctionCompletion,completionEvent,functionCompletion,type FunctionCompletion} from '../utils/functionCompletion';
+import {draftReferences,referenceColors,referenceSlot,referenceText} from '../utils/formulaDraft';
+
 
 interface GridProps {
   sheetName: string; viewport: ViewportResponse | null; selectedRow: number; selectedCol: number;
@@ -22,6 +25,8 @@ interface GridProps {
   onUndo: () => void; onRedo: () => void; onFillDown: () => void;
   onClear: () => void; onFillRight: () => void; onPasteSpecial: () => void;
   onDraftChange:(active:boolean)=>void;
+  externalDraft?:string|null;
+  functionNames:string[];
   columnWidths: Record<number,number>;
   showFormulas:boolean;
   freezeTopRow:boolean; freezeFirstColumn:boolean;
@@ -38,6 +43,29 @@ export const Grid: React.FC<GridProps> = (props) => {
   useEffect(()=>()=>props.onDraftChange(false),[props.onDraftChange]);
   const editor = useRef<HTMLInputElement>(null);
   const referenceSelection=useRef<{start:number;end:number}|null>(null);
+  const pickMode=useRef(false);
+  const picked=useRef<{start:number;end:number;anchor:GridRange['start'];cursor:GridRange['start']}|null>(null);
+  const [completion,setCompletion]=useState<FunctionCompletion|null>(null);
+  const [suggestionIndex,setSuggestionIndex]=useState(0);
+  const completionKey=useRef<string|null>(null);
+  const suggestions=completion?props.functionNames.filter(name=>name.startsWith(completion.prefix)):[];
+  const showSuggestions=suggestions.length>0;
+  useEffect(()=>{
+    if(showSuggestions)document.getElementById(`inline-function-${suggestionIndex}`)?.scrollIntoView({block:'nearest',container:'nearest'} as ScrollIntoViewOptions);
+  },[showSuggestions,suggestionIndex]);
+  const updateCompletion=(value:string,start:number|null,end:number|null,inputChanged=false)=>{
+    const event=completionEvent(completionKey.current,value,start,end,inputChanged);
+    if(!event.update)return;
+    completionKey.current=event.key;setSuggestionIndex(0);setCompletion(functionCompletion(value,start??0,end??start??0));
+  };
+  const acceptSuggestion=(name:string)=>{
+    if(!completion||edit===null||busy||committing.current||!name)return;
+    const result=applyFunctionCompletion(edit,completion,name);
+    referenceSelection.current={start:result.caret,end:result.caret};failedInput.current=null;
+    if(result.value===edit){editor.current?.setSelectionRange(result.caret,result.caret);referenceSelection.current=null;}
+    setEdit(result.value);setCompletion(null);
+  };
+
   useLayoutEffect(()=>{const selection=referenceSelection.current;referenceSelection.current=null;if(selection&&editor.current)editor.current.setSelectionRange(selection.start,selection.end);},[edit]);
   // Draft text is owned by the cell where editing began, never by selection.
   const draftTarget = useRef<{sheetName:string;selectedRow:number;selectedCol:number}|null>(null);
@@ -54,6 +82,7 @@ export const Grid: React.FC<GridProps> = (props) => {
   currentTarget.current = {sheetName, selectedRow, selectedCol};
   const highlight = props.traceHighlight?.target.sheet_name === sheetName ? props.traceHighlight : null;
   const traceRange = highlight?.target.range ?? (highlight?.target.coord ? {start:highlight.target.coord, end:highlight.target.coord} : null);
+  const formulaRanges=useMemo(()=>draftReferences(edit??props.externalDraft??'',sheetName),[edit,props.externalDraft,sheetName]);
   const totalRows = viewport?.total_rows ?? 1000, totalCols = viewport?.total_cols ?? 100;
   const geometry = useMemo(()=>columnGeometry(totalCols,props.columnWidths),[totalCols,props.columnWidths]);
   const frozenHeight=props.freezeTopRow?H:0, frozenWidth=props.freezeFirstColumn?geometry.width(0):0;
@@ -86,7 +115,7 @@ export const Grid: React.FC<GridProps> = (props) => {
     return()=>{resize.current=null;window.removeEventListener('mousemove',move);window.removeEventListener('mouseup',up);window.removeEventListener('keydown',key,true);window.removeEventListener('blur',cancel);};
   },[]);
   useEffect(()=>{resize.current=null;setResizePreview(null);},[sheetName,busy]);
-  useLayoutEffect(() => { editGeneration.current++;editing.current=false;draftTarget.current=null;failedInput.current=null;referenceSelection.current=null;setEdit(null); },[sheetName,selectedRow,selectedCol]);
+  useLayoutEffect(() => { editGeneration.current++;editing.current=false;draftTarget.current=null;failedInput.current=null;referenceSelection.current=null;pickMode.current=false;picked.current=null;completionKey.current=null;setCompletion(null);setEdit(null); },[sheetName,selectedRow,selectedCol]);
   useEffect(() => { if (edit !== null) editor.current?.focus(); }, [edit !== null]);
   useEffect(() => {
     const el=container.current;if(!el)return;
@@ -111,6 +140,7 @@ export const Grid: React.FC<GridProps> = (props) => {
     // stale/offscreen content while an address or sheet jump is still loading.
     if (!viewport || viewport.sheet_name !== sheetName || !isCellLoaded(viewport,selectedRow,selectedCol)) return;
     const cell=viewport?.cells[coordToA1(selectedRow,selectedCol)];
+    pickMode.current=true;picked.current=null;completionKey.current=null;setCompletion(null);
     editGeneration.current++;draftTarget.current={sheetName,selectedRow,selectedCol};failedInput.current=null;editing.current=true;setEdit(initial ?? editableCellInput(cell));
   };
   const finish = async (commit: boolean, move?: ReturnType<typeof navigation>) => {
@@ -120,7 +150,7 @@ export const Grid: React.FC<GridProps> = (props) => {
     // navigation, even before the selection-reset effect has run.
     if (!target || target.sheetName!==current.sheetName || target.selectedRow!==current.selectedRow || target.selectedCol!==current.selectedCol || target.sheetName!==sheetName || target.selectedRow!==selectedRow || target.selectedCol!==selectedCol) return;
     if (!commit) {
-      editGeneration.current++;editing.current=false;draftTarget.current=null;setEdit(null);container.current?.focus();return;
+      editGeneration.current++;editing.current=false;draftTarget.current=null;picked.current=null;setCompletion(null);setEdit(null);container.current?.focus();return;
     }
     if (edit === null) return;
     // A failed draft needs an explicit retry or a change, not another network
@@ -140,24 +170,60 @@ export const Grid: React.FC<GridProps> = (props) => {
     const after = currentTarget.current;
     if (generation !== editGeneration.current || after.sheetName !== target.sheetName) return;
     if (after.selectedRow !== target.selectedRow || after.selectedCol !== target.selectedCol) {
-      editing.current=false;draftTarget.current=null;setEdit(null);return;
+      editing.current=false;draftTarget.current=null;picked.current=null;setCompletion(null);setEdit(null);return;
     }
     // A blur may have opened a dialog or moved focus to another control. Do not
     // steal it when the network response arrives. Keyboard commits retain focus.
     const hasEditorFocus = document.activeElement === editor.current;
     if (!success) { failedInput.current=edit; if (move || hasEditorFocus) editor.current?.focus();return; }
-    editing.current=false;draftTarget.current=null;setEdit(null);
+    editing.current=false;draftTarget.current=null;picked.current=null;setCompletion(null);setEdit(null);
     if (move) onSelectCell(move.row,move.col,move.extend);
     if (move || hasEditorFocus) container.current?.focus();
+  };
+  const pointReference=(point:GridRange['start'],extend:boolean)=>{
+    if(edit===null||!editor.current||busy||committing.current)return false;
+    const previous=picked.current;
+    const slot=previous??referenceSlot(edit,editor.current.selectionStart??0,editor.current.selectionEnd??0);
+    if(!slot)return false;
+    const anchor=extend?(previous?.anchor??{row:selectedRow,col:selectedCol}):point;
+    const token=referenceText(anchor,point);
+    const replacement=edit.slice(0,slot.start)+token+edit.slice(slot.end);
+    const end=slot.start+token.length;
+    picked.current={...slot,end,anchor,cursor:point};
+    referenceSelection.current={start:end,end};
+    if(edit===replacement){editor.current.setSelectionRange(end,end);referenceSelection.current=null;}
+    setEdit(replacement);setCompletion(null);failedInput.current=null;
+    const el=container.current;
+    if(el){
+      el.scrollLeft=revealAxis(geometry.offset(point.col),geometry.width(point.col),el.scrollLeft,el.clientWidth-LEFT,frozenWidth,props.freezeFirstColumn&&point.col===0);
+      el.scrollTop=revealAxis(point.row*H,H,el.scrollTop,el.clientHeight-H,frozenHeight,props.freezeTopRow&&point.row===0);
+    }
+    return true;
   };
   const onKeyDown = (e: React.KeyboardEvent) => {
     // Composition Enter confirms the IME candidate, not the spreadsheet edit.
     if (e.nativeEvent.isComposing) return;
     if (editing.current) {
+      const plain=!e.ctrlKey&&!e.metaKey&&!e.altKey;
+      if(plain&&!e.shiftKey&&e.key==='F2'){
+        e.preventDefault();pickMode.current=!pickMode.current;picked.current=null;setCompletion(null);return;
+      }
+      if(plain&&!e.shiftKey&&showSuggestions){
+        if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+          e.preventDefault();setSuggestionIndex(i=>(i+(e.key==='ArrowDown'?1:-1)+suggestions.length)%suggestions.length);return;
+        }
+        if(e.key==='Tab'||e.key==='Enter'){e.preventDefault();acceptSuggestion(suggestions[Math.min(suggestionIndex,suggestions.length-1)]);return;}
+        if(e.key==='Escape'){e.preventDefault();setCompletion(null);return;}
+      }
+      if(plain&&pickMode.current&&['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){
+        const move=gridNavigation(e,picked.current?.cursor??{row:selectedRow,col:selectedCol},totalRows,totalCols,Math.floor((size.height-H-frozenHeight)/H));
+        if(move&&pointReference(move,e.shiftKey)){e.preventDefault();return;}
+      }
+      if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(e.key))picked.current=null;
       if(e.key==='F4'&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey){
         e.preventDefault();if(busy||committing.current||edit===null||!editor.current)return;
         const result=cycleReference(edit,editor.current.selectionStart??0,editor.current.selectionEnd??0);
-        if(result){failedInput.current=null;referenceSelection.current={start:result.selectionStart,end:result.selectionEnd};setEdit(result.value);}return;
+        if(result){picked.current=null;failedInput.current=null;referenceSelection.current={start:result.selectionStart,end:result.selectionEnd};setEdit(result.value);}return;
       }
       if(e.key==='Escape'){e.preventDefault();void finish(false);}
       else if(e.key==='Enter'||e.key==='Tab'){
@@ -193,12 +259,13 @@ export const Grid: React.FC<GridProps> = (props) => {
         const key=coordToA1(r,c),cell=viewport?.cells[key],active=r===selectedRow&&c===selectedCol,selected=containsCell(selection,r,c);
         const style=cell?.style;
         const presentation=cellPresentation(cell,props.showFormulas);
+        const reference=formulaRanges.findIndex(range=>containsCell(range,r,c));
         const traced = traceRange && containsCell(traceRange, r, c) ? highlight?.direction : undefined;
-        return <div key={key} role="gridcell" aria-label={key} aria-selected={selected} data-dependency-highlight={traced}
-          onMouseDown={e=>{if(e.button!==0||busy||committing.current)return;e.preventDefault();if(editing.current){void finish(true,{row:r,col:c,extend:e.shiftKey});return;}dragging.current=true;onSelectCell(r,c,e.shiftKey);container.current?.focus();}}
+        return <div key={key} role="gridcell" aria-label={key} aria-selected={selected} data-dependency-highlight={traced} data-formula-reference={reference>=0?reference+1:undefined}
+          onMouseDown={e=>{if(e.button!==0||busy||committing.current)return;e.preventDefault();if(editing.current){if(pickMode.current&&pointReference({row:r,col:c},e.shiftKey))return;void finish(true,{row:r,col:c,extend:e.shiftKey});return;}dragging.current=true;onSelectCell(r,c,e.shiftKey);container.current?.focus();}}
           onMouseEnter={()=>{if(dragging.current)onSelectCell(r,c,true);}}
           onDoubleClick={()=>{if(active)begin();}}
-          style={{position:'absolute',left:cellLeft(c),top:cellTop(r),zIndex:paneLayer(r,c,props.freezeTopRow,props.freezeFirstColumn),width:geometry.width(c),height:H,backgroundColor:traced==='upstream'?'#ccfbf1':traced==='downstream'?'#ede9fe':selected?'#eff6ff':style?.fill??(cell?.is_staged?'#fffbeb':cell?.is_table_header?'#f1f5f9':'#ffffff'),fontWeight:style?.bold?'bold':undefined,fontStyle:style?.italic?'italic':undefined}}
+          style={{position:'absolute',left:cellLeft(c),top:cellTop(r),zIndex:paneLayer(r,c,props.freezeTopRow,props.freezeFirstColumn),width:geometry.width(c),height:H,backgroundColor:traced==='upstream'?'#ccfbf1':traced==='downstream'?'#ede9fe':selected?'#eff6ff':style?.fill??(cell?.is_staged?'#fffbeb':cell?.is_table_header?'#f1f5f9':'#ffffff'),fontWeight:style?.bold?'bold':undefined,fontStyle:style?.italic?'italic':undefined,boxShadow:reference>=0?`inset 0 0 0 2px ${referenceColors[reference%referenceColors.length]}`:undefined}}
           className={`border-r border-b border-slate-200 px-1.5 flex items-center text-xs overflow-hidden cursor-cell ${active?'ring-2 ring-inset ring-blue-500':''} ${cell?.is_error?'text-rose-700':''} ${cell?.is_table_header?'bg-slate-100':''}`}
           title={traced ? (traced === 'upstream' ? 'Upstream dependency' : 'Downstream dependent') + (presentation.title ? ': ' + presentation.title : '') : presentation.title}>{cell?.is_staged&&<span className="text-amber-600 mr-1">●</span>}<span className="truncate">{presentation.text}</span></div>;
       }))}
@@ -212,7 +279,26 @@ export const Grid: React.FC<GridProps> = (props) => {
       {rows.map(r=><div key={`r${r}`} aria-hidden style={{position:'absolute',left:scroll.left,top:cellTop(r),width:LEFT,height:H,zIndex:props.freezeTopRow&&r===0?35:30}} className="bg-slate-100 border-r border-b border-slate-300 text-center text-xs py-1">{r+1}</div>)}
       <div aria-hidden style={{position:'absolute',top:scroll.top,left:scroll.left,width:LEFT,height:H,zIndex:40}} className="bg-slate-200 border-r border-b border-slate-300"/>
       {resizePreview&&<div aria-hidden style={{position:'absolute',pointerEvents:'none',left:cellLeft(resizePreview.column)+resizePreview.width,top:scroll.top,width:2,height:size.height,zIndex:45,background:'#2563eb'}}/>}
-      {edit!==null&&draftMatchesSelection&&<input ref={editor} aria-label={`Edit ${coordToA1(selectedRow,selectedCol)}`} value={edit} title="F4 cycles a formula reference: relative, absolute, row-locked, column-locked" onChange={e=>{referenceSelection.current=null;failedInput.current=null;setEdit(e.target.value);}} onBlur={()=>{void finish(true);}} readOnly={busy} style={{position:'absolute',left:cellLeft(selectedCol),top:cellTop(selectedRow),width:Math.max(geometry.width(selectedCol),160),height:H,zIndex:paneLayer(selectedRow,selectedCol,props.freezeTopRow,props.freezeFirstColumn)+5}} className="px-1 text-xs border-2 border-blue-600 bg-white outline-none"/>}
+      {edit!==null&&draftMatchesSelection&&<div className="absolute" style={{left:props.freezeFirstColumn&&selectedCol===0?cellLeft(selectedCol):Math.min(Math.max(cellLeft(selectedCol),scroll.left+LEFT+frozenWidth),scroll.left+Math.max(LEFT+frozenWidth,size.width-170)),
+        top:props.freezeTopRow&&selectedRow===0?cellTop(selectedRow):Math.max(scroll.top+H+frozenHeight,Math.min(cellTop(selectedRow),scroll.top+size.height-H)),
+        width:Math.max(geometry.width(selectedCol),160),height:H,zIndex:45}}>
+        <input ref={editor} aria-label={`Edit ${coordToA1(selectedRow,selectedCol)}`} value={edit}
+          aria-autocomplete="list" aria-controls={showSuggestions?'inline-function-suggestions':undefined}
+          aria-activedescendant={showSuggestions?`inline-function-${suggestionIndex}`:undefined}
+          title="Use arrows to point to a cell (Shift extends the range); F2 toggles caret movement. F4 cycles reference locks."
+          onChange={e=>{referenceSelection.current=null;picked.current=null;failedInput.current=null;setEdit(e.target.value);updateCompletion(e.target.value,e.target.selectionStart,e.target.selectionEnd,true);}}
+          onSelect={e=>updateCompletion(e.currentTarget.value,e.currentTarget.selectionStart,e.currentTarget.selectionEnd)}
+          onClick={()=>{picked.current=null;}}
+          onBlur={()=>{setCompletion(null);void finish(true);}} readOnly={busy}
+          className="h-full w-full px-1 text-xs border-2 border-blue-600 bg-white outline-none"/>
+        {showSuggestions&&<div id="inline-function-suggestions" role="listbox" aria-label="Function suggestions"
+          className="absolute left-0 z-50 w-64 max-h-40 overflow-y-auto rounded border border-slate-200 bg-white py-1 shadow"
+          style={cellTop(selectedRow)-scroll.top>size.height-190?{bottom:H}:{top:H}}>
+          {suggestions.map((name,index)=><button key={name} id={`inline-function-${index}`} type="button" role="option" aria-label={name} aria-selected={index===suggestionIndex}
+            onMouseDown={e=>e.preventDefault()} onClick={()=>acceptSuggestion(name)}
+            className={`block w-full px-3 py-1 text-left font-mono text-xs hover:bg-emerald-50 ${index===suggestionIndex?'bg-emerald-50':''}`}>{name}</button>)}
+        </div>}
+      </div>}
     </div>
   </div>;
 };

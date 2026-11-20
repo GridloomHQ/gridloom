@@ -47,6 +47,14 @@ export const App: React.FC = () => {
   const [anchor, setAnchor] = useState({row: 0, col: 0});
   const [busy, setBusy] = useState(false);
   const [gridDraft,setGridDraft]=useState(false),[formulaDraft,setFormulaDraft]=useState(false);
+  const [formulaDraftText,setFormulaDraftText]=useState<string|null>(null);
+  const [functionNames,setFunctionNames]=useState<string[]>([]);
+  const [functionCatalogStatus,setFunctionCatalogStatus]=useState<'loading'|'ready'|'error'>('loading');
+  const reloadFunctionCatalog=useCallback(()=>{
+    setFunctionCatalogStatus('loading');
+    void api.functionCatalog().then(({functions})=>{setFunctionNames(functions);setFunctionCatalogStatus('ready');},()=>setFunctionCatalogStatus('error'));
+  },[]);
+  useEffect(reloadFunctionCatalog,[reloadFunctionCatalog]);
   const [filePath,setFilePath]=useState<string|null>(null);
   const [replacement,setReplacement]=useState<'new'|'open'|'recover'|null>(null);
   const [recoveryCopies,setRecoveryCopies]=useState<{id:string;modified:string}[]>([]);
@@ -493,7 +501,8 @@ export const App: React.FC = () => {
       />
 
       {/* Formula Bar */}
-      <FormulaBar sheetName={sheetName} onDraftChange={setFormulaDraft} key={`${workbookEpoch}:${sheetName}`}
+      <FormulaBar sheetName={sheetName} onDraftChange={setFormulaDraft} onDraftText={setFormulaDraftText}
+        functionNames={functionNames} catalogStatus={functionCatalogStatus} onReloadCatalog={reloadFunctionCatalog} key={`${workbookEpoch}:${sheetName}`}
         disabled={busy || !selectedCellLoaded}
         selectedRow={selectedRow}
         selectedCol={selectedCol}
@@ -505,7 +514,7 @@ export const App: React.FC = () => {
 
       {/* Virtualized Worksheet Grid Canvas */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
-      <Grid onDraftChange={setGridDraft} key={workbookEpoch}
+      <Grid onDraftChange={setGridDraft} functionNames={functionNames} externalDraft={formulaDraftText} key={workbookEpoch}
         sheetName={sheetName}
         showFormulas={showFormulas}
         freezeTopRow={freezeTopRow} freezeFirstColumn={freezeFirstColumn}
