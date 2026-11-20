@@ -778,7 +778,10 @@ impl Workbook {
                                             raw_input: None,
                                             style,
                                             coord,
-                                            display_text: crate::spreadsheet::format_value(&val, number_format.as_deref()),
+                                            display_text: crate::spreadsheet::format_value(
+                                                &val,
+                                                number_format.as_deref(),
+                                            ),
                                             raw_value: val,
                                             formula: None,
                                             number_format,
