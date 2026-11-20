@@ -3,6 +3,15 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, Play, ChevronLeft, ChevronRight, CheckCircle, AlertCircle, Sparkles, Table as TableIcon, ArrowRight } from 'lucide-react';
 import { api } from '../api';
 import { QueryPreviewPage, LineageReport } from '../types';
+import { WorksheetPlacement } from './WorksheetPlacement';
+import { parsePlacement, type GridPlacement, type PlacementDraft } from '../utils/worksheetPlacement';
+
+export type QueryPlacement = GridPlacement & {
+  sourceName: string;
+  connectionName: string;
+  sql: string;
+  mode: 'live' | 'snapshot';
+};
 
 const PREVIEW_PAGE_SIZE = 100;
 
@@ -11,7 +20,9 @@ interface QueryEditorModalProps {
   onClose: () => void;
   initialConnection?: string;
   initialSql?: string;
-  onInsertTableFromSource: (sourceName: string) => void;
+  sheets: readonly string[];
+  selection: GridPlacement;
+  onInsertTableFromSource: (input: QueryPlacement) => Promise<void>;
 }
 
 export const QueryEditorModal: React.FC<QueryEditorModalProps> = ({
@@ -19,13 +30,18 @@ export const QueryEditorModal: React.FC<QueryEditorModalProps> = ({
   onClose,
   initialConnection,
   initialSql,
+  sheets,
+  selection,
   onInsertTableFromSource,
 }) => {
   const [connections, setConnections] = useState<{ name: string; kind: string }[]>([]);
   const [connecting, setConnecting] = useState(false);
   const [selectedConn, setSelectedConn] = useState(initialConnection || '');
-  const [sql, setSql] = useState(initialSql || 'SELECT * FROM invoices LIMIT 50');
+  const [sql, setSql] = useState(initialSql || 'SELECT * FROM invoices');
   const [sourceName, setSourceName] = useState('Invoices');
+  const [mode, setMode] = useState<QueryPlacement['mode']>('live');
+  const [placement, setPlacement] = useState<PlacementDraft>({sheetName: '', anchor: ''});
+  const destination = parsePlacement(placement, sheets);
 
   const [previewLoading, setPreviewLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -35,7 +51,9 @@ export const QueryEditorModal: React.FC<QueryEditorModalProps> = ({
   const request = useRef<AbortController | null>(null);
   const resultsScroll = useRef<HTMLDivElement>(null);
   const busy = previewLoading || saving;
-  const canQuery = !connecting && connections.some(conn => conn.name === selectedConn) && !!sql.trim();
+  const connection = connections.find(conn => conn.name === selectedConn);
+  const canQuery = !connecting && !!connection && !!sql.trim();
+  const modeSupported = mode === 'snapshot' || connection?.kind.toLowerCase() === 'sqlite';
 
   const clearPreview = () => {
     request.current?.abort();
@@ -54,6 +72,8 @@ export const QueryEditorModal: React.FC<QueryEditorModalProps> = ({
   useEffect(() => {
     clearPreview();
     if (!isOpen) return;
+    setPlacement({sheetName: '', anchor: ''});
+    setMode('live');
     let active = true;
     setConnecting(true);
     setConnections([]);
@@ -107,12 +127,11 @@ export const QueryEditorModal: React.FC<QueryEditorModalProps> = ({
   };
 
   const handleSaveAndInsert = async () => {
-    if (!canQuery || !sourceName.trim() || !result || busy) return;
+    if (!canQuery || !sourceName.trim() || !result || busy || !destination || !modeSupported) return;
     setSaving(true);
     setError(null);
     try {
-      await api.createSource(sourceName, selectedConn, sql);
-      onInsertTableFromSource(sourceName);
+      await onInsertTableFromSource({...destination, sourceName: sourceName.trim(), connectionName: selectedConn, sql, mode});
       onClose();
     } catch (err: any) {
       setError(err.message);
@@ -125,7 +144,7 @@ export const QueryEditorModal: React.FC<QueryEditorModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <div role="dialog" aria-modal="true" aria-labelledby="query-editor-heading" className="bg-white rounded-lg shadow-xl w-full max-w-5xl h-[650px] flex flex-col overflow-hidden border border-slate-200">
+      <div role="dialog" aria-modal="true" aria-labelledby="query-editor-heading" className="bg-white rounded-lg shadow-xl w-full max-w-5xl h-[720px] max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden border border-slate-200">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 bg-slate-50">
           <div className="flex items-center gap-2">
@@ -133,6 +152,7 @@ export const QueryEditorModal: React.FC<QueryEditorModalProps> = ({
             <h2 id="query-editor-heading" className="text-sm font-bold text-slate-800">SQL Query Editor & Source Builder</h2>
           </div>
           <button
+            disabled={saving}
             aria-label="Close query editor"
             onClick={onClose}
             className="text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-200"
@@ -151,7 +171,7 @@ export const QueryEditorModal: React.FC<QueryEditorModalProps> = ({
         )}
 
         {/* Content Body */}
-        <div className="flex-1 flex flex-col p-4 overflow-hidden gap-3">
+        <div className="flex-1 min-h-0 flex flex-col p-4 overflow-y-auto gap-3">
           {/* Top Controls: Connection & Presets */}
           <div className="flex items-center justify-between gap-3 text-xs">
             <div className="flex items-center gap-2">
@@ -181,8 +201,9 @@ export const QueryEditorModal: React.FC<QueryEditorModalProps> = ({
               <button
                 disabled={saving}
                 onClick={() => {
-                  changeSql('SELECT id, customer_name, amount, status, issued_on FROM invoices ORDER BY id LIMIT 100');
+                  changeSql('SELECT * FROM invoices ORDER BY id');
                   setSourceName('Invoices');
+                  setMode('live');
                 }}
                 className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-[11px] text-slate-700 font-mono"
               >
@@ -191,8 +212,9 @@ export const QueryEditorModal: React.FC<QueryEditorModalProps> = ({
               <button
                 disabled={saving}
                 onClick={() => {
-                  changeSql('SELECT id, name, quota, region FROM sales_reps');
+                  changeSql('SELECT * FROM sales_reps ORDER BY id');
                   setSourceName('SalesReps');
+                  setMode('live');
                 }}
                 className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-[11px] text-slate-700 font-mono"
               >
@@ -203,6 +225,7 @@ export const QueryEditorModal: React.FC<QueryEditorModalProps> = ({
                 onClick={() => {
                   changeSql('SELECT status, count(*) as count, sum(amount) as total_amount FROM invoices GROUP BY status');
                   setSourceName('InvoiceSummary');
+                  setMode('snapshot');
                 }}
                 className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-[11px] text-slate-700 font-mono"
               >
@@ -212,7 +235,7 @@ export const QueryEditorModal: React.FC<QueryEditorModalProps> = ({
           </div>
 
           {/* SQL Input Area */}
-          <div className="h-32 border border-slate-300 rounded overflow-hidden flex flex-col focus-within:border-indigo-500">
+          <div className="h-24 shrink-0 border border-slate-300 rounded overflow-hidden flex flex-col focus-within:border-indigo-500">
             <textarea
               aria-label="SQL query"
               value={sql}
@@ -282,7 +305,7 @@ export const QueryEditorModal: React.FC<QueryEditorModalProps> = ({
           )}
 
           {/* Result Table Preview */}
-          <div className="flex-1 min-h-0 border border-slate-200 rounded flex flex-col bg-white" aria-busy={previewLoading}>
+          <div className="flex-1 min-h-[100px] border border-slate-200 rounded flex flex-col bg-white" aria-busy={previewLoading}>
             {result && (
               <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b text-xs bg-slate-50">
                 <span role="status" className="font-medium text-slate-700">
@@ -354,37 +377,52 @@ export const QueryEditorModal: React.FC<QueryEditorModalProps> = ({
             </div>
           </div>
 
-          {/* Footer: Register as Named Data Source */}
-          <div className="pt-2 border-t border-slate-200 flex items-center justify-between">
-            <div className="flex items-center gap-2">
+          <div className="pt-2 border-t border-slate-200 flex flex-wrap items-end gap-3">
+            <div className="flex flex-col gap-1">
               <label htmlFor="query-source-name" className="text-xs font-bold text-slate-700">Source Name:</label>
               <input
                 id="query-source-name"
                 type="text"
                 value={sourceName}
                 onChange={(e) => setSourceName(e.target.value)}
+                disabled={saving}
                 placeholder="e.g. Invoices"
-                className="px-2.5 py-1 border border-slate-300 rounded text-xs w-48 font-mono bg-white"
+                className="px-2.5 py-1 border border-slate-300 rounded text-xs w-36 font-mono bg-white"
               />
             </div>
-
-            <div className="flex items-center gap-2">
+            <label className="flex flex-col gap-1 text-xs font-bold text-slate-700">
+              Table type
+              <select value={mode} onChange={e => setMode(e.target.value === 'live' ? 'live' : 'snapshot')}
+                disabled={saving} className="px-2 py-1 border border-slate-300 rounded bg-white font-normal">
+                <option value="live">Live table</option>
+                <option value="snapshot">Materialized snapshot</option>
+              </select>
+            </label>
+            <WorksheetPlacement sheets={sheets} selection={selection} draft={placement} onChange={setPlacement} disabled={saving} />
+            <div className="flex items-center gap-2 ml-auto">
               <button
                 type="button"
                 onClick={onClose}
+                disabled={saving}
                 className="px-3 py-1.5 rounded border border-slate-300 text-xs text-slate-600 hover:bg-slate-100"
               >
                 Close
               </button>
               <button
                 onClick={handleSaveAndInsert}
-                disabled={busy || !result || !sourceName.trim()}
+                disabled={busy || !result || !sourceName.trim() || !destination || !modeSupported}
                 className="flex items-center gap-1.5 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-semibold shadow-sm transition-colors disabled:opacity-50"
               >
-                <span>Save Source & Insert Table</span>
+                <span>{saving ? 'Inserting…' : mode === 'live' ? 'Insert live table' : 'Insert snapshot'}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
+            <p className="basis-full text-xs text-slate-600">
+              {mode === 'live' ? (modeSupported
+                ? 'Live tables load rows as you navigate. Use SELECT * from one SQLite table with an INTEGER primary key; simple WHERE and ORDER BY are supported.'
+                : 'Live tables require a SQLite database. Select Materialized snapshot for this connection.') :
+                'Snapshots load the query result into the workbook. For large datasets, use a live table or narrow the SQL first.'}
+            </p>
           </div>
         </div>
       </div>

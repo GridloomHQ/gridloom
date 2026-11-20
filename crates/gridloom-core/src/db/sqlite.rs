@@ -120,6 +120,38 @@ impl SqliteEngine {
         })
     }
 
+    pub(crate) fn live_schema(&self, table: &str) -> Result<TableSchema, CellError> {
+        {
+            let conn = self.conn.lock().unwrap();
+            let okay: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_list WHERE schema='main' AND type='table' AND name=?1 COLLATE NOCASE AND lower(substr(name,1,7)) <> 'sqlite_') AND NOT EXISTS(SELECT 1 FROM pragma_index_list(?1, 'main') WHERE origin='pk')",
+                [table], |row| row.get(0)
+            ).map_err(|err| CellError::Sql(err.to_string()))?;
+            if !okay {
+                return Err(CellError::Sql("Live worksheets require a normal SQLite base table in main with an INTEGER PRIMARY KEY that aliases its rowid. Views, virtual tables, and separately indexed primary keys are not supported.".into()));
+            }
+            // Sort spill files must not become a second giant in-memory result.
+            conn.pragma_update(None, "temp_store", "FILE").map_err(|err| CellError::Sql(err.to_string()))?;
+        }
+        self.get_table_schema(table)
+    }
+
+    pub(crate) fn live_count(&self, table: &str, key: &str, predicate: &str) -> Result<(i64, Option<(i64,i64)>), CellError> {
+        use crate::live_table::quote_identifier;
+        let name = quote_identifier(table);
+        let key = quote_identifier(key);
+        let base = format!("main.{name} AS gridloom_live");
+        let query = if predicate.is_empty() {
+            format!("SELECT (SELECT count(*) FROM {base}), (SELECT min({key}) FROM {base}), (SELECT max({key}) FROM {base})")
+        } else {
+            format!("SELECT count(*), NULL, NULL FROM {base}{predicate}")
+        };
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(&query, [], |row| {
+            Ok((row.get(0)?, row.get::<_,Option<i64>>(1)?.zip(row.get::<_,Option<i64>>(2)?)))
+        }).map_err(|err| CellError::Sql(err.to_string()))
+    }
+
     pub(crate) fn check_column_writable(&self, table: &str, column: &str) -> Result<(), CellError> {
         let conn = self.conn.lock().unwrap();
         let hidden = conn.query_row(

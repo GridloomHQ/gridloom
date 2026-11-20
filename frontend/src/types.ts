@@ -33,6 +33,14 @@ export interface CellRenderData {
   is_error: boolean;
   table_name?: string;
   is_table_header: boolean;
+  live_edit?: {
+    connection_name: string;
+    table_name: string;
+    pk_column: string;
+    column_name: string;
+    pk_value: CellValue;
+    original_value: CellValue;
+  };
 }
 
 export interface ViewportResponse {
@@ -97,6 +105,7 @@ export interface WorksheetTable {
   anchor: CellCoord;
   range: { start_row: number; start_col: number; end_row: number; end_col: number };
   columns: string[];
+  live?: { connection_name: string; sql: string; base_table: string; primary_key: string };
 }
 
 export interface StagedPatch {

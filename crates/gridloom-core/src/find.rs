@@ -68,6 +68,9 @@ impl Workbook {
         {
             return Err(CellError::Ref);
         }
+        let live_omitted = matches!(req.look_in, FindLookIn::Values) && self.sheets.iter().any(|(name,sheet)|
+            req.sheet_name.as_ref().is_none_or(|selected|selected==name)
+                && sheet.tables.values().any(|table|table.live.is_some()));
         let needle = if req.case_sensitive {
             req.query.clone()
         } else {
@@ -210,6 +213,9 @@ impl Workbook {
         let next = req.offset.saturating_add(response.matches.len());
         if next < response.total_matches {
             response.next_offset = Some(next);
+        }
+        if live_omitted {
+            response.warnings.push("Worksheet Find omits live table values. Use SQL WHERE for live table filtering.".into());
         }
         if clipped {
             response.warnings.push("Result previews are limited to 1,000 characters per field; matching uses the complete cell text.".into());

@@ -4,6 +4,7 @@ import { LedgerPanel } from './components/LedgerPanel';
 import {SelectionSummary} from './components/SelectionSummary';
 import {wholeAxisRange, type SelectionAxis} from './utils/gridNavigation';
 import {isCellLoaded} from './utils/frozenViewport';
+import {ViewportCache, viewportBudget, viewportCovers, requestCovers, type ViewBounds} from './utils/viewportCache';
 import { FindPanel, FindMatch } from './components/FindPanel';
 import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { normalizedRange, encodeTsv, decodeTsv, boundedRangeDimensions, ordinaryFormatRangeIsBounded, GridRange } from './utils/selection';
@@ -64,9 +65,7 @@ export const App: React.FC = () => {
   const [recoveryCopies,setRecoveryCopies]=useState<{id:string;modified:string}[]>([]);
   const [recoveryId,setRecoveryId]=useState('');
   const [apiPending,setApiPending]=useState(getPendingMutations());
-  useEffect(()=>subscribeMutations(()=>setApiPending(getPendingMutations())),[]);
   const mutationLock = useRef(false);
-  const viewportSequence = useRef(0);
   const metadataSequence = useRef(0);
   const clipboard = useRef<{text:string;values:string[][];snapshot:string;sheet:string;range:GridRange} | null>(null);
   const [pasteSpecialOpen, setPasteSpecialOpen] = useState(false);
@@ -81,8 +80,6 @@ export const App: React.FC = () => {
   const [reviewRevision, setReviewRevision] = useState(0);
   const [workbookEpoch, setWorkbookEpoch] = useState(0);
   const [sheetName, setSheetName] = useState('Sheet1');
-  const activeSheetRef = useRef(sheetName);
-  activeSheetRef.current = sheetName;
   const [selectedRow, setSelectedRow] = useState(0);
   const [selectedCol, setSelectedCol] = useState(0);
   const [storedViewport, setViewport] = useState<ViewportResponse | null>(null);
@@ -93,9 +90,16 @@ export const App: React.FC = () => {
   const showFormulas=sheetShowFormulas[sheetName]??false;
   const [sheetFreeze,setSheetFreeze]=useState<Record<string,{rows:number;columns:number}>>({});
   const frozenRows=sheetFreeze[sheetName]?.rows??0,frozenColumns=sheetFreeze[sheetName]?.columns??0;
-  const visibleFrozen=useRef({rows:0,columns:0});
-  const viewportConfigRef=useRef('');
-  viewportConfigRef.current=`${sheetName}:${frozenRows}:${frozenColumns}`;
+  const viewportConfig=JSON.stringify([workbookEpoch,sheetName,frozenRows,frozenColumns]);
+  const viewportConfigRef=useRef(viewportConfig);
+  viewportConfigRef.current=viewportConfig;
+  const [viewportCache]=useState(()=>new ViewportCache(viewportBudget(
+    (navigator as Navigator & {deviceMemory?:number}).deviceMemory)));
+  const viewportScope=useRef('');
+  const displayedWindow=useRef<ViewportResponse|null>(null);
+  const viewportPending=useRef<{bounds:ViewBounds; controller:AbortController; task:Promise<void>}|null>(null);
+  const priorBounds=useRef<ViewBounds|undefined>(undefined);
+  const [viewportRevision,setViewportRevision]=useState(0);
   const [widthDraft,setWidthDraft]=useState('110');
   const columnWidths=sheetWidths[sheetName]??{};
   useEffect(()=>setWidthDraft(String(columnWidths[selectedCol]??110)),[sheetName,selectedCol,sheetWidths]);
@@ -103,7 +107,7 @@ export const App: React.FC = () => {
   const tables = tableMetadata?.sheet === sheetName ? tableMetadata.tables : [];
 
   // Visible bounds
-  const [visibleBounds, setVisibleBounds] = useState({
+  const [visibleBounds, setVisibleBounds] = useState<ViewBounds>({
     startRow: 0,
     startCol: 0,
     endRow: 40,
@@ -111,6 +115,7 @@ export const App: React.FC = () => {
     pinnedRows: 0,
     pinnedColumns: 0,
   });
+  const latestBounds=useRef(visibleBounds);
 
   // Modal open states
   const [isSchemaBrowserOpen, setIsSchemaBrowserOpen] = useState(false);
@@ -153,29 +158,93 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // Fetch viewport cells
-  const fetchViewportData = useCallback(async (startR: number, startC: number, endR: number, endC: number) => {
-    const config=`${sheetName}:${frozenRows}:${frozenColumns}`;
-    if(config!==viewportConfigRef.current)return;
-    try {
-      const request = ++viewportSequence.current;
-      const data = await api.getViewportPanes(sheetName,startR,startC,endR,endC,Math.min(frozenRows,visibleFrozen.current.rows),Math.min(frozenColumns,visibleFrozen.current.columns));
-      if (request === viewportSequence.current && data.sheet_name === activeSheetRef.current && config === viewportConfigRef.current) setViewport(data);
-    } catch (err: any) {
-      console.error('Failed to fetch viewport:', err);
+  const invalidateViewport = useCallback(() => {
+    viewportPending.current?.controller.abort();
+    viewportPending.current=null;
+    viewportCache.clear();
+    displayedWindow.current=null;
+    priorBounds.current=undefined;
+  }, [viewportCache]);
+
+  useEffect(() => {
+    let wasPending=getPendingMutations()>0;
+    return subscribeMutations(() => {
+      const count=getPendingMutations();
+      setApiPending(count);
+      if (!wasPending && count>0) invalidateViewport();
+      // Explicit App mutations already await a fresh viewport. This covers
+      // writes from nested panels that do not request their own refresh.
+      if (wasPending && count===0 && !mutationLock.current) setViewportRevision(n=>n+1);
+      wasPending=count>0;
+    });
+  }, [invalidateViewport]);
+  useEffect(() => invalidateViewport, [invalidateViewport]);
+
+  const requestViewport = useCallback(async (current:ViewBounds) => {
+    if(viewportConfig!==viewportConfigRef.current || getPendingMutations()>0)return;
+    if(viewportScope.current!==viewportConfig){
+      invalidateViewport();
+      viewportScope.current=viewportConfig;
     }
-  }, [sheetName,frozenRows,frozenColumns]);
+    const withVisiblePanes = (b:ViewBounds):ViewBounds => ({
+      ...b,pinnedRows:Math.min(frozenRows,b.pinnedRows),pinnedColumns:Math.min(frozenColumns,b.pinnedColumns),
+    });
+    const bounds=withVisiblePanes(current);
+    const previous=priorBounds.current;
+    priorBounds.current=bounds;
+    const shown=displayedWindow.current;
+    const cached=shown&&viewportCovers(shown,bounds) ? shown : viewportCache.find(bounds);
+    if(cached){
+      viewportPending.current?.controller.abort();
+      viewportPending.current=null;
+      displayedWindow.current=cached;
+      setViewport(cached);
+      return;
+    }
+    const pending=viewportPending.current;
+    if(pending&&requestCovers(pending.bounds,bounds))return pending.task;
+    pending?.controller.abort();
+    const window=viewportCache.plan(bounds,previous);
+    const controller=new AbortController();
+    const task=(async()=>{
+      try{
+        const view=await api.getViewportPanes(sheetName,window.startRow,window.startCol,
+          window.endRow,window.endCol,window.pinnedRows,window.pinnedColumns,0,controller.signal);
+        if(controller.signal.aborted||viewportConfig!==viewportConfigRef.current||view.sheet_name!==sheetName)return;
+        viewportCache.put(view);
+        if(viewportCovers(view,withVisiblePanes(latestBounds.current))){
+          displayedWindow.current=view;
+          setViewport(view);
+        }
+      }catch(error){
+        if(!controller.signal.aborted)console.error('Failed to fetch viewport:',error);
+      }finally{
+        if(viewportPending.current?.controller===controller)viewportPending.current=null;
+      }
+    })();
+    viewportPending.current={controller,bounds:window,task};
+    await task;
+  }, [sheetName,viewportConfig,frozenRows,frozenColumns,viewportCache,invalidateViewport]);
+
+  const fetchViewportData = useCallback(async () => {
+    if(viewportConfig!==viewportConfigRef.current)return;
+    invalidateViewport();
+    await requestViewport(latestBounds.current);
+  }, [viewportConfig,invalidateViewport,requestViewport]);
 
   useEffect(() => { void refreshMetadata(); }, [refreshMetadata]);
   useEffect(() => {
-    void fetchViewportData(visibleBounds.startRow, visibleBounds.startCol, visibleBounds.endRow, visibleBounds.endCol);
-  }, [fetchViewportData, visibleBounds]);
+    // Coalesce visual scroll events within a frame; a distant keyboard jump
+    // requests the destination window, never a corridor of intermediate rows.
+    const frame=requestAnimationFrame(()=>{void requestViewport(latestBounds.current);});
+    return ()=>cancelAnimationFrame(frame);
+  }, [requestViewport, visibleBounds, viewportRevision]);
 
   const handleViewportChange = useCallback((startRow: number, startCol: number, endRow: number, endCol: number, pinnedRows: number, pinnedColumns: number) => {
-    visibleFrozen.current = {rows:pinnedRows,columns:pinnedColumns};
+    const next={startRow,startCol,endRow,endCol,pinnedRows,pinnedColumns};
+    latestBounds.current=next;
     setVisibleBounds(prev => prev.startRow === startRow && prev.startCol === startCol && prev.endRow === endRow && prev.endCol === endCol
-      && prev.pinnedRows === pinnedRows && prev.pinnedColumns === pinnedColumns
-      ? prev : { startRow, startCol, endRow, endCol, pinnedRows, pinnedColumns });
+      && prev.pinnedRows === pinnedRows && prev.pinnedColumns === pinnedColumns ? prev : next);
   }, []);
 
   const handleCommitCell = async (row: number, col: number, rawInput: string, asSqlNull=false): Promise<boolean> => {
@@ -184,6 +253,35 @@ export const App: React.FC = () => {
       setStatusMsg(`Setting ${coordToA1(row, col)}...`);
       const key = coordToA1(row, col);
       const existing = viewport?.cells[key];
+
+      // A live row carries only its own stable key and original value. Never
+      // ask for an entire source result to stage an edit to a visible cell.
+      const live = existing?.live_edit;
+      if (live) {
+        const tbl = tables.find((table) => table.name === existing?.table_name);
+        const columnName = live.column_name;
+        if (!tbl?.live || tbl.columns[col - tbl.anchor.col] !== columnName)
+          throw new Error('Live table metadata is not ready. Try the edit again.');
+        if ([live.pk_value, live.original_value].some(value => value?.type === 'Integer' && !Number.isSafeInteger(value.value))) {
+          throw new Error('This source row has an integer that cannot be addressed exactly in the browser. No edit was staged.');
+        }
+        await api.stageEdit({
+          connection_name: live.connection_name,
+          table_name: live.table_name,
+          pk_columns: [live.pk_column],
+          pk_values: [live.pk_value],
+          column_name: columnName,
+          original_value: live.original_value,
+          ...(asSqlNull ? {proposed_value: {type: 'Null'} as const} : {raw_input: rawInput}),
+        });
+        setStatusMsg(`Staged edit for ${tbl.name}[${columnName}]`);
+        await refreshMetadata();
+        await fetchViewportData();
+        return true;
+      }
+      if (tables.some(({live,range}) => live && row>=range.start_row && row<=range.end_row && col>=range.start_col && col<=range.end_col)) {
+        throw new Error(existing ? 'This live table cell is read-only' : 'Wait for this live row to load before editing');
+      }
 
       // Check if this cell belongs to an editable table
       if (existing?.table_name && !existing.is_table_header) {
@@ -230,7 +328,7 @@ export const App: React.FC = () => {
 
               setStatusMsg(`Staged edit for ${tbl.name}[${targetColName}]`);
               await refreshMetadata();
-              await fetchViewportData(visibleBounds.startRow, visibleBounds.startCol, visibleBounds.endRow, visibleBounds.endCol);
+              await fetchViewportData();
               return true;
             }
           }
@@ -244,7 +342,7 @@ export const App: React.FC = () => {
       await api.setCell(sheetName, row, col, rawInput);
       setStatusMsg(`Updated ${coordToA1(row, col)}`);
       await refreshMetadata();
-      await fetchViewportData(visibleBounds.startRow, visibleBounds.startCol, visibleBounds.endRow, visibleBounds.endCol);
+      await fetchViewportData();
     } catch (err: any) {
       setStatusMsg(`Error: ${err.message}`);
       return false;
@@ -279,7 +377,7 @@ export const App: React.FC = () => {
     try {
       await operation(); if(!preserveClipboard)clipboard.current=null;
       await refreshMetadata();
-      await fetchViewportData(visibleBounds.startRow,visibleBounds.startCol,visibleBounds.endRow,visibleBounds.endCol);
+      await fetchViewportData();
       setStatusMsg(label);
     } catch(error:any){setStatusMsg(`Error: ${error.message}`);}
     finally{mutationLock.current=false;setBusy(false);}
@@ -452,7 +550,7 @@ export const App: React.FC = () => {
     setReplacement(null);
     await mutate(kind==='new'?'Created new workbook':kind==='recover'?'Recovered workbook. Use Save As to keep a named copy.':`Opened workbook from ${path}`,async()=>{
       if(kind==='new')await api.newWorkbook();else if(kind==='recover')await api.restoreRecovery(recoveryId);else await api.openWorkbook(path!);
-      viewportSequence.current++;setViewport(null);selectCell(0,0);
+      invalidateViewport();setViewport(null);selectCell(0,0);
       setWorkbookEpoch(e=>e+1);reviewDrafts.current.clear();clearDependencyTrace();
     });
   };
@@ -470,14 +568,17 @@ export const App: React.FC = () => {
 
   const handleRefreshAll = async () => {
     await mutate('All sources refreshed successfully', async () => {
-      const sources = await api.getSources();
-      for (const source of sources) await api.refreshSource(source.name);
+      const workbook = await api.getWorkbook();
+      for (const sheet of workbook.sheets)
+        for (const table of sheet.tables)
+          if (table.live) await api.refreshLiveTable(sheet.name, table.name);
+      for (const source of workbook.sources) await api.refreshSource(source);
     });
   };
 
   const openQueryWithTable = (connName: string, tableName: string) => {
     setQueryInitialConn(connName);
-    setQueryInitialSql(`SELECT * FROM ${tableName} LIMIT 50`);
+    setQueryInitialSql(`SELECT * FROM "${tableName.replace(/"/g, '""')}"`);
     setIsQueryEditorOpen(true);
   };
 
@@ -657,7 +758,7 @@ export const App: React.FC = () => {
       </div>
 
       {isAboutOpen && <SampleDemo onClose={()=>setIsAboutOpen(false)}/>}
-      {closeAddon && isCloseOpen && <Suspense fallback={<p role="status" className="fixed bottom-4 right-4 bg-white border p-2">Loading Monthly close…</p>}><MonthlyClosePanel onClose={()=>setIsCloseOpen(false)} onChanged={()=>{clipboard.current=null;void refreshMetadata();void fetchViewportData(visibleBounds.startRow,visibleBounds.startCol,visibleBounds.endRow,visibleBounds.endCol);}} onSelectCell={(sheet,row,col)=>moveToExplanation(row,col,sheet,()=>{clearDependencyTrace();setIsCloseOpen(false);})}/></Suspense>}
+      {closeAddon && isCloseOpen && <Suspense fallback={<p role="status" className="fixed bottom-4 right-4 bg-white border p-2">Loading Monthly close…</p>}><MonthlyClosePanel onClose={()=>setIsCloseOpen(false)} onChanged={()=>{clipboard.current=null;void refreshMetadata();void fetchViewportData();}} onSelectCell={(sheet,row,col)=>moveToExplanation(row,col,sheet,()=>{clearDependencyTrace();setIsCloseOpen(false);})}/></Suspense>}
       {isQuestionsOpen && <OpenQuestions onClose={() => setIsQuestionsOpen(false)} onNavigate={question => {
         moveToExplanation(question.coord.row, question.coord.col, question.sheet_name, () => {
           clearDependencyTrace(); setIsQuestionsOpen(false);
@@ -675,24 +776,34 @@ export const App: React.FC = () => {
         onClose={() => setIsQueryEditorOpen(false)}
         initialConnection={queryInitialConn}
         initialSql={queryInitialSql}
-        onInsertTableFromSource={(srcName) => {
-          api.insertTable(sheetName, srcName, srcName, selectedRow, selectedCol)
-            .then(() => {
-              refreshMetadata();
-              fetchViewportData(visibleBounds.startRow, visibleBounds.startCol, visibleBounds.endRow, visibleBounds.endCol);
-            })
-            .catch((err) => alert(err.message));
+        sheets={sheets}
+        selection={{sheetName, row: selectedRow, col: selectedCol}}
+        onInsertTableFromSource={async placement => {
+          const {sourceName, connectionName, sql, sheetName: targetSheet, row, col, mode} = placement;
+          if (mode === 'live') {
+            await api.insertLiveTable(targetSheet, sourceName, connectionName, sql, row, col);
+          } else {
+            await api.createSource(sourceName, connectionName, sql);
+            try {
+              await api.insertTable(targetSheet, sourceName, sourceName, row, col);
+            } catch (err) {
+              await refreshMetadata();
+              throw new Error(`Source "${sourceName}" was saved, but the snapshot was not inserted. Use Insert → Insert Table to choose another location. ${err instanceof Error ? err.message : ''}`);
+            }
+          }
+          await refreshMetadata();
+          await fetchViewportData();
         }}
       />
 
       <InsertTableModal
         isOpen={isInsertTableOpen}
         onClose={() => setIsInsertTableOpen(false)}
-        activeRow={selectedRow}
-        activeCol={selectedCol}
+        sheets={sheets}
+        selection={{sheetName, row: selectedRow, col: selectedCol}}
         onTableInserted={() => {
           refreshMetadata();
-          fetchViewportData(visibleBounds.startRow, visibleBounds.startCol, visibleBounds.endRow, visibleBounds.endCol);
+          fetchViewportData();
         }}
       />
 
@@ -701,7 +812,7 @@ export const App: React.FC = () => {
         onClose={() => setIsStagedReviewOpen(false)}
         onAppliedSuccessfully={() => {
           refreshMetadata();
-          fetchViewportData(visibleBounds.startRow, visibleBounds.startCol, visibleBounds.endRow, visibleBounds.endCol);
+          fetchViewportData();
         }}
       />
 

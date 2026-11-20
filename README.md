@@ -50,7 +50,13 @@ To check where a balance comes from, select a cell and choose **Trace balance**.
 
 An index on the posting date (binary collation) and the primary key speeds ordered browsing. Scroll within a block, use the next/previous block controls, or jump directly to a row. Forward scrolling can seek from the current page; a distant jump still skips earlier rows in SQLite. If the source changes, reload the view so rows and totals agree. This read-only view does not write to the database or expose imported worksheet cells to formulas.
 
-Choose **Help → About → Sample → Generate demo invoices** to expand the existing `SalesDB.invoices` SQLite demo table to 10 million total rows. It preserves existing invoices and does not change your workbook, replace your databases, or import all the new rows into the worksheet. Repeating the action adds no duplicates. Allow roughly 1 GB of free disk space. Use a bounded SQL query such as `SELECT * FROM invoices ORDER BY id DESC LIMIT 100` to inspect a small result.
+### Work with a live worksheet table
+
+In **Data → SQL Query**, choose **Live table**, select a worksheet, and enter the top-left cell. A live table keeps the rows in SQLite and loads a small window around the visible cells. Use **Data → Refresh** after external changes to update the table's bounds. Ctrl+Arrow moves to the destination without loading the cells in between.
+
+Live tables support `SELECT *` from one SQLite table with a single integer primary key, optional simple `WHERE` comparisons, and `ORDER BY` columns. SQL sorting and filtering apply to all matching rows. You can stage supported edits by the source row's primary key and apply them separately. Use a materialized snapshot for joins, computed projections, or worksheet formulas and review tools that need values from a table range.
+
+To try it, choose **Help → About → Sample → Generate demo invoices**, then **Data → Refresh**. The original worksheet table uses `SELECT * FROM invoices` and expands to 10 million rows without a second table or a full import. It preserves existing invoices; repeating generation creates no duplicates. Allow roughly 1 GB of free disk space. The adjacent cash model is a separate ten-invoice illustration.
 
 ### Insert worksheet rows
 
@@ -159,7 +165,7 @@ Set `GRIDLOOM_RECOVERY_DIR` to choose a private recovery directory. By default i
 - **Review packs.** Use packs to share your reconciliations, review notes and attached evidence. Reviewer names are entered by users, not verified signatures. Keep your source records and database backups separately.
 - **Protect the files.** Workbooks and embedded evidence are unencrypted. Connection paths refer to the machine running the server; source databases are not embedded backups. Keep the local service private rather than exposing it as a multi-user server.
 - **Save deliberately.** Use Save or Save As for your named workbook. Recovery may not include changes made just before a crash, and there is no universal native-window-close guard.
-- **Know the scale.** The grid is virtualized. SQL results imported into worksheet tables are fully materialized; the read-only SQLite ledger view loads pages instead. Source refresh is explicit, not automatic monitoring. Find and bulk worksheet operations have bounded limits.
+- **Know the scale.** The grid is virtualized. Snapshots materialize their results; live worksheet tables and the read-only SQLite ledger load bounded windows instead. Source refresh is explicit, not automatic monitoring. Find and bulk worksheet operations have bounded limits.
 - **Extensions.** Monthly close is a built-in opt-in add-on. Third-party add-on installation and IFRS/XBRL taxonomy validation are not available.
 
 ## Development and verification

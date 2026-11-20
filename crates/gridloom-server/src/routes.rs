@@ -94,6 +94,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/sources/{name}/refresh", post(refresh_source))
         // Worksheet Tables
         .route("/api/tables/insert", post(insert_table))
+        .route("/api/tables/insert-live", post(insert_live_table))
+        .route("/api/tables/refresh-live", post(refresh_live_table))
         // Cells & Virtual Viewport
         .route("/api/cells/set", post(set_cell))
         .route("/api/cells/viewport", post(get_viewport))
@@ -244,19 +246,19 @@ async fn connect_db(
         "sqlite" => {
             if req.path == ":memory:" {
                 wb.add_sqlite_memory(&req.name)
-                    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+                    .map_err(|e| (StatusCode::BAD_REQUEST, e.message().into()))?;
             } else {
                 wb.add_sqlite_connection(&req.name, &req.path)
-                    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+                    .map_err(|e| (StatusCode::BAD_REQUEST, e.message().into()))?;
             }
         }
         "duckdb" => {
             if req.path == ":memory:" {
                 wb.add_duckdb_memory(&req.name)
-                    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+                    .map_err(|e| (StatusCode::BAD_REQUEST, e.message().into()))?;
             } else {
                 wb.add_duckdb_connection(&req.name, &req.path)
-                    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+                    .map_err(|e| (StatusCode::BAD_REQUEST, e.message().into()))?;
             }
         }
         _ => {
@@ -502,6 +504,38 @@ async fn get_viewport(
         .get_viewport(&req)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     Ok(Json(vp))
+}
+
+#[derive(Deserialize)]
+struct InsertLiveTableRequest {
+    sheet_name:String,
+    table_name:String,
+    connection_name:String,
+    sql:String,
+    row:u32,
+    col:u32,
+}
+
+async fn insert_live_table(
+    State(state):State<AppState>, Json(req):Json<InsertLiveTableRequest>,
+) -> Result<Json<gridloom_core::table::WorksheetTable>,(StatusCode,String)> {
+    let mut wb=state.workbook.write().await;
+    wb.insert_live_table(&req.sheet_name,&req.table_name,&req.connection_name,&req.sql,CellCoord::new(req.row,req.col))
+        .map(Json).map_err(|err| (StatusCode::BAD_REQUEST,err.message().into()))
+}
+
+#[derive(Deserialize)]
+struct RefreshLiveTableRequest {
+    sheet_name:String,
+    table_name:String,
+}
+
+async fn refresh_live_table(
+    State(state):State<AppState>, Json(req):Json<RefreshLiveTableRequest>,
+) -> Result<Json<gridloom_core::table::WorksheetTable>,(StatusCode,String)> {
+    let mut wb=state.workbook.write().await;
+    wb.refresh_live_table(&req.sheet_name,&req.table_name)
+        .map(Json).map_err(|err| (StatusCode::BAD_REQUEST,err.message().into()))
 }
 
 // Request decimals must be exact: Decimal's general-purpose deserializer can round.

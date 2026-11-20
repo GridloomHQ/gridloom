@@ -67,7 +67,7 @@ export function SampleDemo({onClose}:{onClose:()=>void}){
       <section aria-labelledby="gridloom-sample-title" className="border-t pt-4 space-y-3">
         <h3 id="gridloom-sample-title" className="font-semibold">Sample</h3>
         <p className="text-sm">Add synthetic invoices to the existing demo table until it has 10 million rows. Existing invoices are kept.</p>
-        <p className="text-sm text-slate-600">Allow roughly 1 GB of free disk space. This updates only <code>SalesDB.invoices</code> on this computer; it doesn’t import the new rows into the worksheet.</p>
+        <p className="text-sm text-slate-600">Allow roughly 1 GB of free disk space. This expands <code>SalesDB.invoices</code> on this computer. When generation finishes, choose <strong>Data → Refresh</strong> to see the new rows in the existing live Invoices table. No second table or import is needed.</p>
         {status?.state==='generating'&&<div className="text-sm space-y-1">
           <p role="status">{status.phase??'Generating'} · {(status.rows_written??0).toLocaleString()} of {(status.target_rows??10_000_000).toLocaleString()} rows</p>
           <progress className="w-full" aria-label="Invoice sample progress" max={status.target_rows??10_000_000} value={status.rows_written??0}/>

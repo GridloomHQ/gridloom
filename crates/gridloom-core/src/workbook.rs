@@ -274,11 +274,25 @@ impl Workbook {
         }
     }
 
+    fn check_live_connection_rebind(&self, name: &str, kind: EngineKind, path: &Path) -> Result<(), CellError> {
+        // Open/reconnect can restore the exact configuration, but must not
+        // redirect a live table or outstanding patch to another database.
+        let used = self.sheets.values().any(|sheet| sheet.tables.values().any(|table|
+                table.live.as_ref().is_some_and(|live| live.connection_name == name)))
+            || self.staged.patches.values().any(|patch| patch.connection_name == name);
+        if used && self.connection_configs.get(name).is_none_or(|existing|
+            existing.kind != kind || Path::new(&existing.path) != path) {
+            return Err(CellError::Sql("This connection is used by a live table or staged edit. Reconnect the same database or use a different connection name.".into()));
+        }
+        Ok(())
+    }
+
     pub fn add_sqlite_connection<P: AsRef<Path>>(
         &mut self,
         name: &str,
         path: P,
     ) -> Result<(), CellError> {
+        self.check_live_connection_rebind(name, EngineKind::Sqlite, path.as_ref())?;
         let p_str = path.as_ref().to_string_lossy().to_string();
         let conn = DbConnection::open_sqlite(&path)?;
         self.connections.insert(name.to_string(), conn);
@@ -294,6 +308,7 @@ impl Workbook {
     }
 
     pub fn add_sqlite_memory(&mut self, name: &str) -> Result<(), CellError> {
+        self.check_live_connection_rebind(name, EngineKind::Sqlite, Path::new(":memory:"))?;
         let conn = DbConnection::open_sqlite_memory()?;
         self.connections.insert(name.to_string(), conn);
         self.connection_configs.insert(
@@ -312,6 +327,7 @@ impl Workbook {
         name: &str,
         path: P,
     ) -> Result<(), CellError> {
+        self.check_live_connection_rebind(name, EngineKind::DuckDb, path.as_ref())?;
         let p_str = path.as_ref().to_string_lossy().to_string();
         let conn = DbConnection::open_duckdb(&path)?;
         self.connections.insert(name.to_string(), conn);
@@ -327,6 +343,7 @@ impl Workbook {
     }
 
     pub fn add_duckdb_memory(&mut self, name: &str) -> Result<(), CellError> {
+        self.check_live_connection_rebind(name, EngineKind::DuckDb, Path::new(":memory:"))?;
         let conn = DbConnection::open_duckdb_memory()?;
         self.connections.insert(name.to_string(), conn);
         self.connection_configs.insert(
@@ -401,7 +418,7 @@ impl Workbook {
         let columns: Vec<_> = result.columns.iter().map(|c| c.name.clone()).collect();
         let mut sheets = self.sheets.clone();
         for sheet in sheets.values_mut() {
-            for table in sheet.tables.values_mut().filter(|t| t.source_name == name) {
+            for table in sheet.tables.values_mut().filter(|t| t.live.is_none() && t.source_name == name) {
                 let resized = WorksheetTable::new(
                     table.name.clone(),
                     name.to_string(),
@@ -412,7 +429,7 @@ impl Workbook {
                 table.columns = resized.columns;
                 table.range = resized.range;
             }
-            for table in sheet.tables.values().filter(|t| t.source_name == name) {
+            for table in sheet.tables.values().filter(|t| t.live.is_none() && t.source_name == name) {
                 if sheet
                     .tables
                     .values()
@@ -450,47 +467,127 @@ impl Workbook {
         source_name: &str,
         anchor: CellCoord,
     ) -> Result<WorksheetTable, CellError> {
-        self.clear_edit_history();
         let source = self
             .named_sources
             .get(source_name)
             .ok_or_else(|| CellError::Sql(format!("Data source '{}' not found", source_name)))?;
-
         let query_res = source
             .last_result
             .as_ref()
             .ok_or_else(|| CellError::Sql("Data source has no query result".to_string()))?;
-
-        let col_names: Vec<String> = query_res.columns.iter().map(|c| c.name.clone()).collect();
-        let row_count = query_res.rows.len() as u32;
-
-        let table = WorksheetTable::new(
-            table_name.to_string(),
-            source_name.to_string(),
+        let columns = query_res.columns.iter().map(|c| c.name.clone()).collect();
+        let row_count = u32::try_from(query_res.rows.len()).map_err(|_| CellError::Ref)?;
+        self.attach_table_extent(
+            sheet_name,
+            table_name,
+            source_name,
             anchor,
-            col_names,
+            columns,
+            row_count,
+            None,
+            false,
+        )
+    }
+
+    pub fn insert_live_table(
+        &mut self, sheet_name:&str, table_name:&str, connection_name:&str, sql:&str, anchor:CellCoord,
+    ) -> Result<WorksheetTable,CellError> {
+        if table_name.trim().is_empty() || table_name.len()>128 {return Err(CellError::Sql("Choose a worksheet table name (1–128 bytes).".into()));}
+        let Some(DbConnection::Sqlite(engine)) = self.connections.get(connection_name) else {
+            return Err(CellError::Sql("Live worksheets currently require a connected SQLite database.".into()));
+        };
+        if self.connection_configs.get(connection_name).is_some_and(|c| c.path==":memory:") {
+            return Err(CellError::Sql("Live worksheets require a persistent SQLite file.".into()));
+        }
+        let (source,columns)=crate::live_table::LiveTable::attach(engine,connection_name,sql)?;
+        let count=source.row_count;
+        self.attach_table_extent(sheet_name,table_name,"",anchor,columns.into_iter().map(|c|c.name).collect(),count,Some(source),false)
+    }
+
+    pub fn refresh_live_table(&mut self,sheet_name:&str,table_name:&str)->Result<WorksheetTable,CellError> {
+        let existing=self.sheets.get(sheet_name).and_then(|s|s.tables.get(table_name))
+            .ok_or_else(||CellError::Sql("Live worksheet table not found.".into()))?;
+        let live=existing.live.as_ref().ok_or_else(||CellError::Sql("This table is not a live worksheet table.".into()))?;
+        let Some(DbConnection::Sqlite(engine))=self.connections.get(&live.connection_name) else {
+            return Err(CellError::Sql("Live worksheet database is not connected.".into()));
+        };
+        let (refreshed,cols)=crate::live_table::LiveTable::attach(engine,&live.connection_name,&live.sql)?;
+        let cols:Vec<_>=cols.into_iter().map(|c|c.name).collect();
+        if cols!=existing.columns || refreshed.primary_key!=live.primary_key {
+            return Err(CellError::Sql("Live worksheet source schema changed; reattach its table.".into()));
+        }
+        self.attach_table_extent(sheet_name,table_name,"",existing.anchor,cols,refreshed.row_count,Some(refreshed),true)
+    }
+
+    /// Attach dimensions using the same checks for materialized and future paged sources.
+    /// No work scales with the incoming table area.
+    fn attach_table_extent(
+        &mut self,
+        sheet_name: &str,
+        table_name: &str,
+        source_name: &str,
+        anchor: CellCoord,
+        columns: Vec<String>,
+        row_count: u32,
+        live: Option<crate::live_table::LiveTable>,
+        replacing: bool,
+    ) -> Result<WorksheetTable, CellError> {
+        let column_count = u32::try_from(columns.len()).map_err(|_| CellError::Ref)?;
+        if column_count == 0 {
+            return Err(CellError::Value);
+        }
+        let rows = anchor
+            .row
+            .checked_add(row_count.max(1))
+            .and_then(|n| n.checked_add(1))
+            .ok_or(CellError::Ref)?;
+        let cols = anchor.col.checked_add(column_count).ok_or(CellError::Ref)?;
+        let mut table = WorksheetTable::new(
+            table_name.into(),
+            source_name.into(),
+            anchor,
+            columns,
             row_count,
         );
-
+        table.live = live;
+        let sheet = self.sheets.get(sheet_name).ok_or(CellError::Ref)?;
+        if replacing {
+            table.formats=sheet.tables.get(table_name).ok_or(CellError::Ref)?.formats.clone();
+        }
+        if (!replacing && sheet.tables.keys().any(|name|name.eq_ignore_ascii_case(table_name)))
+            || sheet
+                .tables
+                .values()
+                .any(|existing| (!replacing || existing.name!=table_name) && existing.range.intersects(&table.range))
+            || sheet.cells.values().any(|cell| {
+                table.range.contains(cell.coord)
+                    && (cell.formula.is_some()
+                        || !cell.raw_input.is_empty()
+                        || !cell.evaluated_value.is_blank())
+            })
+            || sheet
+                .spills
+                .active_spills
+                .values()
+                .any(|spill| spill.range.intersects(&table.range))
+        {
+            return Err(CellError::Spill);
+        }
+        let original_sheets = self.sheets.clone();
+        let original_graph = self.dep_graph.clone();
         let sheet = self
             .sheets
             .get_mut(sheet_name)
-            .ok_or_else(|| CellError::Ref)?;
-
-        // Collision check: verify target area does not collide with existing occupied cells
-        for r in table.range.start_row..=table.range.end_row {
-            for c in table.range.start_col..=table.range.end_col {
-                let coord = CellCoord::new(r, c);
-                if sheet.is_cell_occupied(coord) {
-                    return Err(CellError::Spill);
-                }
-            }
+            .expect("worksheet checked above");
+        sheet.max_rows = sheet.max_rows.max(rows);
+        sheet.max_cols = sheet.max_cols.max(cols);
+        sheet.tables.insert(table_name.into(), table.clone());
+        if let Err(error) = self.recalculate(sheet_name) {
+            self.sheets = original_sheets;
+            self.dep_graph = original_graph;
+            return Err(error);
         }
-
-        sheet.max_rows = sheet.max_rows.max(table.range.end_row + 1);
-        sheet.max_cols = sheet.max_cols.max(table.range.end_col + 1);
-        sheet.tables.insert(table_name.to_string(), table.clone());
-        self.recalculate(sheet_name)?;
+        self.clear_edit_history();
         self.invalidate_changed_reviews();
         Ok(table)
     }
@@ -701,11 +798,27 @@ impl Workbook {
     pub fn get_viewport(&self, req: &ViewportRequest) -> Result<ViewportResponse, CellError> {
         let sheet = self.sheets.get(&req.sheet_name).ok_or(CellError::Ref)?;
 
+        if sheet.max_rows==0 || sheet.max_cols==0 || req.start_row>req.end_row || req.start_col>req.end_col
+            || req.start_row>=sheet.max_rows || req.start_col>=sheet.max_cols || req.overscan>100 { return Err(CellError::Ref); }
         let start_row = req.start_row.saturating_sub(req.overscan);
-        let end_row = (req.end_row + req.overscan).min(sheet.max_rows);
+        let end_row = req.end_row.saturating_add(req.overscan).min(sheet.max_rows-1);
         let start_col = req.start_col.saturating_sub(req.overscan);
-        let end_col = (req.end_col + req.overscan).min(sheet.max_cols);
-
+        let end_col = req.end_col.saturating_add(req.overscan).min(sheet.max_cols-1);
+        let area=u64::from(end_row-start_row+1)*u64::from(end_col-start_col+1);
+        let window_range=CellRange::new(start_row,start_col,end_row,end_col);
+        if area>20_000 && sheet.tables.values().any(|table|table.live.is_some()&&table.range.intersects(&window_range)) {
+            return Err(CellError::Sql("Select a smaller range to read live worksheet data.".into()));
+        }
+        let live_windows: HashMap<_,_> = sheet.tables.values().filter_map(|table|{
+            let spec=table.live.as_ref()?;
+            let first=start_row.max(table.anchor.row+1);
+            let last=end_row.min(table.range.end_row);
+            if first>last || table.range.start_col>end_col || table.range.end_col<start_col {return None;}
+            let values = if let Some(DbConnection::Sqlite(engine))=self.connections.get(&spec.connection_name) {
+                spec.window(engine,first-table.anchor.row-1,last-first+1,&table.columns)
+            } else { Err(CellError::Sql("Live worksheet database is not connected.".into())) };
+            Some((table.name.as_str(),(first,values)))
+        }).collect();
         let mut cells_data = HashMap::new();
 
         for r in start_row..=end_row {
@@ -744,8 +857,35 @@ impl Workbook {
                                 is_error: false,
                                 table_name: Some(table.name.clone()),
                                 is_table_header: true,
+                                live_edit: None,
                             },
                         );
+                        continue;
+                    } else if let Some(live)=&table.live {
+                        let key_index=table.columns.iter().position(|c|c==&live.primary_key);
+                        let fetched=live_windows.get(table.name.as_str()).ok_or(CellError::Ref)?;
+                        let (value,live_edit,is_staged)=match &fetched.1 {
+                            Err(err)=>(Value::Error(err.clone()),None,false),
+                            Ok(rows)=>if let Some(row)=rows.get((r-fetched.0) as usize) {
+                                let original=row.get(col_offset).ok_or(CellError::Ref)?;
+                                let key=key_index.and_then(|idx|row.get(idx)).ok_or(CellError::Ref)?;
+                                let column=&table.columns[col_offset];
+                                let edit=live.edit(column,key,original);
+                                let overlay=self.staged.patches.values().find(|patch|
+                                    patch.connection_name==live.connection_name && patch.table_name.eq_ignore_ascii_case(&live.base_table)
+                                        && matches!(patch.pk_columns.as_slice(),[pk] if pk.eq_ignore_ascii_case(&live.primary_key))
+                                        && matches!(patch.pk_values.as_slice(),[pk] if pk.is_not_distinct_from(key))
+                                        && patch.column_name.eq_ignore_ascii_case(column));
+                                (overlay.map_or_else(||original.clone(),|patch|patch.proposed_value.clone()),edit,overlay.is_some())
+                            } else {(Value::Blank,None,false)},
+                        };
+                        let is_error=value.is_error();
+                        cells_data.insert(a1,CellRenderData {
+                            raw_input:None, style, coord,
+                            display_text:crate::spreadsheet::format_value(&value,number_format.as_deref()),
+                            raw_value:value, formula:None, number_format, is_staged, is_spill:false, is_error,
+                            table_name:Some(table.name.clone()),is_table_header:false,live_edit,
+                        });
                         continue;
                     } else {
                         // Data row from source
@@ -809,6 +949,7 @@ impl Workbook {
                                             is_error: false,
                                             table_name: Some(table.name.clone()),
                                             is_table_header: false,
+                                live_edit: None,
                                         },
                                     );
                                     continue;
@@ -833,6 +974,7 @@ impl Workbook {
                                 is_error: false,
                                 table_name: Some(table.name.clone()),
                                 is_table_header: false,
+                                live_edit: None,
                             },
                         );
                         continue;
@@ -868,6 +1010,7 @@ impl Workbook {
                                         is_error: false,
                                         table_name: None,
                                         is_table_header: false,
+                                live_edit: None,
                                     },
                                 );
                                 continue;
@@ -905,6 +1048,7 @@ impl Workbook {
                             is_error: is_err,
                             table_name: None,
                             is_table_header: false,
+                                live_edit: None,
                         },
                     );
                 }
@@ -1267,6 +1411,9 @@ impl<'a> EvaluationContext for WorkbookEvalContext<'a> {
         // 1. Check if cell is in a table
         for table in sheet.tables.values() {
             if table.range.contains(coord) {
+                if table.live.is_some() {
+                    return Err(CellError::Sql("Formulas and review cannot read a live worksheet table yet. Use a bounded snapshot.".into()));
+                }
                 if coord.row == table.anchor.row {
                     let col_offset = (coord.col - table.anchor.col) as usize;
                     let name = table.columns.get(col_offset).cloned().unwrap_or_default();
@@ -1346,6 +1493,9 @@ impl<'a> EvaluationContext for WorkbookEvalContext<'a> {
             .find(|t| t.name.eq_ignore_ascii_case(&sref.table_name))
             .ok_or(CellError::Ref)?;
 
+        if table.live.is_some() {
+            return Err(CellError::Sql("Formulas cannot use structured references to a live worksheet table yet. Use a bounded snapshot.".into()));
+        }
         let range = table.resolve_structured_ref(sref, Some(self.current_coord))?;
         self.get_range_values(range)
     }
@@ -1389,5 +1539,81 @@ impl<'a> EvaluationContext for WorkbookEvalContext<'a> {
 
         let res = conn.execute_read_query(sql, params)?;
         Ok(Value::Array(res.rows))
+    }
+}
+
+#[cfg(test)]
+mod paged_table_extent_tests {
+    use super::*;
+
+    #[test]
+    fn ten_million_rows_attach_by_metadata_without_allocating_cells() {
+        let mut workbook = Workbook::new();
+        let anchor = CellCoord::new(0, 0);
+        let table = workbook
+            .attach_table_extent(
+                "Sheet1",
+                "Large",
+                "future_paged_source",
+                anchor,
+                vec!["ID".into(), "Amount".into()],
+                10_000_000,
+                None,
+                false,
+            )
+            .unwrap();
+        let sheet = &workbook.sheets["Sheet1"];
+        assert_eq!(table.range.end_row, 10_000_000);
+        assert_eq!(sheet.max_rows, 10_000_001);
+        assert!(sheet.cells.is_empty());
+        assert!(matches!(
+            workbook.attach_table_extent(
+                "Sheet1",
+                "AtTail",
+                "other",
+                CellCoord::new(10_000_000, 1),
+                vec!["ID".into()],
+                2,
+                None,
+                false,
+            ),
+            Err(CellError::Spill)
+        ));
+        assert!(!workbook.sheets["Sheet1"].tables.contains_key("AtTail"));
+    }
+
+    #[test]
+    fn reject_invalid_extent_and_keep_blank_formula_and_undo_history() {
+        let mut workbook = Workbook::new();
+        workbook
+            .set_cell(
+                "Sheet1",
+                CellCoord::new(0, 0),
+                "=IF(TRUE,\"\",\"x\")".into(),
+            )
+            .unwrap();
+        let attach = |workbook: &mut Workbook, row, len| {
+            workbook.attach_table_extent(
+                "Sheet1",
+                "T",
+                "future_paged_source",
+                CellCoord::new(row, 0),
+                vec!["ID".into()],
+                len,
+                None,
+                false,
+            )
+        };
+        assert!(matches!(
+            attach(&mut workbook, u32::MAX - 2, 10_000_000),
+            Err(CellError::Ref)
+        ));
+        assert!(matches!(
+            attach(&mut workbook, 0, 10_000_000),
+            Err(CellError::Spill)
+        ));
+        assert!(workbook.sheets["Sheet1"].tables.is_empty());
+        workbook.undo_sheet_edit().unwrap();
+        assert!(workbook.sheets["Sheet1"].cells.is_empty());
     }
 }
