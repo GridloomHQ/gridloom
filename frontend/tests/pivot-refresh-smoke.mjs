@@ -44,7 +44,7 @@ try {
   browser = await chromium.launch({headless:true, executablePath:process.env.CHROMIUM_PATH});
   const page = await browser.newPage();
   await page.goto(base);
-  await page.getByRole('button', {name:'Charts', exact:true}).click();
+  await page.getByRole('tab',{name:'Insert',exact:true}).click();await page.getByRole('button',{name:'Charts',exact:true}).click();
   const chart = page.getByRole('dialog', {name:'Chart Builder'});
   await chart.getByLabel('Chart Type').selectOption('Bar');
   await chart.locator('li[draggable]').filter({hasText:/^cents$/}).dragTo(chart.getByRole('group', {name:'Values'}));
@@ -64,7 +64,7 @@ try {
   assert.equal(await viewer.locator('[data-chart-mark="bar"]').count(), 4);
   await chart.getByRole('button', {name:'Close chart builder'}).click();
 
-  await page.getByRole('button', {name:'Pivot', exact:true}).click();
+  await page.getByRole('tab',{name:'Insert',exact:true}).click();await page.getByRole('button',{name:'Pivot',exact:true}).click();
   const modal = page.getByRole('dialog', {name:'Pivot Table Builder'});
   await modal.getByLabel('Saved pivot').selectOption('Balances');
   await modal.getByText('Balances · Workbook source snapshot', {exact:true}).waitFor();
@@ -75,7 +75,7 @@ try {
   await modal.getByRole('button', {name:'Update layout and preview'}).click();
   await modal.getByRole('columnheader', {name:'month=Jan', exact:true}).waitFor();
   await modal.getByRole('button', {name:'Close pivot builder'}).click();
-  await page.getByRole('button', {name:'Pivot', exact:true}).click();
+  await page.getByRole('tab',{name:'Insert',exact:true}).click();await page.getByRole('button',{name:'Pivot',exact:true}).click();
   await modal.getByLabel('Saved pivot').selectOption('Balances');
   await modal.getByRole('columnheader', {name:'month=Jan', exact:true}).waitFor();
   const month = modal.getByRole('group', {name:'Columns'});

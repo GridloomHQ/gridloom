@@ -45,11 +45,11 @@ try{
   base=await start();
   await page.goto(base);
   const confirmation=page.getByRole('dialog',{name:'Replace current workbook?',exact:true});
-  await page.getByRole('button',{name:'Recover autosave',exact:true}).click();
+  await page.getByRole('tab',{name:'File',exact:true}).click();await page.getByRole('button',{name:'Recover autosave',exact:true}).click();
   await confirmation.getByRole('button',{name:'Cancel',exact:true}).click();
   await confirmation.waitFor({state:'hidden'});
   assert.equal(await page.getByRole('gridcell',{name:'A1',exact:true}).innerText(),'');
-  await page.getByRole('button',{name:'Recover autosave',exact:true}).click();
+  await page.getByRole('tab',{name:'File',exact:true}).click();await page.getByRole('button',{name:'Recover autosave',exact:true}).click();
   await confirmation.getByRole('button',{name:'Discard and continue',exact:true}).click();
   await page.getByRole('gridcell',{name:'A1',exact:true}).filter({hasText:'recover me'}).waitFor();
   assert.equal((await (await page.request.get(`${base}/api/workbook`)).json()).file_path,null);

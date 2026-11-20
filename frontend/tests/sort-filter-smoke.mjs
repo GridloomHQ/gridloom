@@ -44,6 +44,7 @@ try {
   const cell=name=>page.getByRole('gridcell',{name,exact:true});
   await cell('A1').click();
   await cell('B5').click({modifiers:['Shift']});
+  await page.getByRole('tab',{name:'Data',exact:true}).click();
   const trigger=page.getByRole('button',{name:'Sort & filter',exact:true});
   await trigger.click();
   const dialog=page.getByRole('dialog',{name:'Sort & filter',exact:true});

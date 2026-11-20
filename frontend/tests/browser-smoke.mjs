@@ -20,19 +20,18 @@ try{
  async function edit(name,value){await cell(name).dblclick();const input=page.getByRole('textbox',{name:`Edit ${name}`,exact:true});await input.fill(value);await input.press('Enter');await page.waitForFunction(()=>document.querySelector('[role="grid"]')?.getAttribute('aria-busy')==='false');}
  async function expectText(locator,value){await locator.filter({hasText:value}).waitFor();}
  await edit('A1','2');await edit('B1','=A1*3');await expectText(cell('B1'),'6');
- await cell('B1').click();await cell('B3').click({modifiers:['Shift']});await page.getByRole('button',{name:'Fill down',exact:true}).click();await expectText(cell('B2'),'0');
- await page.getByRole('button',{name:'Undo',exact:true}).click();await page.waitForFunction(()=>document.querySelector('[role="gridcell"][aria-label="B2"]')?.textContent==='');
- await page.getByRole('button',{name:'Redo',exact:true}).click();await expectText(cell('B2'),'0');
- await cell('A1').click();await page.getByTitle('Format as Currency ($)',{exact:true}).click();await expectText(cell('A1'),'$ 2.00');
+ await cell('B1').click();await cell('B3').click({modifiers:['Shift']});await page.getByRole('tab',{name:'Home',exact:true}).click();await page.getByRole('button',{name:'Fill down',exact:true}).click();await expectText(cell('B2'),'0');
+ await page.getByRole('tab',{name:'Home',exact:true}).click();await page.getByRole('button',{name:'Undo',exact:true}).click();await page.waitForFunction(()=>document.querySelector('[role="gridcell"][aria-label="B2"]')?.textContent==='');
+ await page.getByRole('tab',{name:'Home',exact:true}).click();await page.getByRole('button',{name:'Redo',exact:true}).click();await expectText(cell('B2'),'0');
+ await cell('A1').click();await page.getByRole('tab',{name:'Format',exact:true}).click();await page.getByTitle('Format as Currency ($)',{exact:true}).click();await expectText(cell('A1'),'$ 2.00');
  await page.getByTitle('Toggle bold',{exact:true}).click();await page.waitForFunction(()=>getComputedStyle(document.querySelector('[role="gridcell"][aria-label="A1"]')).fontWeight==='700');
  await cell('A1').click();await cell('B1').click({modifiers:['Shift']});await page.waitForTimeout(200);await page.keyboard.press('Control+c');await cell('D1').click();await page.keyboard.press('Control+v');await expectText(cell('E1'),'6');
  page.once('dialog',d=>d.accept('Second sheet'));await page.getByRole('button',{name:'Add worksheet',exact:true}).click();await page.getByRole('grid',{name:'Second sheet worksheet'}).waitFor();
  await edit('A1','=Sheet1!B1+1');await expectText(cell('A1'),'7');
+ await page.getByRole('tab',{name:'Add-ons',exact:true}).click();
  assert.equal(await page.getByRole('button',{name:'Monthly close',exact:true}).count(),0);
- await page.getByRole('button',{name:'Add-ons',exact:true}).click();
  await page.getByRole('checkbox',{name:'Enable Monthly close add-on',exact:true}).check();
- await page.getByRole('button',{name:'Add-ons',exact:true}).click();
- await page.getByRole('button',{name:'Monthly close',exact:true}).click();const modal=page.getByRole('dialog',{name:'Monthly close',exact:true});
+ await page.getByRole('tab',{name:'Add-ons',exact:true}).click();await page.getByRole('button',{name:'Monthly close',exact:true}).click();const modal=page.getByRole('dialog',{name:'Monthly close',exact:true});
  await modal.getByLabel('Import period',{exact:true}).fill('2026-10');
  const csv='account,name,debit,credit\n1000,Cash,10000,0\n1200,Processor clearing,5000,0\n4000,Sales,0,16000\n5000,Processor fees,1000,0';
  await modal.getByLabel('Trial balance CSV',{exact:true}).fill(csv);await modal.getByRole('button',{name:'Import and generate P&L',exact:true}).dblclick();
@@ -47,10 +46,10 @@ try{
  await panel.getByText(/settlement-2026-10-31.txt · \d+ bytes/).waitFor();
  await panel.getByRole('button',{name:'Record review',exact:true}).dblclick();await panel.getByText('Review recorded in this workbook. Save the workbook to keep it on disk.',{exact:true}).waitFor();
  await panel.getByRole('button',{name:'Download settlement-2026-10-31.txt · v1',exact:true}).first().waitFor();
- await page.getByRole('button',{name:'Monthly close',exact:true}).click();await modal.getByLabel('Existing close period',{exact:true}).selectOption({label:'2026-10 · version 1 · Close 2026-10 v1'});await modal.getByLabel('Mapping 4000',{exact:true}).selectOption('Other income');await modal.getByRole('button',{name:'Save account mappings',exact:true}).click();await modal.getByText('Mappings saved and P&L recalculated.',{exact:true}).waitFor();
+ await page.getByRole('tab',{name:'Add-ons',exact:true}).click();await page.getByRole('button',{name:'Monthly close',exact:true}).click();await modal.getByLabel('Existing close period',{exact:true}).selectOption({label:'2026-10 · version 1 · Close 2026-10 v1'});await modal.getByLabel('Mapping 4000',{exact:true}).selectOption('Other income');await modal.getByRole('button',{name:'Save account mappings',exact:true}).click();await modal.getByText('Mappings saved and P&L recalculated.',{exact:true}).waitFor();
  await modal.getByRole('button').filter({hasText:'Net profit'}).filter({hasText:'Needs re-review'}).click();await panel.getByText('Needs re-review',{exact:true}).first().waitFor();await panel.getByRole('button',{name:'Compare exact changes',exact:true}).click();await panel.getByText(/captured input changes/).waitFor();
  await page.screenshot({path:path.join(artifacts,'stale-review-comparison.png'),fullPage:true});
- await page.getByRole('button',{name:'Monthly close',exact:true}).click();await modal.getByLabel('Existing close period',{exact:true}).selectOption({label:'2026-10 · version 1 · Close 2026-10 v1'});await modal.getByRole('button',{name:'Export review pack',exact:true}).waitFor();
+ await page.getByRole('tab',{name:'Add-ons',exact:true}).click();await page.getByRole('button',{name:'Monthly close',exact:true}).click();await modal.getByLabel('Existing close period',{exact:true}).selectOption({label:'2026-10 · version 1 · Close 2026-10 v1'});await modal.getByRole('button',{name:'Export review pack',exact:true}).waitFor();
  const downloadEvent=page.waitForEvent('download');await modal.getByRole('button',{name:'Export review pack',exact:true}).click();const download=await downloadEvent;const downloadPath=await download.path();const pack=JSON.parse(readFileSync(downloadPath,'utf8'));assert.equal(pack.format,'gridloom-review-pack');assert.equal(pack.status.period.source_csv,csv);assert.equal(pack.reviews.length,1,'Duplicate import/review clicks must not duplicate state');assert.equal(pack.reviews[0].attachments[0].filename,'settlement-2026-10-31.txt');assert(pack.reviews[0].input_snapshot.inputs);
 
  const csvDownloadEvent=page.waitForEvent('download');await modal.getByRole('button',{name:'Download P&L CSV',exact:true}).click();const csvDownload=await csvDownloadEvent;const plCsv=readFileSync(await csvDownload.path(),'utf8');
@@ -62,10 +61,10 @@ try{
  await page.screenshot({path:path.join(artifacts,'monthly-close-rollforward.png'),fullPage:true});
  await modal.getByRole('button',{name:'Close monthly close',exact:true}).click();
  if(await page.getByRole('button',{name:'Close explanation',exact:true}).count())await page.getByRole('button',{name:'Close explanation',exact:true}).click();
- const saved=path.join(artifacts,'acceptance.gridloom');page.once('dialog',d=>d.accept(saved));await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByText(`Saved workbook to ${saved}`,{exact:true}).waitFor();
- await page.getByRole('button',{name:'New',exact:true}).click();await page.getByRole('button',{name:'Discard and continue',exact:true}).click();await page.getByRole('grid',{name:'Sheet1 worksheet'}).waitFor();page.once('dialog',d=>d.accept(saved));await page.getByRole('button',{name:'Open',exact:true}).click();await page.getByRole('button',{name:'Discard and continue',exact:true}).click();await page.getByRole('grid',{name:'Close 2026-11 v1 worksheet'}).waitFor();
+ const saved=path.join(artifacts,'acceptance.gridloom');page.once('dialog',d=>d.accept(saved));await page.getByRole('tab',{name:'File',exact:true}).click();await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByText(`Saved workbook to ${saved}`,{exact:true}).waitFor();
+ await page.getByRole('tab',{name:'File',exact:true}).click();await page.getByRole('button',{name:'New',exact:true}).click();await page.getByRole('button',{name:'Discard and continue',exact:true}).click();await page.getByRole('grid',{name:'Sheet1 worksheet'}).waitFor();page.once('dialog',d=>d.accept(saved));await page.getByRole('tab',{name:'File',exact:true}).click();await page.getByRole('button',{name:'Open',exact:true}).click();await page.getByRole('button',{name:'Discard and continue',exact:true}).click();await page.getByRole('grid',{name:'Close 2026-11 v1 worksheet'}).waitFor();
  // 0.4 acceptance: custom working paper and end-to-end question/adjustment flow.
- await page.getByRole('button',{name:'Monthly close',exact:true}).click();
+ await page.getByRole('tab',{name:'Add-ons',exact:true}).click();await page.getByRole('button',{name:'Monthly close',exact:true}).click();
  await modal.getByLabel('Import period',{exact:true}).fill('2026-12');
  await modal.getByLabel('Trial balance CSV',{exact:true}).fill(csv);
  await modal.getByRole('button',{name:'Import and generate P&L',exact:true}).click();
@@ -95,7 +94,7 @@ try{
  await panel.getByLabel('Question (required)',{exact:true}).fill('Did the processing fee cutoff include the final settlement?');
  await panel.getByRole('button',{name:'Circle up this cell',exact:true}).click();
  await panel.getByText('Question opened in this workbook.',{exact:true}).waitFor();
- await page.getByRole('button',{name:'Open questions',exact:true}).click();
+ await page.getByRole('tab',{name:'Review',exact:true}).click();await page.getByRole('button',{name:'Open questions',exact:true}).click();
  const questions=page.getByRole('dialog',{name:'Open questions',exact:true});
  await questions.getByRole('button').filter({hasText:'final settlement'}).click();
  const trace=panel.getByRole('region',{name:'Dependency navigation'});
@@ -108,7 +107,7 @@ try{
  await trace.getByText(/direct output groups/).waitFor();
  await panel.getByRole('button',{name:'Back one cell',exact:true}).click();
  await panel.getByText('Questions on this cell',{exact:true}).waitFor();
- await page.getByRole('button',{name:'Monthly close',exact:true}).click();
+ await page.getByRole('tab',{name:'Add-ons',exact:true}).click();await page.getByRole('button',{name:'Monthly close',exact:true}).click();
  const latestPeriod='2026-12 · version 1 · Close 2026-12 v1';
  await modal.getByLabel('Existing close period',{exact:true}).selectOption({label:latestPeriod});
  for(const [account,line] of [['1000','assets'],['1200','assets'],['4000','sales'],['5000','fees']]) {
@@ -122,7 +121,7 @@ try{
  await panel.getByLabel('Reviewer name or initials',{exact:true}).fill('Controller');
  await panel.getByRole('button',{name:'Record review',exact:true}).click();
  await panel.getByText('Review recorded in this workbook. Save the workbook to keep it on disk.',{exact:true}).waitFor();
- await page.getByRole('button',{name:'Monthly close',exact:true}).click();
+ await page.getByRole('tab',{name:'Add-ons',exact:true}).click();await page.getByRole('button',{name:'Monthly close',exact:true}).click();
  await modal.getByLabel('Existing close period',{exact:true}).selectOption({label:latestPeriod});
  await modal.getByText('Adjustments & supporting evidence (0)',{exact:true}).click();
  await modal.getByLabel('Adjustment author',{exact:true}).fill('Preparer');
@@ -141,17 +140,17 @@ try{
  await impact.getByRole('button',{name:/Operating result: 15000 → 14925/}).click();
  await panel.getByRole('button',{name:'Compare exact changes',exact:true}).click();
  await panel.getByRole('list',{name:'Accounting change summary'}).getByText('Posted adjustments changed:',{exact:true}).waitFor();
- await page.getByRole('button',{name:'Open questions',exact:true}).click();
+ await page.getByRole('tab',{name:'Review',exact:true}).click();await page.getByRole('button',{name:'Open questions',exact:true}).click();
  await questions.getByRole('button').filter({hasText:'final settlement'}).click();
  await panel.getByRole('button',{name:'Resolve question',exact:true}).click();
  await panel.getByLabel('Name or initials',{exact:true}).fill('Case reviewer');
  await panel.getByLabel('Resolution note',{exact:true}).fill('Agreed to retained settlement and posted journal. Calculation requires independent review.');
  await panel.getByRole('button',{name:'Save resolution',exact:true}).click();
  await panel.getByText('Question resolved. This does not record a review.',{exact:true}).waitFor();
- await page.getByRole('button',{name:'Open questions',exact:true}).click();
+ await page.getByRole('tab',{name:'Review',exact:true}).click();await page.getByRole('button',{name:'Open questions',exact:true}).click();
  await questions.getByText('No open questions.',{exact:true}).waitFor();
  await questions.getByRole('button',{name:'Close open questions',exact:true}).click();
- await page.getByRole('button',{name:'Monthly close',exact:true}).click();
+ await page.getByRole('tab',{name:'Add-ons',exact:true}).click();await page.getByRole('button',{name:'Monthly close',exact:true}).click();
  await modal.getByLabel('Existing close period',{exact:true}).selectOption({label:latestPeriod});
  const workingPaperDownload=page.waitForEvent('download');
  await modal.getByRole('button',{name:'Export review pack',exact:true}).click();
