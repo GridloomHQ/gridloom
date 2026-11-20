@@ -10,7 +10,7 @@ const temp=mkdtempSync(path.join(tmpdir(),'gridloom-ledger-ui-'));
 const db=path.join(temp,'ledger.sqlite');
 const sql=(query)=>execFileSync('python3',['-c','import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.executescript(sys.argv[2]); c.close()',db,query]);
 sql("PRAGMA journal_mode=WAL; CREATE TABLE entries(id INTEGER PRIMARY KEY,posted TEXT,cents INTEGER); CREATE INDEX ledger_order ON entries(posted,id); WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<2000000) INSERT INTO entries SELECT i, CASE WHEN i<=1050000 THEN '2026-11-18' ELSE '2026-11-19' END, 5 FROM n;");
-const server=spawn(process.env.GRIDLOOM_SERVER??path.join(root,'target/debug/gridloom-server'),['--port','0','--no-samples'],{cwd:root,env:{...process.env,GRIDLOOM_RECOVERY_DIR:path.join(temp,'recovery')},stdio:['ignore','pipe','pipe']});
+const server=spawn(process.env.GRIDLOOM_SERVER??path.join(root,'target/debug/gridloom-server'),['--port','0'],{cwd:root,env:{...process.env,GRIDLOOM_RECOVERY_DIR:path.join(temp,'recovery')},stdio:['ignore','pipe','pipe']});
 let log='',browser;
 server.stdout.on('data',d=>log+=d);server.stderr.on('data',d=>log+=d);
 try {

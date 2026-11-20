@@ -1,12 +1,9 @@
 pub mod benchmark;
-mod invoice_sample;
 mod ledger;
-mod ledger_demo;
 mod range_view;
 mod recovery;
 mod row_insert;
 pub mod routes;
-pub mod sample_data;
 pub mod state;
 
 use axum::{
@@ -16,36 +13,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use gridloom_core::workbook::Workbook;
-use sample_data::ensure_sample_databases;
 use state::AppState;
 use std::net::SocketAddr;
 
-pub async fn build_app(open_samples: bool) -> anyhow::Result<axum::Router> {
-    let mut workbook = Workbook::new();
-    let mut invoice_sample_path = None;
-
-    if open_samples {
-        if let Ok((sqlite_p, duckdb_p)) = ensure_sample_databases() {
-            let sqlite_p = std::env::current_dir()?.join(sqlite_p);
-            workbook.add_sqlite_connection("SalesDB", &sqlite_p)?;
-            invoice_sample_path = Some(sqlite_p);
-            let _ = workbook.add_duckdb_connection("AnalyticsDB", &duckdb_p);
-
-            // Keep the original demo table at B2, linked to the actual SalesDB
-            // invoices, not to an eagerly materialized query result.
-            workbook.insert_live_table(
-                "Sheet1",
-                "Invoices",
-                "SalesDB",
-                "SELECT * FROM invoices",
-                gridloom_core::value::CellCoord::new(1, 1),
-            )?;
-            sample_data::seed_sample_financial_model(&mut workbook)?;
-        }
-    }
-
-    let mut state = AppState::new(workbook);
-    state.invoice_sample_path = invoice_sample_path;
+pub async fn build_app() -> anyhow::Result<axum::Router> {
+    let mut state = AppState::new(Workbook::new());
     state.recovery = Some(std::sync::Arc::new(tokio::sync::Mutex::new(
         recovery::Recovery::new(recovery::default_dir()?),
     )));
@@ -72,9 +44,8 @@ pub async fn build_app(open_samples: bool) -> anyhow::Result<axum::Router> {
 
 pub async fn start_server(
     port: u16,
-    open_samples: bool,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
-    let app = build_app(open_samples).await?;
+    let app = build_app().await?;
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let actual_port = listener.local_addr()?.port();

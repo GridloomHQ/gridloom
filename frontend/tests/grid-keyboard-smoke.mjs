@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const fixture=mkdtempSync(path.join(os.tmpdir(),'gridloom-keyboard-'));
-const server=spawn(process.env.GRIDLOOM_SERVER||path.join(root,'target/debug/gridloom-server'),['--port','0','--no-samples'],{cwd:root,env:{...process.env,GRIDLOOM_RECOVERY_DIR:path.join(fixture,'recovery')},stdio:['ignore','pipe','pipe']});
+const server=spawn(process.env.GRIDLOOM_SERVER||path.join(root,'target/debug/gridloom-server'),['--port','0'],{cwd:root,env:{...process.env,GRIDLOOM_RECOVERY_DIR:path.join(fixture,'recovery')},stdio:['ignore','pipe','pipe']});
 let output='',browser;
 try {
   const base=await new Promise((resolve,reject)=>{

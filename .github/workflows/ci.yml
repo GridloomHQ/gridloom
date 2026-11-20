@@ -93,7 +93,7 @@ jobs:
 
       - name: Real browser ten-million-row worksheet refresh, navigation and SQL preview
         working-directory: ./frontend
-        run: node tests/sample-demo-smoke.mjs
+        run: node tests/live-table-10m-smoke.mjs
 
       - name: Real browser query preview navigation and retry
         working-directory: ./frontend

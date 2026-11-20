@@ -317,21 +317,6 @@ pub async fn browse(
     browse_path(state, input, path).await
 }
 
-pub async fn browse_sample(
-    State(state): State<AppState>,
-    Json(mut input): Json<Request>,
-) -> Result<Json<Page>, Failure> {
-    let path = state.demo.ready_path()?;
-    input.spec.connection = String::from("10M-row sample");
-    input.spec.table = String::from("entries");
-    input.spec.date = String::from("posted");
-    input.spec.cents = String::from("amount_cents");
-    if let Some(account) = &mut input.spec.account {
-        account.column = String::from("account");
-    }
-    browse_path(state, input, path).await
-}
-
 async fn browse_path(state: AppState, input: Request, path: PathBuf) -> Result<Json<Page>, Failure> {
     if !(1..=200).contains(&input.limit) || input.offset > i64::MAX as u64 {
         return Err(bad("Invalid page size or offset"));

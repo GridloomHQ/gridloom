@@ -12,7 +12,7 @@ const recovery=mkdtempSync(path.join(os.tmpdir(),'gridloom-recovery-smoke-'));
 const binary=process.env.GRIDLOOM_SERVER || path.join(root,'target/debug/gridloom-server');
 let server,browser;
 async function start(){
-  server=spawn(binary,['--port','0','--no-samples'],{cwd:root,env:{...process.env,GRIDLOOM_RECOVERY_DIR:recovery}});
+  server=spawn(binary,['--port','0'],{cwd:root,env:{...process.env,GRIDLOOM_RECOVERY_DIR:recovery}});
   return new Promise((resolve,reject)=>{
     let log='';
     const timer=setTimeout(()=>reject(new Error(log||'Server startup timeout')),15000);

@@ -31,7 +31,7 @@ yarn-error.log*
 *.gridloom.tmp
 /fixtures/*.tmp
 
-# Generated sample databases
+# Old version-generated SQLite/DuckDB files
 /fixtures/*.sqlite
 /fixtures/*.duckdb
 

@@ -260,7 +260,7 @@ class PackageTests(unittest.TestCase):
         launcher = b'''#!/usr/bin/env python3
 import http.server,json,os,sys
 from pathlib import Path
-assert "--no-samples" in sys.argv and "--port" in sys.argv
+assert "--port" in sys.argv
 assert not any(k.startswith("DUCKDB") for k in os.environ)
 assert not any(k in os.environ for k in ("LD_LIBRARY_PATH","GRIDLOOM_FRONTEND_DIR","LD_PRELOAD"))
 root=Path(__file__).resolve().parent

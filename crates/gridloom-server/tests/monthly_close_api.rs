@@ -185,7 +185,7 @@ async fn ranges_and_cross_sheet_are_functional_over_http() {
 }
 #[tokio::test]
 async fn local_server_rejects_cross_origin_and_rebinding() {
-    let app = gridloom_server::build_app(false).await.unwrap();
+    let app = gridloom_server::build_app().await.unwrap();
     for (host, origin, status) in [
         ("127.0.0.1:3001", None, StatusCode::OK),
         ("evil.example:3001", None, StatusCode::FORBIDDEN),

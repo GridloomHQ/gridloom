@@ -1,4 +1,4 @@
-import { SampleDemo } from './components/SampleDemo';
+import { AboutDialog } from './components/AboutDialog';
 import { SortFilterPanel } from './components/SortFilterPanel';
 import { LedgerPanel } from './components/LedgerPanel';
 import {SelectionSummary} from './components/SelectionSummary';
@@ -757,7 +757,7 @@ export const App: React.FC = () => {
         </div>
       </div>
 
-      {isAboutOpen && <SampleDemo onClose={()=>setIsAboutOpen(false)}/>}
+      {isAboutOpen && <AboutDialog onClose={()=>setIsAboutOpen(false)}/>}
       {closeAddon && isCloseOpen && <Suspense fallback={<p role="status" className="fixed bottom-4 right-4 bg-white border p-2">Loading Monthly close…</p>}><MonthlyClosePanel onClose={()=>setIsCloseOpen(false)} onChanged={()=>{clipboard.current=null;void refreshMetadata();void fetchViewportData();}} onSelectCell={(sheet,row,col)=>moveToExplanation(row,col,sheet,()=>{clearDependencyTrace();setIsCloseOpen(false);})}/></Suspense>}
       {isQuestionsOpen && <OpenQuestions onClose={() => setIsQuestionsOpen(false)} onNavigate={question => {
         moveToExplanation(question.coord.row, question.coord.col, question.sheet_name, () => {

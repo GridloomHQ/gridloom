@@ -56,8 +56,6 @@ In **Data → SQL Query**, choose **Live table**, select a worksheet, and enter 
 
 Live tables support `SELECT *` from one SQLite table with a single integer primary key, optional simple `WHERE` comparisons, and `ORDER BY` columns. SQL sorting and filtering apply to all matching rows. You can stage supported edits by the source row's primary key and apply them separately. Use a materialized snapshot for joins, computed projections, or worksheet formulas and review tools that need values from a table range.
 
-To try it, choose **Help → About → Sample → Generate demo invoices**, then **Data → Refresh**. The original worksheet table uses `SELECT * FROM invoices` and expands to 10 million rows without a second table or a full import. It preserves existing invoices; repeating generation creates no duplicates. Allow roughly 1 GB of free disk space. The adjacent cash model is a separate ten-invoice illustration.
-
 ### Insert worksheet rows
 
 Select a row or a range and choose **Insert rows above**. Gridloom adds one blank row per selected row, moves the existing rows and follows direct A1 references across the workbook, including absolute references. Ranges that cross the insertion point expand. A whole table can move, but an insertion cannot split a table.
@@ -92,10 +90,10 @@ Choose the server variant for a browser interface, or desktop for a native windo
 archive='gridloom-<version>-linux-x86_64-server.tar.gz'
 sha256sum -c "$archive.sha256"
 tar -xzf "$archive"
-"./${archive%.tar.gz}/gridloom" --no-samples
+"./${archive%.tar.gz}/gridloom"
 ```
 
-For the server variant, open the local URL printed in the terminal. Omit `--no-samples` to start with sample data.
+For the server variant, open the local URL printed in the terminal. Both variants start with one blank worksheet. Open a saved workbook to load its data and connections.
 
 Packages include frontend assets and DuckDB, but not every system library. They are built and checked on Ubuntu 24.04 x86_64; the desktop variant needs compatible GTK3/WebKitGTK 4.1 runtime libraries. They are **not signed installers or universal Linux images**. Inspect the extracted `docs/shared-libraries.txt` and `docs/build-info.json` for dependencies and source identity. Checksums detect altered bytes, not publisher authenticity.
 
@@ -150,7 +148,7 @@ For frontend development, run the server in one terminal and `cd frontend && npm
 
 ### Try a first workbook
 
-Start with the sample databases to explore SQL tables, or enable the **Monthly close** add-on for a trial balance. Add a formula outside any occupied table or spill range, select its result, and open **Explain & Review**. Save the workbook before closing the application. Use **Save As** to keep a separate copy.
+Enter a few values and a formula, select its result, and open **Explain & Review**. To use your own data, connect an existing SQLite or DuckDB file, or enable the **Monthly close** add-on to import a trial balance. Save the workbook before closing the application. Use **Save As** to keep a separate copy.
 
 ### Recover unsaved edits
 
