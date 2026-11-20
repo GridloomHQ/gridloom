@@ -48,7 +48,7 @@ To check where a balance comes from, select a cell and choose **Trace balance**.
 
 An index on the posting date (binary collation) and the primary key speeds ordered browsing. Scroll within a block, use the next/previous block controls, or jump directly to a row. Forward scrolling can seek from the current page; a distant jump still skips earlier rows in SQLite. If the source changes, reload the view so rows and totals agree. This read-only view does not write to the database or expose imported worksheet cells to formulas.
 
-For a sample with no real accounting data, run `python3 scripts/make-ledger-demo.py demo.sqlite` from the source checkout. It creates four million synthetic entries (roughly 270 MiB) and prints an account/date range and reference total for comparison. Connect the file and choose the `entries` table, `posted` date, `amount_cents` amount and `account` code. Use `--rows 10000` for a smaller file.
+Choose **Help → About → Sample** to generate and browse 10 million synthetic journal entries on this computer. Allow about 1 GB of free disk space. Gridloom measures the full count and total, an indexed account/date filter, and an indexed lookup of the final entry. The sample is read-only and does not change your workbook. Run `node frontend/tests/sample-demo-smoke.mjs` after building the server and frontend to verify this full dataset and workflow.
 
 ### Insert worksheet rows
 
