@@ -2,6 +2,7 @@ import { SampleDemo } from './components/SampleDemo';
 import { SortFilterPanel } from './components/SortFilterPanel';
 import { LedgerPanel } from './components/LedgerPanel';
 import {SelectionSummary} from './components/SelectionSummary';
+import {wholeAxisRange, type SelectionAxis} from './utils/gridNavigation';
 import {isCellLoaded} from './utils/frozenViewport';
 import { FindPanel, FindMatch } from './components/FindPanel';
 import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
@@ -47,6 +48,7 @@ export const App: React.FC = () => {
   };
   const [sheets, setSheets] = useState<string[]>(['Sheet1']);
   const [anchor, setAnchor] = useState({row: 0, col: 0});
+  const [selectionAxis, setSelectionAxis] = useState<SelectionAxis | null>(null);
   const [busy, setBusy] = useState(false);
   const [gridDraft,setGridDraft]=useState(false),[formulaDraft,setFormulaDraft]=useState(false);
   const [formulaDraftText,setFormulaDraftText]=useState<string|null>(null);
@@ -249,8 +251,11 @@ export const App: React.FC = () => {
     return true;
   };
 
-  const selection = normalizedRange(anchor, {row:selectedRow, col:selectedCol});
-  const rangeKey = `${sheetName}:${anchor.row}:${anchor.col}:${selectedRow}:${selectedCol}:${reviewRevision}`;
+  const activePosition = {row:selectedRow, col:selectedCol};
+  const selection = selectionAxis
+    ? wholeAxisRange(selectionAxis, activePosition, viewport?.total_rows ?? 1000, viewport?.total_cols ?? 100)
+    : normalizedRange(anchor, activePosition);
+  const rangeKey = `${sheetName}:${selection.start.row}:${selection.start.col}:${selection.end.row}:${selection.end.col}:${reviewRevision}`;
   useEffect(() => {
     let cancelled = false;
     setCopyData(null);
@@ -263,7 +268,9 @@ export const App: React.FC = () => {
     return ()=>{cancelled=true;};
   },[rangeKey]);
   const selectCell = (r:number,c:number,extend=false) => {
-    setSelectedRow(r);setSelectedCol(c);if(!extend)setAnchor({row:r,col:c});
+    setSelectedRow(r);setSelectedCol(c);setSelectionAxis(null);
+    if(!extend)setAnchor({row:r,col:c});
+    else if(selectionAxis)setAnchor({row:selectedRow,col:selectedCol});
   };
   const mutate = async (label:string, operation:()=>Promise<unknown>, preserveClipboard=false) => {
     if(mutationLock.current)return;
@@ -593,6 +600,8 @@ export const App: React.FC = () => {
         selection={selection} busy={busy}
         traceHighlight={dependencyHighlight}
         onSelectCell={(row, col, extend) => { clearDependencyTrace(); selectCell(row, col, extend); }}
+        onSelectAxis={axis => { clearDependencyTrace(); setSelectionAxis(axis); }}
+        onNavigationError={() => setStatusMsg("Could not navigate the worksheet. Try again.")}
         onCopy={handleCopy} onPaste={handlePaste} onPasteSpecial={()=>setPasteSpecialOpen(true)}
         onUndo={() => void mutate('Undid worksheet edit',api.undo)}
         onRedo={() => void mutate('Redid worksheet edit',api.redo)}

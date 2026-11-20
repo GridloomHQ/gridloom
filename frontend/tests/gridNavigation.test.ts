@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { gridNavigation } from '../src/utils/gridNavigation.ts';
+import { gridBoundaryShortcut, gridNavigation, wholeAxisRange } from "../src/utils/gridNavigation.ts";
 const at = { row: 20, col: 8 };
 const move = (key: string, flags = {}) => gridNavigation({ key, ...flags }, at, 100, 20, 15);
 test('Enter and Tab move with Shift reversing instead of extending', () => {
@@ -29,4 +29,17 @@ test('unimplemented modified navigation and browser shortcuts are not intercepte
   assert.equal(move('PageDown',{altKey:true}),null);
   assert.equal(move('f',{ctrlKey:true}),null);
   assert.equal(move('F2'),null);
+});
+test('boundary shortcuts handle the intended modifiers without capturing AltGr', () => {
+  assert.deepEqual(gridBoundaryShortcut({key:'ArrowLeft',ctrlKey:true}), {direction:'left',extend:false});
+  assert.deepEqual(gridBoundaryShortcut({key:'ArrowDown',metaKey:true,shiftKey:true}), {direction:'down',extend:true});
+  assert.deepEqual(gridBoundaryShortcut({key:' ',ctrlKey:true}), {axis:'column'});
+  assert.deepEqual(gridBoundaryShortcut({key:' ',shiftKey:true}), {axis:'row'});
+  assert.equal(gridBoundaryShortcut({key:' ',ctrlKey:true,altKey:true}),null);
+  assert.equal(gridBoundaryShortcut({key:' ',ctrlKey:true,shiftKey:true}),null);
+  assert.equal(gridBoundaryShortcut({key:'ArrowLeft'}),null);
+});
+test('whole-axis selections are only two bounded endpoints even on large sheets', () => {
+  assert.deepEqual(wholeAxisRange('column',at,2_000_000,100),{start:{row:0,col:8},end:{row:1_999_999,col:8}});
+  assert.deepEqual(wholeAxisRange('row',at,2_000_000,100),{start:{row:20,col:0},end:{row:20,col:99}});
 });

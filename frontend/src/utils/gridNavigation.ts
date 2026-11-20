@@ -37,3 +37,32 @@ export function gridNavigation(
     extend: !!event.shiftKey && event.key !== 'Enter' && event.key !== 'Tab',
   };
 }
+
+export type JumpDirection = 'up' | 'down' | 'left' | 'right';
+export type SelectionAxis = 'row' | 'column';
+
+export function gridBoundaryShortcut(event: NavigationKey):
+  { direction: JumpDirection; extend: boolean } | { axis: SelectionAxis } | null {
+  if (event.altKey) return null; // Includes AltGr.
+  const control = event.ctrlKey || event.metaKey;
+  if (event.key === ' ') {
+    if (control && !event.shiftKey) return {axis:'column'};
+    if (!control && event.shiftKey) return {axis:'row'};
+    return null;
+  }
+  if (!control) return null;
+  switch (event.key) {
+    case 'ArrowUp': return {direction:'up',extend:!!event.shiftKey};
+    case 'ArrowDown': return {direction:'down',extend:!!event.shiftKey};
+    case 'ArrowLeft': return {direction:'left',extend:!!event.shiftKey};
+    case 'ArrowRight': return {direction:'right',extend:!!event.shiftKey};
+    default: return null;
+  }
+}
+
+export function wholeAxisRange(axis: SelectionAxis, at: GridPosition, rows: number, columns: number) {
+  if (axis === 'row') return {
+    start: {row:at.row,col:0}, end:{row:at.row,col:columns-1},
+  };
+  return {start:{row:0,col:at.col}, end:{row:rows-1,col:at.col}};
+}

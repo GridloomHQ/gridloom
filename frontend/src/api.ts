@@ -1,3 +1,4 @@
+import type {JumpDirection} from './utils/gridNavigation';
 import type {RangeSummary} from './components/SelectionSummary';
 import type {FindRequest, FindResponse} from './components/FindPanel';
 import type {
@@ -56,6 +57,8 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  jumpCell: (sheet_name:string, row:number, col:number, direction:JumpDirection, signal:AbortSignal) =>
+    fetchJson<CellCoord>(`/api/cells/jump?${new URLSearchParams({sheet_name,row:String(row),col:String(col),direction})}`, {signal,cache:'no-store'}),
   setShowFormulas:(sheet_name:string,show_formulas:boolean)=>fetchJson('/api/sheets/show-formulas',{method:'POST',body:JSON.stringify({sheet_name,show_formulas})}),
   rangeView:(sheet_name:string,range:CellRange,options:RangeViewOptions,signal:AbortSignal)=>fetchJson<RangeView>('/api/ranges/sort-filter',{method:'POST',body:JSON.stringify({sheet_name,range:wireRange(range),...options}),signal}),
   functionCatalog:()=>fetchJson<{functions:string[]}>('/api/functions'),
