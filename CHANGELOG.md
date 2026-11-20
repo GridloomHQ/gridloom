@@ -1,3 +1,11 @@
+# 0.9.0
+
+- Use a single-row command bar with tabs, consistent buttons, a dedicated Add-ons tab, and an unobstructed keyboard-shortcuts dialog.
+- Jump across populated cells with Ctrl+Arrow, or select the whole column with Ctrl+Space and the whole row with Shift+Space.
+- Right-click a worksheet tab to rename or delete it. Gridloom blocks deletion that would break references or discard recorded reviews.
+- Open **fx** to browse functions by category, inspect arguments and return values, and insert the chosen function into the draft.
+- Open the 10-million-row demo as a read-only worksheet tab and query its SQLite data. The demo stays separate from workbook data and loads rows in pages.
+
 # 0.8.0
 
 - Group worksheet commands and simplify Explain & Review without changing the underlying trace or review rules.
