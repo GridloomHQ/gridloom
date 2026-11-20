@@ -1,3 +1,9 @@
+# 0.11.0
+
+- Refresh the existing demo Invoices table in place after generating ten million rows, without loading all rows into the worksheet.
+- Jump to the first or last invoice with Ctrl+Up or Ctrl+Down. Gridloom fetches the destination window and reuses it when possible.
+- Place a supported SQLite query in the worksheet, then refresh or stage edits by stable row key. Refresh also picks up source changes when the row count stays the same.
+
 # 0.10.0
 
 - Preview read-only SQL query results in pages of up to 100 rows. The editor no longer loads the entire result into memory or sends it to the browser.

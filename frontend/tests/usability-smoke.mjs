@@ -64,17 +64,35 @@ try {
  await grid().press('PageDown');await page.waitForFunction(()=>document.querySelector('input[aria-label="Go to cell"]')?.value!=='A1');const pageDown=await address.inputValue();assert.match(pageDown,/^A\d+$/);assert.notEqual(pageDown,'A1');await grid().press('PageUp');await selected('A1');
  await address.fill('A0');await address.press('Enter');await page.getByRole('alert').filter({hasText:'Enter a cell address'}).waitFor();assert.equal(await cell('A1').getAttribute('aria-selected'),'true');await address.press('Escape');assert.equal(await address.inputValue(),'A1');
  // Offscreen data must arrive before editing; a placeholder is not an empty cell.
- await go('D200');await page.waitForFunction(()=>!document.querySelector('input[aria-label="Formula input"]')?.disabled);await edit('D200','existing distant value');await go('A1');await page.waitForFunction(()=>!document.querySelector('input[aria-label="Formula input"]')?.disabled);
- const viewportStarted=deferred(),viewportResume=deferred();
+ // Seed a never-visited cell without visiting (and thereby caching) its viewport.
+ const coldCell='D400',coldRow=399,coldCol=3,coldValue='existing distant value';
+ const seeded=await page.request.post(`${base}/api/cells/set`,{data:{sheet_name:'Sheet1',row:coldRow,col:coldCol,raw_input:coldValue}});
+ assert(seeded.ok(),await seeded.text());
+ await formulaReady();
+ const viewportPath='**/api/cells/viewport-panes',viewportResume=deferred();
+ const matchesColdViewport=request=>{
+   if(!request.url().endsWith('/api/cells/viewport-panes'))return false;
+   const b=request.postDataJSON();
+   return b?.sheet_name==='Sheet1'&&b.start_row<=coldRow&&b.end_row>=coldRow
+     &&b.start_col<=coldCol&&b.end_col>=coldCol;
+ };
  const delayedViewport=async route=>{
-   const bounds=route.request().postDataJSON();
-   if(bounds.start_row>100){viewportStarted.resolve();await viewportResume.promise;}
+   if(matchesColdViewport(route.request()))await viewportResume.promise;
    await route.continue();
  };
- await page.route('**/api/cells/viewport-panes',delayedViewport);await go('D200');await viewportStarted.promise;
- await grid().focus();await grid().press('F2');assert.equal(await page.getByRole('textbox',{name:'Edit D200',exact:true}).count(),0);
- viewportResume.resolve();await cell('D200').filter({hasText:'existing distant value'}).waitFor();await page.unroute('**/api/cells/viewport-panes',delayedViewport);
- await grid().press('F2');input=page.getByRole('textbox',{name:'Edit D200',exact:true});assert.equal(await input.inputValue(),'existing distant value');await input.press('Escape');await go('A1');
+ const coldEditor=page.getByRole('textbox',{name:`Edit ${coldCell}`,exact:true});
+ await page.route(viewportPath,delayedViewport);
+ try{
+   await Promise.all([page.waitForRequest(matchesColdViewport,{timeout:10000}),go(coldCell)]);
+   await grid().focus();await grid().press('F2');assert.equal(await coldEditor.count(),0);
+   assert.equal(await page.getByRole('textbox',{name:'Formula input',exact:true}).isDisabled(),true);
+   viewportResume.resolve();
+   await cell(coldCell).filter({hasText:coldValue}).waitFor();
+ }finally{
+   viewportResume.resolve();
+   await page.unroute(viewportPath,delayedViewport);
+ }
+ await grid().press('F2');assert.equal(await coldEditor.inputValue(),coldValue);await coldEditor.press('Escape');await go('A1');
  await edit('B1','=A1*2');await edit('C1','needle');await edit('D1','Needle extra');
  // Add a second sheet through the UI and seed a matching literal.
  page.once('dialog',d=>d.accept('Search Other'));await page.getByRole('button',{name:'Add worksheet',exact:true}).click();await page.getByRole('grid',{name:'Search Other worksheet'}).waitFor();await edit('A1','needle');
