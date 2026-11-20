@@ -19,6 +19,7 @@ import type {
   PivotDefinition,
   PivotResult,
   QueryResult,
+  QueryPreviewPage,
   StagedPatch,
   TableSchema,
   ViewportResponse,
@@ -45,7 +46,7 @@ let pendingMutations=0;
 const mutationListeners=new Set<()=>void>();
 export const getPendingMutations=()=>pendingMutations;
 export const subscribeMutations=(listener:()=>void)=>{mutationListeners.add(listener);return()=>{mutationListeners.delete(listener);};};
-const readPostPaths=new Set(['/api/ranges/sort-filter','/api/ledger/page','/api/sample','/api/sample/invoices','/api/sample/ledger','/api/sample/query','/api/pivots/refresh','/api/ranges/summary','/api/ranges/capture','/api/ranges/read','/api/cells/find','/api/cells/explain','/api/cells/dependencies','/api/cells/viewport','/api/cells/viewport-panes','/api/query/analyze','/api/writeback/review','/api/benchmark/run']);
+const readPostPaths=new Set(['/api/ranges/sort-filter','/api/ledger/page','/api/sample','/api/sample/invoices','/api/sample/ledger','/api/sample/query','/api/pivots/refresh','/api/ranges/summary','/api/ranges/capture','/api/ranges/read','/api/cells/find','/api/cells/explain','/api/cells/dependencies','/api/cells/viewport','/api/cells/viewport-panes','/api/query/analyze','/api/query/preview','/api/writeback/review','/api/benchmark/run']);
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const changing=!!options?.method && options.method!=='GET' && !readPostPaths.has(url);
   if(changing){pendingMutations++;mutationListeners.forEach(listener=>listener());}
@@ -137,10 +138,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ connection_name, sql }),
     }),
-  analyzeQuery: (connection_name: string, sql: string) =>
+  previewQuery: (connection_name: string, sql: string, offset: number, limit: number, signal: AbortSignal) =>
+    fetchJson<QueryPreviewPage>('/api/query/preview', {
+      method: 'POST',
+      body: JSON.stringify({ connection_name, sql, offset, limit }),
+      signal,
+    }),
+  analyzeQuery: (connection_name: string, sql: string, signal?: AbortSignal) =>
     fetchJson<LineageReport>('/api/query/analyze', {
       method: 'POST',
       body: JSON.stringify({ connection_name, sql }),
+      signal,
     }),
 
   getSources: () => fetchJson<NamedSource[]>('/api/sources'),

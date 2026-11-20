@@ -91,9 +91,13 @@ jobs:
         working-directory: ./frontend
         run: npm run test:ledger
 
-      - name: Real browser ten-million-row demo invoice generation
+      - name: Real browser ten-million-row invoice generation and SQL preview
         working-directory: ./frontend
         run: node tests/sample-demo-smoke.mjs
+
+      - name: Real browser query preview navigation and retry
+        working-directory: ./frontend
+        run: node tests/query-preview-smoke.mjs
 
       - name: Real browser worksheet usability
         working-directory: ./frontend

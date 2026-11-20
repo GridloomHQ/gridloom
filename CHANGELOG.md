@@ -1,3 +1,9 @@
+# 0.10.0
+
+- Preview read-only SQL query results in pages of up to 100 rows. The editor no longer loads the entire result into memory or sends it to the browser.
+- Use SQL `WHERE` and `ORDER BY` to filter and sort the results in the database before paging. Specify a stable order to browse large results consistently.
+- Previewing a query does not import its full result into an editable worksheet.
+
 # 0.9.0
 
 - Use a single-row command bar with tabs, consistent buttons, a dedicated Add-ons tab, and an unobstructed keyboard-shortcuts dialog.
