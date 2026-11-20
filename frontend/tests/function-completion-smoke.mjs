@@ -40,7 +40,8 @@ try {
  await page.getByRole('button',{name:'Insert function',exact:true}).click();
  const picker=page.getByRole('dialog',{name:'Insert function'});
  await picker.getByRole('textbox',{name:'Search functions'}).fill('STDEV.S');
- await picker.getByRole('button',{name:'STDEV.S',exact:true}).click();
+ await picker.getByRole('option',{name:'STDEV.S',exact:true}).click();
+ await picker.getByRole('button',{name:'Insert',exact:true}).click();
  await value('=STDEV.S(');
  await formula.fill('=SUM(A1:A3,B1)');
  assert.equal(await cell('A2').getAttribute('data-formula-reference'),'1');

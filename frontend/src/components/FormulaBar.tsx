@@ -6,6 +6,7 @@ import { a1ToCoord, coordToA1 } from '../utils/coords';
 import {cycleReference} from '../utils/referenceCycle';
 import {referenceSlot} from '../utils/formulaDraft';
 import {functionCompletion,applyFunctionCompletion,completionEvent,FunctionCompletion} from '../utils/functionCompletion';
+import {FunctionBrowser} from './FunctionBrowser';
 
 interface FormulaBarProps {
   disabled?: boolean;
@@ -37,7 +38,6 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
   const [inputValue, setInputValue] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [picker,setPicker]=useState(false);
-  const [search,setSearch]=useState('');
   const pickerButton=useRef<HTMLButtonElement>(null);
   const pickerSelection=useRef<{start:number;end:number}|null>(null);
   const [completion,setCompletion]=useState<FunctionCompletion|null>(null);
@@ -176,27 +176,16 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
         </button>
       </div>
 
-      <div className="relative">
-        <button type="button" ref={pickerButton} disabled={disabled} aria-label="Insert function" aria-expanded={picker} aria-controls="function-picker"
-          onClick={()=>{
-            const start=inputRef.current?.selectionStart??inputValue.length,end=inputRef.current?.selectionEnd??start;
-            pickerSelection.current={start,end};setSearch('');setShowSuggestions(false);setPicker(!picker);
-          }}
-          className="font-serif italic font-bold text-slate-700 text-sm rounded px-2 py-1 hover:bg-slate-100">fx</button>
-        {picker&&<div id="function-picker" role="dialog" aria-label="Insert function"
-          onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();setPicker(false);pickerButton.current?.focus();}}}
-          onBlur={e=>{if(e.relatedTarget!==pickerButton.current&&!e.currentTarget.contains(e.relatedTarget))setPicker(false);}}
-          className="absolute left-0 top-full w-64 z-50 rounded border bg-white p-2 shadow-lg">
-          <input autoFocus aria-label="Search functions" placeholder="Search functions" value={search} onChange={e=>setSearch(e.target.value)} className="mb-2 w-full rounded border p-1"/>
-          {catalogStatus==='loading'&&<p role="status">Loading functions…</p>}
-          {catalogStatus==='error'&&<button type="button" onClick={onReloadCatalog}>Couldn’t load functions. Retry</button>}
-          {catalogStatus==='ready'&&<div className="max-h-48 overflow-auto">
-            {functionNames.filter(name=>name.includes(search.trim().toUpperCase())).map(name=><button type="button" key={name} onClick={()=>pickFunction(name)} className="block w-full px-2 py-1 text-left font-mono hover:bg-slate-100">{name}</button>)}
-            {!functionNames.some(name=>name.includes(search.trim().toUpperCase()))&&<p role="status">No matching functions.</p>}
-          </div>}
-          {inputValue.trim()&&pickerSelection.current&&!referenceSlot(inputValue,pickerSelection.current.start,pickerSelection.current.end)&&!functionCompletion(inputValue,pickerSelection.current.start,pickerSelection.current.end)&&<p className="mt-2 text-slate-500">Choosing a function replaces this draft. Use Cancel to restore the cell.</p>}
-        </div>}
-      </div>
+      <button type="button" ref={pickerButton} disabled={disabled} aria-label="Insert function" aria-haspopup="dialog"
+        aria-expanded={picker} aria-controls={picker?'function-picker':undefined}
+        onClick={()=>{
+          const start=inputRef.current?.selectionStart??inputValue.length,end=inputRef.current?.selectionEnd??start;
+          pickerSelection.current={start,end};setShowSuggestions(false);setPicker(true);
+        }}
+        className="font-serif italic font-bold text-slate-700 text-sm rounded px-2 py-1 hover:bg-slate-100">fx</button>
+      {picker&&<FunctionBrowser names={functionNames} status={catalogStatus} onReload={onReloadCatalog} onInsert={pickFunction}
+        replacesDraft={!!(inputValue.trim()&&pickerSelection.current&&!referenceSlot(inputValue,pickerSelection.current.start,pickerSelection.current.end)&&!functionCompletion(inputValue,pickerSelection.current.start,pickerSelection.current.end))}
+        onClose={()=>{setPicker(false);pickerButton.current?.focus();}}/>}
 
       {/* Formula Input */}
       <div className="relative flex-1">
