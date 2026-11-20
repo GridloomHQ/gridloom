@@ -55,12 +55,59 @@ try{
   const summary=await (await page.request.get(base+'/api/workbook')).json();
   assert.equal(summary.sheets.length,1,'generation should not add a workbook sheet');
   assert.equal(summary.sheets[0].tables.find(t=>t.name==='Invoices').range.end_row,11);
+  await about.getByRole('button',{name:'Close',exact:true}).click();
+  await page.getByRole('tab',{name:'Data',exact:true}).click();
+  await page.getByRole('button',{name:'SQL Query',exact:true}).click();
+  const editor=page.getByRole('dialog',{name:'SQL Query Editor & Source Builder'});
+  await editor.getByRole('combobox',{name:'Target Database:'}).selectOption('SalesDB');
+  const sqlInput=editor.getByRole('textbox',{name:'SQL query'});
+  const run=editor.getByRole('button',{name:'Run Query',exact:true});
+  const paging=editor.getByRole('group',{name:'Query result pages'});
+  const next=paging.getByRole('button',{name:'Next',exact:true});
+  const previous=paging.getByRole('button',{name:'Previous',exact:true});
+  const rows=editor.getByRole('table').locator('tbody > tr');
+  const legacy=[];
+  const observe=request=>{ if(new URL(request.url()).pathname==='/api/query/execute') legacy.push(request); };
+  page.on('request',observe);
+  async function assertPreview(action,{sql,offset,status,first,last,length,more}){
+    const started=performance.now();
+    const [response]=await Promise.all([
+      page.waitForResponse(r=>new URL(r.url()).pathname==='/api/query/preview'), action.click(),
+    ]);
+    assert(response.ok(),await response.text());
+    assert.deepEqual(response.request().postDataJSON(),{connection_name:'SalesDB',sql,offset,limit:100});
+    const payload=await response.json();
+    assert.equal(payload.offset,offset);
+    assert.equal(payload.rows.length,length);
+    assert.equal(payload.has_more,more);
+    await editor.getByRole('status').filter({hasText:status}).waitFor();
+    assert.equal(await rows.count(),length);
+    assert.equal((await rows.first().getByRole('cell').first().innerText()).trim(),String(first));
+    assert.equal((await rows.last().getByRole('cell').first().innerText()).trim(),String(last));
+    assert.equal(await next.isEnabled(),more);
+    assert.equal(await previous.isEnabled(),offset>0);
+    console.log(`SQL preview ${status}: ${Math.round(performance.now()-started)} ms including render`);
+  }
+  // The original query has no LIMIT. The SQLite invoice fixture's table scan
+  // returns its integer primary keys in storage order; user-defined ordering
+  // is covered separately below.
+  const originalSql='SELECT * FROM invoices';
+  await sqlInput.fill(originalSql);
+  await assertPreview(run,{sql:originalSql,offset:0,status:'Rows 1–100',first:1,last:100,length:100,more:true});
+  await assertPreview(next,{sql:originalSql,offset:100,status:'Rows 101–200',first:101,last:200,length:100,more:true});
+  const tailSql='SELECT * FROM invoices WHERE id >= 9999997 ORDER BY id DESC';
+  await sqlInput.fill(tailSql);
+  await assertPreview(run,{sql:tailSql,offset:0,status:'Rows 1–4',first:10_000_000,last:9_999_997,length:4,more:false});
+  assert.deepEqual(await rows.locator('td:first-child').allTextContents(),['10000000','9999999','9999998','9999997']);
+  assert.equal(legacy.length,0,'SQL editor preview must not use the eager query endpoint');
+  page.off('request',observe);
+  await editor.getByRole('button',{name:'Close query editor'}).click();
   await stop();
   base=await start();
   const reopened=await (await page.request.get(base+'/api/workbook')).json();
   assert.equal(reopened.sheets[0].tables.find(t=>t.name==='Invoices').range.end_row,11,'restart should not load all invoices into the worksheet');
   assert.equal(Number((await query('SELECT count(*) FROM invoices'))[0][0].value),10_000_000);
-  console.log('PASS: the sample button adds and preserves 10,000,000 invoices in SalesDB, without a new worksheet or eager import.');
+  console.log('PASS: the sample button adds and preserves 10,000,000 invoices in SalesDB, without a new worksheet or eager import; real SQL preview pages and orders them in the database.');
 }finally{
   await browser?.close();
   await stop();

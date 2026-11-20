@@ -2,6 +2,59 @@ use crate::error::CellError;
 use sqlparser::ast::{SetExpr, Statement, TableFactor};
 use sqlparser::dialect::{DuckDbDialect, GenericDialect, SQLiteDialect};
 use sqlparser::parser::Parser;
+use sqlparser::tokenizer::{Token, Tokenizer};
+
+fn dialect_for(name: &str) -> Box<dyn sqlparser::dialect::Dialect> {
+    match name.to_lowercase().as_str() {
+        "sqlite" => Box::new(SQLiteDialect {}),
+        "duckdb" => Box::new(DuckDbDialect {}),
+        _ => Box::new(GenericDialect {}),
+    }
+}
+
+/// Build a bounded query without reformatting the submitted SQL. The SQL engine
+/// applies the outer page limit after the original filters, order, and limit.
+pub(super) fn preview_sql(
+    sql: &str,
+    dialect_name: &str,
+    offset: u64,
+    fetch: usize,
+) -> Result<String, CellError> {
+    let sql = sql.trim();
+    validate_read_only_sql(sql, dialect_name)?;
+    let dialect = dialect_for(dialect_name);
+    let tokens = Tokenizer::new(dialect.as_ref(), sql)
+        .tokenize_with_location()
+        .map_err(|e| CellError::Sql(format!("SQL syntax error: {e}")))?;
+    let semicolon = tokens.iter().find(|item| item.token == Token::SemiColon)
+        .map(|item| item.span.start);
+    let ast = Parser::new(dialect.as_ref()).with_tokens_with_locations(tokens)
+        .parse_statements()
+        .map_err(|e| CellError::Sql(format!("SQL syntax error: {e}")))?;
+    if !matches!(ast.as_slice(), [Statement::Query(_)]) {
+        return Err(CellError::Sql("Preview requires one read-only SELECT query".into()));
+    }
+
+    // Remove a terminal delimiter (including comments after it), not semicolons
+    // in text literals, quoted identifiers or comments. Preserve dialect syntax.
+    let mut sql_body = sql;
+    if let Some(location) = semicolon {
+        let line_start: usize = sql.split_inclusive('\n')
+            .take((location.line - 1) as usize)
+            .map(str::len)
+            .sum();
+        let column_start = sql[line_start..].char_indices()
+            .nth((location.column - 1) as usize)
+            .map(|(index, _)| index);
+        let index = column_start.map(|column| line_start + column)
+            .filter(|&index| sql.as_bytes().get(index) == Some(&b';'))
+            .ok_or_else(|| CellError::Sql("Could not locate SQL statement delimiter".into()))?;
+        sql_body = &sql[..index];
+    }
+    Ok(format!(
+        "SELECT * FROM (\n{sql_body}\n) AS gridloom_preview LIMIT {fetch} OFFSET {offset}"
+    ))
+}
 
 /// Strictly validates that SQL is a read-only query.
 /// Disallows mutating statements (INSERT, UPDATE, DELETE, DROP, CREATE, ALTER),
@@ -39,12 +92,7 @@ pub fn validate_read_only_sql(sql: &str, dialect_name: &str) -> Result<(), CellE
     }
 
     // Parse with AST to guarantee it is strictly a read-only SELECT / WITH statement
-    let dialect: Box<dyn sqlparser::dialect::Dialect> = match dialect_name.to_lowercase().as_str() {
-        "sqlite" => Box::new(SQLiteDialect {}),
-        "duckdb" => Box::new(DuckDbDialect {}),
-        _ => Box::new(GenericDialect {}),
-    };
-
+    let dialect = dialect_for(dialect_name);
     let ast = Parser::parse_sql(dialect.as_ref(), trimmed).map_err(|e| {
         CellError::Sql(format!("SQL syntax error: {}", e))
     })?;

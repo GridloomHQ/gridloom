@@ -21,6 +21,17 @@ pub enum DbConnection {
     DuckDb(DuckDbEngine),
 }
 
+/// The maximum number of rows returned to the SQL editor per page.
+pub const MAX_QUERY_PREVIEW_ROWS: usize = 100;
+
+#[derive(Debug, Serialize)]
+pub struct QueryPreviewPage {
+    pub columns: Vec<ColumnMeta>,
+    pub rows: Vec<Vec<Value>>,
+    pub offset: u64,
+    pub has_more: bool,
+}
+
 impl DbConnection {
     pub fn open_sqlite<P: AsRef<Path>>(path: P) -> Result<Self, CellError> {
         Ok(DbConnection::Sqlite(SqliteEngine::open(path)?))
@@ -68,6 +79,33 @@ impl DbConnection {
             DbConnection::Sqlite(eng) => eng.execute_read_query(sql, params),
             DbConnection::DuckDb(eng) => eng.execute_read_query(sql, params),
         }
+    }
+
+    pub fn preview_query(
+        &self,
+        sql: &str,
+        offset: u64,
+        limit: usize,
+    ) -> Result<QueryPreviewPage, CellError> {
+        if !(1..=MAX_QUERY_PREVIEW_ROWS).contains(&limit) || offset > i64::MAX as u64 {
+            return Err(CellError::Sql("Invalid query preview page bounds".into()));
+        }
+        let dialect = match self.kind() {
+            EngineKind::Sqlite => "sqlite",
+            EngineKind::DuckDb => "duckdb",
+        };
+        let bounded = security::preview_sql(sql, dialect, offset, limit + 1)?;
+        let QueryResult {
+            columns, mut rows, ..
+        } = self.execute_read_query(&bounded, &[])?;
+        let has_more = rows.len() > limit;
+        rows.truncate(limit);
+        Ok(QueryPreviewPage {
+            columns,
+            rows,
+            offset,
+            has_more,
+        })
     }
 
     pub fn update_rows(&self, patches: &[crate::writeback::StagedPatch]) -> Result<(), CellError> {

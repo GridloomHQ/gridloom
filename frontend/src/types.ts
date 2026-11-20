@@ -67,6 +67,13 @@ export interface QueryResult {
   total_rows: number;
 }
 
+export interface QueryPreviewPage {
+  columns: ColumnMeta[];
+  rows: CellValue[][];
+  offset: number;
+  has_more: boolean;
+}
+
 export interface LineageReport {
   is_editable: boolean;
   base_table?: string;

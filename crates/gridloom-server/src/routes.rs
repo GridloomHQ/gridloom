@@ -71,6 +71,7 @@ pub fn create_router(state: AppState) -> Router {
         )
         // Query Execution & Lineage
         .route("/api/query/execute", post(execute_query))
+        .route("/api/query/preview", post(preview_query))
         .route(
             "/api/sample",
             get(crate::ledger_demo::status)
@@ -331,6 +332,34 @@ async fn execute_query(
         .execute_read_query(&req.sql, &[])
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     Ok(Json(res))
+}
+
+#[derive(Deserialize)]
+struct QueryPreviewRequest {
+    connection_name: String,
+    sql: String,
+    offset: u64,
+    limit: usize,
+}
+
+async fn preview_query(
+    State(state): State<AppState>,
+    Json(req): Json<QueryPreviewRequest>,
+) -> Result<Json<gridloom_core::db::QueryPreviewPage>, (StatusCode, String)> {
+    tokio::task::spawn_blocking(move || {
+        let wb = state.workbook.blocking_read();
+        let conn = wb.connections.get(&req.connection_name).ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Connection '{}' not found", req.connection_name),
+            )
+        })?;
+        conn.preview_query(&req.sql, req.offset, req.limit)
+            .map(Json)
+            .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))
+    })
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Query preview failed".into()))?
 }
 
 async fn analyze_query(
