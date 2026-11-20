@@ -19,7 +19,26 @@ try {
  const selected=async name=>{await page.waitForFunction(name=>document.querySelector('input[aria-label="Go to cell"]')?.value===name,name);assert.equal(await cell(name).getAttribute('aria-selected'),'true');};
  const go=async name=>{await address.focus();await idle();await address.fill(name);await address.press('Enter');await selected(name);};
  const edit=async(name,value,key='Enter')=>{await cell(name).dblclick();const input=page.getByRole('textbox',{name:`Edit ${name}`,exact:true});await input.fill(value);await input.press(key);await idle();};
- await grid().waitFor();await edit('A1','12');await selected('A2');await grid().press('Shift+Enter');await selected('A1');
+ await grid().waitFor();
+ const painted=()=>page.evaluate(()=>new Promise(resolve=>
+   requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))));
+ const formulaReady=()=>page.waitForFunction(()=>!document.querySelector('input[aria-label="Formula input"]')?.disabled);
+ await formulaReady();await painted();
+ const cacheRequests=[];
+ const observeCache=request=>{if(request.url().endsWith('/api/cells/viewport-panes'))cacheRequests.push(request.postDataJSON());};
+ page.on('request',observeCache);
+ for(let i=1;i<=5;i++){
+   await grid().evaluate((el,top)=>{el.scrollTop=top;},i*26);
+   await painted();
+ }
+ assert.equal(cacheRequests.length,0,'covered scrolls must not request more cells');
+ await go('A700');await formulaReady();await painted();
+ assert.equal(cacheRequests.length,1,'a far jump should fetch only its destination');
+ assert(cacheRequests[0].start_row<=699&&cacheRequests[0].end_row>=699&&cacheRequests[0].start_row>600);
+ await go('A1');await formulaReady();await painted();
+ assert.equal(cacheRequests.length,1,'returning to the buffered window should reuse it');
+ page.off('request',observeCache);
+ await edit('A1','12');await selected('A2');await grid().press('Shift+Enter');await selected('A1');
  await edit('A1','13','Tab');await selected('B1');await grid().press('Shift+Tab');await selected('A1');
  await grid().press('F2');await page.getByRole('textbox',{name:'Edit A1',exact:true}).fill('discard me');await page.keyboard.press('Escape');assert.equal(await cell('A1').innerText(),'13');await selected('A1');
  // Failed writes retain the draft and selection; retry writes once and moves only on success.

@@ -166,13 +166,25 @@ export const api = {
       body: JSON.stringify({ sheet_name, table_name, source_name, row, col }),
     }),
 
+  insertLiveTable: (sheet_name: string, table_name: string, connection_name: string, sql: string, row: number, col: number) =>
+    fetchJson<WorksheetTable>('/api/tables/insert-live', {
+      method: 'POST',
+      body: JSON.stringify({ sheet_name, table_name, connection_name, sql, row, col }),
+    }),
+
+  refreshLiveTable: (sheet_name: string, table_name: string) =>
+    fetchJson<WorksheetTable>('/api/tables/refresh-live', {
+      method: 'POST',
+      body: JSON.stringify({ sheet_name, table_name }),
+    }),
+
   setCell: (sheet_name: string, row: number, col: number, raw_input: string) =>
     fetchJson<{ status: string }>('/api/cells/set', {
       method: 'POST',
       body: JSON.stringify({ sheet_name, row, col, raw_input }),
     }),
-  getViewportPanes: (sheet_name:string,start_row:number,start_col:number,end_row:number,end_col:number,visible_frozen_rows:number,visible_frozen_columns:number) =>
-    fetchJson<ViewportResponse>('/api/cells/viewport-panes',{method:'POST',body:JSON.stringify({sheet_name,start_row,start_col,end_row,end_col,overscan:5,visible_frozen_rows,visible_frozen_columns})}),
+  getViewportPanes: (sheet_name:string,start_row:number,start_col:number,end_row:number,end_col:number,visible_frozen_rows:number,visible_frozen_columns:number,overscan=5,signal?:AbortSignal) =>
+    fetchJson<ViewportResponse>('/api/cells/viewport-panes',{method:'POST',body:JSON.stringify({sheet_name,start_row,start_col,end_row,end_col,overscan,visible_frozen_rows,visible_frozen_columns}),signal}),
   getViewport: (sheet_name: string, start_row: number, start_col: number, end_row: number, end_col: number, overscan = 5) =>
     fetchJson<ViewportResponse>('/api/cells/viewport', {
       method: 'POST',

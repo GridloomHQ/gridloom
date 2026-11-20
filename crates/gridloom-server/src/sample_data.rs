@@ -157,10 +157,14 @@ pub fn seed_sample_financial_model(workbook: &mut gridloom_core::Workbook) -> an
     for (row, label, input) in [
         (
             1,
-            "Cash collected",
-            "=SUMIF(Invoices[status],\"Paid\",Invoices[amount])",
+            "Cash collected (first 10 invoices)",
+            "=SQLVALUE(\"SalesDB\",\"SELECT COALESCE(SUM(CAST(ROUND(amount*100) AS INTEGER)),0) FROM invoices WHERE id BETWEEN 1 AND 10 AND status='Paid'\")/100",
         ),
-        (2, "Invoice total", "=SUM(Invoices[amount])"),
+        (
+            2,
+            "Invoice total (first 10 invoices)",
+            "=SQLVALUE(\"SalesDB\",\"SELECT COALESCE(SUM(CAST(ROUND(amount*100) AS INTEGER)),0) FROM invoices WHERE id BETWEEN 1 AND 10\")/100",
+        ),
         (3, "Collection rate", "=IFERROR(J2/J3,0)"),
         (5, "Monthly fixed costs", "25000"),
         (6, "Reserve months", "3"),

@@ -2,44 +2,52 @@ import React, { useState, useEffect } from 'react';
 import { X, Table as TableIcon, ArrowRight } from 'lucide-react';
 import { api } from '../api';
 import { NamedSource } from '../types';
-import { coordToA1 } from '../utils/coords';
+import { WorksheetPlacement } from './WorksheetPlacement';
+import { parsePlacement, type GridPlacement, type PlacementDraft } from '../utils/worksheetPlacement';
 
 interface InsertTableModalProps {
   isOpen: boolean;
   onClose: () => void;
-  activeRow: number;
-  activeCol: number;
+  sheets: readonly string[];
+  selection: GridPlacement;
   onTableInserted: () => void;
 }
 
 export const InsertTableModal: React.FC<InsertTableModalProps> = ({
   isOpen,
   onClose,
-  activeRow,
-  activeCol,
+  sheets,
+  selection,
   onTableInserted,
 }) => {
   const [sources, setSources] = useState<NamedSource[]>([]);
   const [selectedSource, setSelectedSource] = useState('');
   const [tableName, setTableName] = useState('');
-  const [startRow, setStartRow] = useState(activeRow);
-  const [startCol, setStartCol] = useState(activeCol);
+  const [placement, setPlacement] = useState<PlacementDraft>({sheetName: '', anchor: ''});
+  const destination = parsePlacement(placement, sheets);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isOpen) {
-      setStartRow(activeRow);
-      setStartCol(activeCol);
-      api.getSources().then((srcs) => {
-        setSources(srcs);
-        if (srcs.length > 0) {
-          setSelectedSource(srcs[0].name);
-          setTableName(srcs[0].name);
-        }
-      });
-    }
-  }, [isOpen, activeRow, activeCol]);
+    if (!isOpen) return;
+    let active = true;
+    setPlacement({sheetName: '', anchor: ''});
+    setSelectedSource('');
+    setTableName('');
+    setSources([]);
+    setError(null);
+    api.getSources().then((srcs) => {
+      if (!active) return;
+      setSources(srcs);
+      if (srcs.length > 0) {
+        setSelectedSource(srcs[0].name);
+        setTableName(srcs[0].name);
+      }
+    }).catch((err: Error) => {
+      if (active) setError(err.message);
+    });
+    return () => { active = false; };
+  }, [isOpen]);
 
   const handleSourceChange = (name: string) => {
     setSelectedSource(name);
@@ -48,11 +56,11 @@ export const InsertTableModal: React.FC<InsertTableModalProps> = ({
 
   const handleInsert = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedSource || !tableName.trim()) return;
+    if (loading || !selectedSource || !tableName.trim() || !destination) return;
     setLoading(true);
     setError(null);
     try {
-      await api.insertTable('Sheet1', tableName.trim(), selectedSource, startRow, startCol);
+      await api.insertTable(destination.sheetName, tableName.trim(), selectedSource, destination.row, destination.col);
       onTableInserted();
       onClose();
     } catch (err: any) {
@@ -66,13 +74,15 @@ export const InsertTableModal: React.FC<InsertTableModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md flex flex-col overflow-hidden border border-slate-200">
+      <div role="dialog" aria-modal="true" aria-labelledby="insert-table-heading" className="bg-white rounded-lg shadow-xl w-full max-w-md flex flex-col overflow-hidden border border-slate-200">
         <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 bg-slate-50">
           <div className="flex items-center gap-2">
             <TableIcon className="w-5 h-5 text-emerald-600" />
-            <h2 className="text-sm font-bold text-slate-800">Insert Worksheet Table</h2>
+            <h2 id="insert-table-heading" className="text-sm font-bold text-slate-800">Insert Worksheet Table</h2>
           </div>
           <button
+            disabled={loading}
+            aria-label="Close insert table dialog"
             onClick={onClose}
             className="text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-200"
           >
@@ -81,7 +91,7 @@ export const InsertTableModal: React.FC<InsertTableModalProps> = ({
         </div>
 
         {error && (
-          <div className="bg-rose-50 text-rose-800 text-xs px-4 py-2 border-b border-rose-200">
+          <div role="alert" className="bg-rose-50 text-rose-800 text-xs px-4 py-2 border-b border-rose-200">
             {error}
           </div>
         )}
@@ -98,6 +108,7 @@ export const InsertTableModal: React.FC<InsertTableModalProps> = ({
             ) : (
               <select
                 value={selectedSource}
+                disabled={loading}
                 onChange={(e) => handleSourceChange(e.target.value)}
                 className="w-full px-2.5 py-1.5 border border-slate-300 rounded bg-white text-xs font-medium"
               >
@@ -117,6 +128,7 @@ export const InsertTableModal: React.FC<InsertTableModalProps> = ({
             <input
               type="text"
               value={tableName}
+              disabled={loading}
               onChange={(e) => setTableName(e.target.value)}
               placeholder="e.g. Invoices"
               required
@@ -127,28 +139,12 @@ export const InsertTableModal: React.FC<InsertTableModalProps> = ({
             </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 mb-1">Anchor Row</label>
-              <input
-                type="number"
-                min={0}
-                value={startRow + 1}
-                onChange={(e) => setStartRow(Math.max(0, parseInt(e.target.value, 10) - 1))}
-                className="w-full px-2.5 py-1.5 border border-slate-300 rounded bg-white text-xs font-mono"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 mb-1">Anchor Cell</label>
-              <div className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded text-xs font-mono font-bold text-slate-700">
-                {coordToA1(startRow, startCol)}
-              </div>
-            </div>
-          </div>
+          <WorksheetPlacement sheets={sheets} selection={selection} draft={placement} onChange={setPlacement} disabled={loading} />
 
           <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2">
             <button
               type="button"
+              disabled={loading}
               onClick={onClose}
               className="px-3 py-1.5 rounded border border-slate-300 text-xs text-slate-600 hover:bg-slate-100 font-medium"
             >
@@ -156,7 +152,7 @@ export const InsertTableModal: React.FC<InsertTableModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={loading || sources.length === 0 || !tableName.trim()}
+              disabled={loading || !selectedSource || !tableName.trim() || !destination}
               className="flex items-center gap-1.5 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold shadow-sm transition-colors disabled:opacity-50"
             >
               <span>Insert Table</span>

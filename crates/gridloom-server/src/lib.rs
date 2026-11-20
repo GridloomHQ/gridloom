@@ -26,24 +26,20 @@ pub async fn build_app(open_samples: bool) -> anyhow::Result<axum::Router> {
 
     if open_samples {
         if let Ok((sqlite_p, duckdb_p)) = ensure_sample_databases() {
-            if workbook.add_sqlite_connection("SalesDB", &sqlite_p).is_ok() {
-                invoice_sample_path = std::env::current_dir().ok().map(|cwd| cwd.join(&sqlite_p));
-            }
+            let sqlite_p = std::env::current_dir()?.join(sqlite_p);
+            workbook.add_sqlite_connection("SalesDB", &sqlite_p)?;
+            invoice_sample_path = Some(sqlite_p);
             let _ = workbook.add_duckdb_connection("AnalyticsDB", &duckdb_p);
 
-            // Pre-seed sample tables and queries
-            let _ = workbook.create_named_source(
-                "Invoices",
-                "SalesDB",
-                "SELECT id, customer_name, issued_on, amount, status FROM invoices WHERE id BETWEEN 1 AND 10 ORDER BY id",
-            );
-
-            let _ = workbook.insert_table(
+            // Keep the original demo table at B2, linked to the actual SalesDB
+            // invoices, not to an eagerly materialized query result.
+            workbook.insert_live_table(
                 "Sheet1",
                 "Invoices",
-                "Invoices",
-                gridloom_core::value::CellCoord::new(1, 1), // B2
-            );
+                "SalesDB",
+                "SELECT * FROM invoices",
+                gridloom_core::value::CellCoord::new(1, 1),
+            )?;
             sample_data::seed_sample_financial_model(&mut workbook)?;
         }
     }

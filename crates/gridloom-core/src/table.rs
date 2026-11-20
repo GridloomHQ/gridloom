@@ -62,6 +62,8 @@ pub struct WorksheetTable {
     pub columns: Vec<String>,
     pub has_headers: bool,
     pub has_totals: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live: Option<crate::live_table::LiveTable>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) formats: Vec<TableFormat>,
 }
@@ -91,6 +93,7 @@ impl WorksheetTable {
             columns,
             has_headers: true,
             has_totals: false,
+            live: None,
             formats: Vec::new(),
         }
     }

@@ -32,12 +32,13 @@ try {
   const page = await browser.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
-  const sql = 'SELECT id FROM items WHERE id >= 1 ORDER BY id DESC';
+  const sql = 'SELECT * FROM items WHERE id >= 1 ORDER BY id DESC';
   const otherSql = 'SELECT id FROM other_items ORDER BY id';
   const connections = ['Ledger', 'Archive'].map(name => ({name, kind: 'sqlite', path: ':memory:'}));
   const columns = [{name: 'id', data_type: 'Integer', is_primary_key: true}];
   const emptyLineage = {is_editable: false, primary_keys: [], editable_columns: [], read_only_columns: [], read_only_reasons: []};
-  let analysisCount = 0, executeCount = 0, pending, saved, inserted;
+  let analysisCount = 0, executeCount = 0, pending, saved, live, inserted;
+  let liveConflict = true;
   let nextPageError = false;
   const requests = [];
 
@@ -54,6 +55,14 @@ try {
     if (route.request().method() !== 'POST') return route.continue();
     saved = route.request().postDataJSON();
     return route.fulfill({json: saved});
+  });
+  await page.route('**/api/tables/insert-live', route => {
+    live = route.request().postDataJSON();
+    if (liveConflict) {
+      liveConflict = false;
+      return route.fulfill({status: 400, body: 'Fixture: destination occupied'});
+    }
+    return route.fulfill({json: {}});
   });
   await page.route('**/api/tables/insert', route => {
     inserted = route.request().postDataJSON();
@@ -85,7 +94,12 @@ try {
     pending = {started: start, released: new Promise(resolve => { release = resolve; })};
     return {started, release};
   };
+  const secondSheet = await page.request.post(base + '/api/sheets', {data: {name: 'Other sheet'}});
+  assert(secondSheet.ok(), await secondSheet.text());
+  const selectOriginal = await page.request.post(base + '/api/sheets/select', {data: {name: 'Sheet1'}});
+  assert(selectOriginal.ok(), await selectOriginal.text());
   await page.goto(base);
+  await page.getByRole('grid', {name: 'Sheet1 worksheet'}).waitFor();
   const open = page.getByRole('button', {name: 'SQL Query', exact: true});
   await page.getByRole('tab', {name: 'Data', exact: true}).click();
   await open.click();
@@ -95,7 +109,9 @@ try {
   const run = dialog.getByRole('button', {name: 'Run Query', exact: true});
   const next = dialog.getByRole('button', {name: 'Next', exact: true});
   const prev = dialog.getByRole('button', {name: 'Previous', exact: true});
-  const save = dialog.getByRole('button', {name: 'Save Source & Insert Table', exact: true});
+  const save = dialog.getByRole('button', {name: 'Insert live table', exact: true});
+  const sheet = dialog.getByRole('combobox', {name: 'Worksheet', exact: true});
+  const anchor = dialog.getByRole('textbox', {name: 'Anchor cell', exact: true});
   const waitStatus = name => dialog.getByRole('status').filter({hasText: name}).waitFor();
 
   await editor.fill(sql);
@@ -150,16 +166,39 @@ try {
 
   await next.click();
   await waitStatus('Rows 101–200');
+  assert(await save.isDisabled(), 'No write until a worksheet and anchor are chosen');
+  await sheet.selectOption('Other sheet');
+  await anchor.fill('B0');
+  assert(await save.isDisabled(), 'Invalid anchor cannot submit');
+  await anchor.fill('D17');
+  await dialog.getByRole('textbox', {name: 'Source Name:'}).fill('Live test query');
+  await save.click();
+  await dialog.getByRole('alert').getByText('Fixture: destination occupied').waitFor();
+  assert.equal(await anchor.inputValue(), 'D17', 'Failure preserves the chosen placement');
+  assert.equal(saved, undefined, 'Live insert does not materialize a source');
+  await anchor.fill('E18');
+  const liveInsertion = page.waitForResponse(response => response.url().endsWith('/api/tables/insert-live') && response.ok());
+  await save.click();
+  await liveInsertion;
+  await dialog.waitFor({state: 'hidden'});
+  assert.deepEqual(live, {table_name: 'Live test query', connection_name: 'Archive', sql, sheet_name: 'Other sheet', row: 17, col: 4});
+
+  await open.click();
+  await run.click();
+  await waitStatus('Rows 1–100');
+  await dialog.getByRole('combobox', {name: 'Table type', exact: true}).selectOption('snapshot');
+  await sheet.selectOption('Other sheet');
+  await anchor.fill('C9');
   await dialog.getByRole('textbox', {name: 'Source Name:'}).fill('Saved test query');
   const insertion = page.waitForResponse(response => response.url().endsWith('/api/tables/insert'));
-  await save.click();
+  await dialog.getByRole('button', {name: 'Insert snapshot', exact: true}).click();
   await insertion;
   await dialog.waitFor({state: 'hidden'});
   assert.deepEqual(saved, {name: 'Saved test query', connection_name: 'Archive', sql});
-  assert.equal(inserted?.source_name, 'Saved test query');
+  assert.deepEqual(inserted, {sheet_name:'Other sheet', table_name:'Saved test query', source_name:'Saved test query', row:8, col:2});
   assert.equal(executeCount, 0);
   assert.deepEqual(errors, []);
-  console.log('PASS SQL pagination, failed-page retry, stale query/connection changes, untouched source SQL.');
+  console.log('PASS SQL pagination, failed-page retry, stale query/connection changes, explicit live and snapshot placement.');
 } finally {
   if (browser) await browser.close();
   if (server.exitCode === null && server.signalCode === null && !server.killed) {

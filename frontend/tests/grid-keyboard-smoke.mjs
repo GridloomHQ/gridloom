@@ -2,11 +2,14 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
-const server=spawn(process.env.GRIDLOOM_SERVER||path.join(root,'target/debug/gridloom-server'),['--port','0','--no-samples'],{cwd:root,stdio:['ignore','pipe','pipe']});
+const fixture=mkdtempSync(path.join(os.tmpdir(),'gridloom-keyboard-'));
+const server=spawn(process.env.GRIDLOOM_SERVER||path.join(root,'target/debug/gridloom-server'),['--port','0','--no-samples'],{cwd:root,env:{...process.env,GRIDLOOM_RECOVERY_DIR:path.join(fixture,'recovery')},stdio:['ignore','pipe','pipe']});
 let output='',browser;
 try {
   const base=await new Promise((resolve,reject)=>{
@@ -60,8 +63,55 @@ try {
   release();
   await page.unrouteAll({behavior:'wait'});
   assert.equal(await cell('B3').getAttribute('aria-selected'),'true');
-  console.log('PASS: sparse jumps, whole-axis selection, edit/IME handling, and stale jump cancellation.');
+  // Huge but sparse fixture: exercise the normal Grid without populating a data table.
+  const file=path.join(fixture,'deep.gridloom');
+  const post=async(endpoint,data)=>{
+    const response=await page.request.post(`${base}${endpoint}`,{data});
+    assert(response.ok(),await response.text());
+  };
+  await post('/api/workbook/save',{path:file});
+  const saved=JSON.parse(readFileSync(file,'utf8'));
+  saved.sheets.Sheet1.max_rows=10_000_001;
+  saved.sheets.Sheet1.frozen_rows=2;
+  writeFileSync(file,JSON.stringify(saved));
+  await post('/api/workbook/open',{path:file});
+  await post('/api/cells/set',{sheet_name:'Sheet1',row:10_000_000,col:0,raw_input:'=A1+41'});
+  await page.reload();
+  await cell('A1').getByText('1',{exact:true}).waitFor();
+  const address=page.getByRole('textbox',{name:'Go to cell',exact:true});
+  await address.fill('A71');await address.press('Enter');
+  await selected('A71');
+  await grid.focus();
+  await grid.press('Control+ArrowDown');
+  await selected('A10000001');
+  await cell('A10000001').getByText('42',{exact:true}).waitFor();
+  const positions=await grid.evaluate(el=>{
+    const rect=name=>el.querySelector(`[role="gridcell"][aria-label="${name}"]`).getBoundingClientRect();
+    const bounds=el.getBoundingClientRect();
+    return {height:el.scrollHeight,pinnedTop:rect('A1').top-bounds.top,deepTop:rect('A10000001').top-bounds.top,deepBottom:rect('A10000001').bottom-bounds.top,visibleHeight:el.clientHeight};
+  });
+  assert(positions.height<=1_000_000);
+  assert(positions.pinnedTop>=25 && positions.pinnedTop<=27);
+  assert(positions.deepTop>=77, 'The selection is not covered by the frozen rows');
+  assert(positions.deepBottom<=positions.visibleHeight+1, 'The selection is physically on screen');
+  await grid.press('ArrowUp');await selected('A10000000');
+  await grid.press('ArrowDown');await selected('A10000001');
+  await grid.press('F2');
+  const deepEditor=page.getByRole('textbox',{name:'Edit A10000001',exact:true});
+  assert.equal(await deepEditor.inputValue(),'=A1+41');
+  await deepEditor.fill('=A1+98');await deepEditor.press('Enter');
+  await cell('A10000001').getByText('99',{exact:true}).waitFor();
+  await page.waitForFunction(()=>document.querySelector('[role=grid]')?.getAttribute('aria-busy')==='false');
+  await grid.press('Control+Space');
+  await selected('A1');await selected('A10000001');
+  assert.equal(await cell('B10000001').getAttribute('aria-selected'),'false');
+  await grid.press('Control+Home');await selected('A1');
+  console.log('PASS: worksheet keyboard navigation, Ctrl+Down final row reveal and editing, frozen top rows, and bounded segmented canvas.');
 } finally {
   if(browser)await browser.close();
-  server.kill('SIGTERM');
+  if(server.exitCode===null && server.signalCode===null) {
+    const stopped=new Promise(resolve=>server.once('exit',resolve));
+    server.kill('SIGTERM');await stopped;
+  }
+  rmSync(fixture,{recursive:true,force:true});
 }

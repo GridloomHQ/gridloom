@@ -27,6 +27,8 @@ pub struct CellRenderData {
     pub is_error: bool,
     pub table_name: Option<String>,
     pub is_table_header: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_edit: Option<crate::live_table::LiveEdit>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
