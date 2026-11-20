@@ -42,7 +42,8 @@ fn fixture() -> (Workbook, tempfile::TempDir) {
     w.add_sqlite_connection("db", db.to_str().unwrap()).unwrap();
     w.create_named_source("ledger", "db", "SELECT id, amount FROM ledger ORDER BY id")
         .unwrap();
-    w.insert_table(SHEET, "Data", "ledger", coord("A1")).unwrap();
+    w.insert_table(SHEET, "Data", "ledger", coord("A1"))
+        .unwrap();
     (w, dir)
 }
 

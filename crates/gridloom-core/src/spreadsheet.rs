@@ -619,7 +619,9 @@ impl Workbook {
                 let materialized = source_is_materialized(source, coord);
                 let data = if materialized {
                     let rendered = viewport.cells.get(&coord.to_a1());
-                    let value = rendered.map(|c| c.raw_value.clone()).unwrap_or(Value::Blank);
+                    let value = rendered
+                        .map(|c| c.raw_value.clone())
+                        .unwrap_or(Value::Blank);
                     let mut data = CellData::new(coord, value.to_string_repr());
                     data.formula = None;
                     data.evaluated_value = value;
