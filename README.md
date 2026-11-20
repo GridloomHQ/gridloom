@@ -64,7 +64,7 @@ Record a review or circle up an open question. Questions can be resolved or reop
 
 ### Prepare accounting working papers
 
-**Monthly close** provides a focused trial-balance workflow:
+Enable **Monthly close** in **Help → Add-ons** for a focused trial-balance workflow. It is off by default; switching it off leaves existing workbooks and close records intact.
 
 1. Import a trial-balance CSV and map accounts to a report.
 2. Define entity, currency, units and report hierarchy.
@@ -76,7 +76,7 @@ Record a review or circle up an open question. Questions can be resolved or reop
 
 ### Use a Linux package
 
-Open a **successful main-branch run** in [Actions → CI](https://github.com/lhemerly/gridloom/actions/workflows/ci.yml) and download its `gridloom-linux-x86_64-<commit>` artifact. Extract the downloaded ZIP to find the server/browser and desktop tarballs, their SHA-256 files and verification logs. Artifacts expire after 14 days.
+Download a Linux x86-64 tarball and its matching SHA-256 file from [GitHub Releases](https://github.com/lhemerly/gridloom/releases). For unreleased builds, successful main-branch [CI runs](https://github.com/lhemerly/gridloom/actions/workflows/ci.yml) also publish packages as temporary artifacts.
 
 Choose the server variant for a browser interface, or desktop for a native window. From the directory containing the downloaded tarballs, substitute the actual filename below:
 
@@ -142,7 +142,7 @@ For frontend development, run the server in one terminal and `cd frontend && npm
 
 ### Try a first workbook
 
-Start with the sample databases to explore SQL tables, or use **Monthly close** for a trial balance. Add a formula outside any occupied table or spill range, select its result, and open **Explain & Review**. Save the workbook before closing the application. Use **Save As** to keep a separate copy.
+Start with the sample databases to explore SQL tables, or enable the **Monthly close** add-on for a trial balance. Add a formula outside any occupied table or spill range, select its result, and open **Explain & Review**. Save the workbook before closing the application. Use **Save As** to keep a separate copy.
 
 ### Recover unsaved edits
 

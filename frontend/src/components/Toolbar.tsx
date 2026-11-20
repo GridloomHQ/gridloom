@@ -1,248 +1,81 @@
-import { version } from '../../package.json';
-import React from 'react';
-import {
-  Database,
-  Terminal,
-  Table as TableIcon,
-  CheckCircle2,
-  FileSpreadsheet,
-  Save,
-  FolderOpen,
-  PieChart,
-  BarChart2,
-  History,
-  Zap,
-  RefreshCw,
-  DollarSign,
-  Percent,
-} from 'lucide-react';
+import { useState, type ReactNode } from 'react';
 
 interface ToolbarProps {
   busy: boolean;
-  onUndo: () => void; onRedo: () => void; onFillDown: () => void; onFillRight: () => void; onOpenClose: () => void;
-  onOpenExplain: () => void;
-  onOpenQuestions: () => void;
-  onOpenSchemaBrowser: () => void;
-  onOpenQueryEditor: () => void;
-  onOpenInsertTable: () => void;
-  onOpenStagedReview: () => void;
-  onOpenPivots: () => void;
-  onOpenCharts: () => void;
-  onOpenAuditLog: () => void;
-  onOpenBenchmarks: () => void;
-  onNewWorkbook: () => void;
-  onSaveWorkbook: () => void;
-  onSaveAsWorkbook: () => void;
-  onOpenWorkbook: () => void;
-  onRefreshAll: () => void;
-  onApplyFormat: (format: string) => void;
-  stagedCount: number;
+  onUndo: () => void; onRedo: () => void; onFillDown: () => void; onFillRight: () => void;
+  closeAddon: boolean; onToggleCloseAddon: (enabled: boolean) => void; onOpenClose: () => void;
+  onOpenExplain: () => void; onOpenQuestions: () => void;
+  onOpenSchemaBrowser: () => void; onOpenQueryEditor: () => void; onOpenInsertTable: () => void;
+  onOpenStagedReview: () => void; onOpenPivots: () => void; onOpenCharts: () => void;
+  onOpenAuditLog: () => void; onOpenBenchmarks: () => void;
+  onNewWorkbook: () => void; onSaveWorkbook: () => void; onSaveAsWorkbook: () => void;
+  onOpenWorkbook: () => void; onRefreshAll: () => void; onApplyFormat: (format: string) => void;
+  stagedCount: number; onOpenAbout?: () => void;
+  fileExtras: ReactNode; homeExtras: ReactNode; insertExtras: ReactNode; dataExtras: ReactNode; viewExtras: ReactNode;
 }
 
-export const Toolbar: React.FC<ToolbarProps> = ({
-  busy, onUndo, onRedo, onFillDown, onFillRight, onOpenClose,
-  onOpenExplain,
-  onOpenQuestions,
-  onOpenSchemaBrowser,
-  onOpenQueryEditor,
-  onOpenInsertTable,
-  onOpenStagedReview,
-  onOpenPivots,
-  onOpenCharts,
-  onOpenAuditLog,
-  onOpenBenchmarks,
-  onNewWorkbook,
-  onSaveWorkbook, onSaveAsWorkbook,
-  onOpenWorkbook,
-  onRefreshAll,
-  onApplyFormat,
-  stagedCount,
-}) => {
-  return (
-    <div className="flex flex-wrap items-center justify-between border-b border-slate-200 bg-white px-3 py-1.5 shadow-sm text-xs select-none">
-      {/* Brand & File Operations */}
-      <div className="flex items-center gap-1.5 border-r border-slate-200 pr-3">
-        <div className="flex items-center gap-1 font-bold text-slate-800 text-sm tracking-tight mr-2">
-          <div className="w-5 h-5 rounded bg-emerald-600 flex items-center justify-center text-white text-xs font-black shadow-sm">
-            G
-          </div>
-          <span>Gridloom</span>
-          <span className="text-[10px] px-1 py-0.2 bg-emerald-100 text-emerald-800 rounded font-semibold ml-0.5">
-            {version.split('.').slice(0, 2).join('.')} preview
-          </span>
-        </div>
+function Group({ name, children }: {name: string; children: ReactNode}) {
+  return <section aria-label={name} className="border-r border-slate-200 px-2 py-1 last:border-r-0">
+    <h2 className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{name}</h2>
+    <div className="flex flex-wrap items-center gap-1">{children}</div>
+  </section>;
+}
 
-        <button disabled={busy}
-          onMouseDown={e=>e.preventDefault()} onClick={onNewWorkbook}
-          title="New Workbook"
-          className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 text-slate-700 transition-colors"
-        >
-          <FileSpreadsheet className="w-3.5 h-3.5 text-slate-500" />
-          <span>New</span>
+export function Toolbar(p: ToolbarProps) {
+  const [addonsOpen, setAddonsOpen] = useState(false);
+  const command = (label: string, run: () => void, title?: string) => <button type="button" disabled={p.busy}
+    onMouseDown={e => e.preventDefault()} onClick={run} title={title}
+    className="rounded px-2 py-1 text-slate-800 hover:bg-slate-100 focus-visible:outline-indigo-500 disabled:opacity-50">{label}</button>;
+  return <div role="region" aria-label="Worksheet commands" className="border-b border-slate-200 bg-white px-2 py-1 shadow-sm text-xs select-none">
+    <div className="flex flex-wrap items-stretch gap-y-1">
+      <div className="self-center px-2 font-bold text-emerald-800">Gridloom</div>
+      <Group name="File">
+        {command('New', p.onNewWorkbook, 'New Workbook')}{command('Open', p.onOpenWorkbook, 'Open Workbook (.gridloom)')}
+        {command('Save', p.onSaveWorkbook, 'Save Workbook')}{command('Save As', p.onSaveAsWorkbook)}{p.fileExtras}
+      </Group>
+      <Group name="Home">
+        {command('Undo', p.onUndo, 'Undo worksheet edit (Ctrl/Cmd+Z)')}{command('Redo', p.onRedo)}
+        {command('Fill down', p.onFillDown, 'Fill selected range from its first row (Ctrl/Cmd+D)')}
+        {command('Fill right', p.onFillRight)}{p.homeExtras}
+      </Group>
+      <Group name="Format">
+        {command('123', () => p.onApplyFormat('General'), 'Format as General')}
+        {command('$', () => p.onApplyFormat('Currency'), 'Format as Currency ($)')}
+        {command('%', () => p.onApplyFormat('Percent'), 'Format as Percent (%)')}
+        {command('B', () => p.onApplyFormat('Bold'), 'Toggle bold')}
+        {command('I', () => p.onApplyFormat('Italic'), 'Toggle italic')}
+        <label className="flex gap-1 items-center">Fill <input type="color" aria-label="Cell fill color" disabled={p.busy}
+          defaultValue="#fef3c7" onChange={e => p.onApplyFormat(`Fill:${e.target.value}`)} className="w-7 h-6"/></label>
+        {command('No fill', () => p.onApplyFormat('Fill:'), 'Clear cell fill')}
+      </Group>
+      <Group name="Insert">
+        {p.insertExtras}{command('Insert Table', p.onOpenInsertTable)}{command('Pivot', p.onOpenPivots)}{command('Charts', p.onOpenCharts)}
+      </Group>
+      <Group name="Data">
+        {command('Databases', p.onOpenSchemaBrowser)}{command('SQL Query', p.onOpenQueryEditor)}
+        {command('Refresh', p.onRefreshAll, 'Refresh All Data Sources')}{p.dataExtras}
+      </Group>
+      <Group name="Review">
+        {command('Explain & Review', p.onOpenExplain)}{command('Open questions', p.onOpenQuestions)}
+        <button type="button" disabled={p.busy} onClick={p.onOpenStagedReview}
+          className={p.stagedCount ? 'rounded bg-amber-100 px-2 py-1 text-amber-900 font-semibold' : 'rounded px-2 py-1 hover:bg-slate-100'}>
+          Review Edits <span className="tabular-nums">{p.stagedCount}</span>
         </button>
-
-        <button disabled={busy}
-          onMouseDown={e=>e.preventDefault()} onClick={onOpenWorkbook}
-          title="Open Workbook (.gridloom)"
-          className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 text-slate-700 transition-colors"
-        >
-          <FolderOpen className="w-3.5 h-3.5 text-slate-500" />
-          <span>Open</span>
-        </button>
-
-        <button disabled={busy}
-          onMouseDown={e=>e.preventDefault()} onClick={onSaveWorkbook}
-          title="Save Workbook"
-          className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 text-slate-700 transition-colors"
-        >
-          <Save className="w-3.5 h-3.5 text-slate-500" />
-          <span>Save</span>
-        </button>
-        <button disabled={busy} onMouseDown={e=>e.preventDefault()} onClick={onSaveAsWorkbook} className="px-2 py-1 rounded hover:bg-slate-100">Save As</button>
-      </div>
-
-      {/* SQL & Database Controls */}
-      <div className="flex items-center gap-1 border-r border-slate-200 px-3">
-        <button disabled={busy}
-          onClick={onOpenSchemaBrowser}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 font-medium transition-colors"
-        >
-          <Database className="w-3.5 h-3.5 text-blue-600" />
-          <span>Databases</span>
-        </button>
-
-        <button disabled={busy}
-          onClick={onOpenQueryEditor}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 font-medium transition-colors"
-        >
-          <Terminal className="w-3.5 h-3.5 text-indigo-600" />
-          <span>SQL Query</span>
-        </button>
-
-        <button disabled={busy}
-          onClick={onOpenInsertTable}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 font-medium transition-colors"
-        >
-          <TableIcon className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Insert Table</span>
-        </button>
-
-        <button disabled={busy}
-          onClick={onRefreshAll}
-          title="Refresh All Data Sources"
-          className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 text-slate-600 transition-colors"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          <span>Refresh</span>
-        </button>
-      </div>
-
-      <div className="flex gap-1 px-2">
-        <button disabled={busy} onClick={onUndo} title="Undo worksheet edit (Ctrl/Cmd+Z)" className="px-2 py-1 hover:bg-slate-100">Undo</button>
-        <button disabled={busy} onClick={onRedo} title="Redo worksheet edit" className="px-2 py-1 hover:bg-slate-100">Redo</button>
-        <button disabled={busy} onClick={onFillDown} title="Fill selected range from its first row (Ctrl/Cmd+D)" className="px-2 py-1 hover:bg-slate-100">Fill down</button>
-        <button disabled={busy} onClick={onFillRight} title="Fill selected range from its first column" className="px-2 py-1 hover:bg-slate-100">Fill right</button>
-      </div>
-      {/* Cell Formatting */}
-      <div className="flex items-center gap-1 border-r border-slate-200 px-3">
-        <button disabled={busy}
-          onClick={() => onApplyFormat('General')}
-          title="Format as General"
-          className="px-2 py-1 rounded hover:bg-slate-100 text-slate-700 font-mono"
-        >
-          123
-        </button>
-        <button disabled={busy}
-          onClick={() => onApplyFormat('Currency')}
-          title="Format as Currency ($)"
-          className="p-1 rounded hover:bg-slate-100 text-slate-700"
-        >
-          <DollarSign className="w-3.5 h-3.5" />
-        </button>
-        <button disabled={busy}
-          onClick={() => onApplyFormat('Percent')}
-          title="Format as Percent (%)"
-          className="p-1 rounded hover:bg-slate-100 text-slate-700"
-        >
-          <Percent className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      <div className="flex gap-1 items-center">
-        <button disabled={busy} onClick={()=>onApplyFormat('Bold')} title="Toggle bold" className="px-2 py-1 font-bold">B</button>
-        <button disabled={busy} onClick={()=>onApplyFormat('Italic')} title="Toggle italic" className="px-2 py-1 italic">I</button>
-        <label className="flex gap-1 items-center">Fill <input type="color" aria-label="Cell fill color" disabled={busy} defaultValue="#fef3c7" onChange={e=>onApplyFormat(`Fill:${e.target.value}`)} className="w-7 h-6"/></label>
-        <button disabled={busy} onClick={()=>onApplyFormat('Fill:')} title="Clear cell fill" className="px-2 py-1">No fill</button>
-      </div>
-      <button disabled={busy} onClick={onOpenClose} className="px-3 py-1 rounded bg-emerald-100 text-emerald-900 font-semibold">Monthly close</button>
-      {/* Staged Writeback Badge & Review */}
-      <div className="flex items-center gap-1 border-r border-slate-200 px-3">
-        <button disabled={busy}
-          onClick={onOpenStagedReview}
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded font-semibold transition-all shadow-sm ${
-            stagedCount > 0
-              ? 'bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200 animate-pulse'
-              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-          }`}
-        >
-          <CheckCircle2
-            className={`w-3.5 h-3.5 ${
-              stagedCount > 0 ? 'text-amber-700' : 'text-slate-400'
-            }`}
-          />
-          <span>Review Edits</span>
-          <span
-            className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-              stagedCount > 0 ? 'bg-amber-500 text-white' : 'bg-slate-300 text-slate-700'
-            }`}
-          >
-            {stagedCount}
-          </span>
-        </button>
-      </div>
-
-      <button disabled={busy} onClick={onOpenQuestions} className="px-3 py-1 rounded bg-amber-100 text-amber-900 font-semibold hover:bg-amber-200">
-        Open questions
-      </button>
-      <button disabled={busy} onClick={onOpenExplain} className="px-3 py-1 rounded bg-indigo-100 text-indigo-900 font-semibold hover:bg-indigo-200">
-        Explain &amp; Review
-      </button>
-      {/* Analysis, Charts, Benchmarks & Audit */}
-      <div className="flex items-center gap-1 pl-2">
-        <button disabled={busy}
-          onClick={onOpenPivots}
-          className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 text-slate-700 transition-colors"
-        >
-          <PieChart className="w-3.5 h-3.5 text-purple-600" />
-          <span>Pivot</span>
-        </button>
-
-        <button disabled={busy}
-          onClick={onOpenCharts}
-          className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 text-slate-700 transition-colors"
-        >
-          <BarChart2 className="w-3.5 h-3.5 text-blue-600" />
-          <span>Charts</span>
-        </button>
-
-        <button disabled={busy}
-          onClick={onOpenAuditLog}
-          title="Audit Log of Applied Writebacks"
-          className="flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 text-slate-700 transition-colors"
-        >
-          <History className="w-3.5 h-3.5 text-slate-600" />
-          <span>Audit</span>
-        </button>
-
-        <button disabled={busy}
-          onClick={onOpenBenchmarks}
-          title="Performance Acceptance Protocol"
-          className="flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-50 text-emerald-800 hover:bg-emerald-100 font-semibold border border-emerald-200 transition-colors"
-        >
-          <Zap className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Benchmarks</span>
-        </button>
-      </div>
+        {command('Audit', p.onOpenAuditLog, 'Audit Log of Applied Writebacks')}
+      </Group>
+      <Group name="View">{p.viewExtras}</Group>
+      <Group name="Help">
+        {p.onOpenAbout && command('About', p.onOpenAbout)}
+        {command('Benchmarks', p.onOpenBenchmarks, 'Performance Acceptance Protocol')}
+        <button type="button" disabled={p.busy} aria-expanded={addonsOpen} aria-controls="worksheet-addons"
+          onClick={() => setAddonsOpen(open => !open)} className="rounded px-2 py-1 hover:bg-slate-100">Add-ons</button>
+        {p.closeAddon && command('Monthly close', p.onOpenClose)}
+      </Group>
     </div>
-  );
-};
+    {addonsOpen && <div id="worksheet-addons" className="flex flex-wrap items-center gap-2 border-t px-2 py-2">
+      <label className="flex items-center gap-2"><input type="checkbox" checked={p.closeAddon} disabled={p.busy}
+        onChange={e => p.onToggleCloseAddon(e.target.checked)} />Enable Monthly close add-on</label>
+      <span className="text-slate-600">Adds trial-balance and close reports. Switching it off does not remove any workbook data.</span>
+    </div>}
+  </div>;
+}

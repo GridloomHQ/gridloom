@@ -3,8 +3,7 @@ import { LedgerPanel } from './components/LedgerPanel';
 import {SelectionSummary} from './components/SelectionSummary';
 import {isCellLoaded} from './utils/frozenViewport';
 import { FindPanel, FindMatch } from './components/FindPanel';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { MonthlyClosePanel } from './components/MonthlyClosePanel';
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { normalizedRange, encodeTsv, decodeTsv, boundedRangeDimensions, GridRange } from './utils/selection';
 import { displayValue } from './utils/values';
 import { ExplainReviewPanel } from './components/ExplainReviewPanel';
@@ -27,12 +26,23 @@ import {saveBlocker} from './utils/saveGuard';
 import { ViewportResponse, WorksheetTable, ReviewDraft, DependencyHighlight } from './types';
 import { colIndexToName, coordToA1 } from './utils/coords';
 
+const MonthlyClosePanel = lazy(() => import('./components/MonthlyClosePanel').then(module => ({ default: module.MonthlyClosePanel })));
+const CLOSE_ADDON = 'gridloom:addon:monthly-close';
+
 export const App: React.FC = () => {
   const [isFindOpen,setIsFindOpen]=useState(false);
   const [sortFilterRange,setSortFilterRange]=useState<GridRange|null>(null);
   const [isLedgerOpen,setIsLedgerOpen]=useState(false);
   const [ledgerTarget,setLedgerTarget]=useState<LedgerTarget|undefined>();
   const [isCloseOpen, setIsCloseOpen] = useState(false);
+  const [closeAddon, setCloseAddon] = useState(() => {
+    try { return localStorage.getItem(CLOSE_ADDON) === 'enabled'; } catch { return false; }
+  });
+  const toggleCloseAddon = (enabled: boolean) => {
+    try { localStorage.setItem(CLOSE_ADDON, enabled ? 'enabled' : 'disabled'); } catch { /* Session only. */ }
+    setCloseAddon(enabled);
+    if (!enabled) setIsCloseOpen(false);
+  };
   const [sheets, setSheets] = useState<string[]>(['Sheet1']);
   const [anchor, setAnchor] = useState({row: 0, col: 0});
   const [busy, setBusy] = useState(false);
@@ -427,6 +437,8 @@ export const App: React.FC = () => {
       {/* Top Application Toolbar */}
       <Toolbar
         busy={busy}
+        closeAddon={closeAddon}
+        onToggleCloseAddon={toggleCloseAddon}
         onOpenClose={() => setIsCloseOpen(true)}
         onUndo={() => void mutate('Undid worksheet edit',api.undo)}
         onRedo={() => void mutate('Redid worksheet edit',api.redo)}
@@ -448,20 +460,26 @@ export const App: React.FC = () => {
         onOpenWorkbook={handleOpenWorkbook}
         onRefreshAll={handleRefreshAll}
         onApplyFormat={handleApplyFormat}
-        stagedCount={stagedCount}
-      />
-
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 bg-white border-b px-3 py-1 text-xs"><button disabled={busy} onClick={()=>setIsFindOpen(true)} className="border rounded px-2 py-1">Find (Ctrl+F)</button>
-        <button disabled={busy||apiPending>0||gridDraft||formulaDraft} onMouseDown={e=>{if(gridDraft||formulaDraft)e.preventDefault();}} onClick={()=>setSortFilterRange(selection)} className="border rounded px-2 py-1">Sort &amp; filter</button>
-        <button disabled={busy} onClick={()=>{setLedgerTarget(undefined);setIsLedgerOpen(true);}} className="border rounded px-2 py-1">SQLite ledger</button>
-        <button disabled={busy||!selectedCellLoaded||gridDraft||formulaDraft} onClick={()=>{setLedgerTarget({sheet_name:sheetName,row:selectedRow,col:selectedCol});setIsLedgerOpen(true);}} className="border rounded px-2 py-1">Trace balance</button>
-        {activeCellData?.table_name&&!activeCellData.is_table_header&&<button disabled={busy||gridDraft||formulaDraft} onClick={()=>void handleCommitCell(selectedRow,selectedCol,'',true)} className="border rounded px-2 py-1" title="Stage SQL NULL; use a normal edit to enter empty or literal text">Set SQL NULL</button>}
-        <button disabled={busy} onClick={()=>void handleRecoverWorkbook()} className="border rounded px-2 py-1">Recover autosave</button>
+        fileExtras={<>
+<button disabled={busy} onClick={()=>void handleRecoverWorkbook()} className="border rounded px-2 py-1">Recover autosave</button>
+        </>}
+        homeExtras={<>
+<button disabled={busy} onClick={()=>setIsFindOpen(true)} className="border rounded px-2 py-1">Find (Ctrl+F)</button>
         <PasteControls open={pasteSpecialOpen} onOpen={()=>setPasteSpecialOpen(true)} onClose={()=>setPasteSpecialOpen(false)}
           onPaste={handlePasteSpecial} busy={busy||gridDraft||formulaDraft}
           copySource={clipboard.current ? `${clipboard.current.sheet}!${coordToA1(clipboard.current.range.start.row,clipboard.current.range.start.col)}:${coordToA1(clipboard.current.range.end.row,clipboard.current.range.end.col)}` : null}/>
-        <button disabled={busy||apiPending>0||gridDraft||formulaDraft||!selectedCellLoaded} onClick={insertSelectedRows} className="border rounded px-2 py-1" title="Insert one blank row per selected row. Clears Undo/Redo.">Insert rows above</button>
-        <form className="flex items-center gap-1" onSubmit={e=>{e.preventDefault();resizeColumn(selectedCol,Number(widthDraft));}}>
+        </>}
+        insertExtras={<>
+<button disabled={busy||apiPending>0||gridDraft||formulaDraft||!selectedCellLoaded} onClick={insertSelectedRows} className="border rounded px-2 py-1" title="Insert one blank row per selected row. Clears Undo/Redo.">Insert rows above</button>
+        </>}
+        dataExtras={<>
+<button disabled={busy||apiPending>0||gridDraft||formulaDraft} onMouseDown={e=>{if(gridDraft||formulaDraft)e.preventDefault();}} onClick={()=>setSortFilterRange(selection)} className="border rounded px-2 py-1">Sort &amp; filter</button>
+        <button disabled={busy} onClick={()=>{setLedgerTarget(undefined);setIsLedgerOpen(true);}} className="border rounded px-2 py-1">SQLite ledger</button>
+        <button disabled={busy||!selectedCellLoaded||gridDraft||formulaDraft} onClick={()=>{setLedgerTarget({sheet_name:sheetName,row:selectedRow,col:selectedCol});setIsLedgerOpen(true);}} className="border rounded px-2 py-1">Trace balance</button>
+        {activeCellData?.table_name&&!activeCellData.is_table_header&&<button disabled={busy||gridDraft||formulaDraft} onClick={()=>void handleCommitCell(selectedRow,selectedCol,'',true)} className="border rounded px-2 py-1" title="Stage SQL NULL; use a normal edit to enter empty or literal text">Set SQL NULL</button>}
+        </>}
+        viewExtras={<>
+<form className="flex items-center gap-1" onSubmit={e=>{e.preventDefault();resizeColumn(selectedCol,Number(widthDraft));}}>
           <label htmlFor="column-width">Column {colIndexToName(selectedCol)} width</label><input id="column-width" aria-label="Column width in pixels" type="number" min="48" max="600" step="1" disabled={busy} value={widthDraft} onChange={e=>setWidthDraft(e.target.value)} className="w-16 border rounded p-1"/>
           <span>px</span><button disabled={busy} className="border rounded px-2 py-1">Set width</button><button type="button" disabled={busy} onClick={()=>resizeColumn(selectedCol,null)} className="border rounded px-2 py-1">Reset width</button>
         </form>
@@ -471,7 +489,10 @@ export const App: React.FC = () => {
         </label>
         <label className="flex items-center gap-1"><input type="checkbox" checked={freezeTopRow} disabled={busy} onChange={e=>void mutate('Updated frozen panes',()=>api.setFreeze(sheetName,e.target.checked,freezeFirstColumn),true)}/>Freeze top row</label>
         <label className="flex items-center gap-1"><input type="checkbox" checked={freezeFirstColumn} disabled={busy} onChange={e=>void mutate('Updated frozen panes',()=>api.setFreeze(sheetName,freezeTopRow,e.target.checked),true)}/>Freeze first column</label>
-      </div>
+        </>}
+        stagedCount={stagedCount}
+      />
+
       {/* Formula Bar */}
       <FormulaBar sheetName={sheetName} onDraftChange={setFormulaDraft} key={`${workbookEpoch}:${sheetName}`}
         disabled={busy || !selectedCellLoaded}
@@ -546,7 +567,7 @@ export const App: React.FC = () => {
         </div>
       </div>
 
-      {isCloseOpen && <MonthlyClosePanel onClose={()=>setIsCloseOpen(false)} onChanged={()=>{clipboard.current=null;void refreshMetadata();void fetchViewportData(visibleBounds.startRow,visibleBounds.startCol,visibleBounds.endRow,visibleBounds.endCol);}} onSelectCell={(sheet,row,col)=>moveToExplanation(row,col,sheet,()=>{clearDependencyTrace();setIsCloseOpen(false);})}/>}
+      {closeAddon && isCloseOpen && <Suspense fallback={<p role="status" className="fixed bottom-4 right-4 bg-white border p-2">Loading Monthly close…</p>}><MonthlyClosePanel onClose={()=>setIsCloseOpen(false)} onChanged={()=>{clipboard.current=null;void refreshMetadata();void fetchViewportData(visibleBounds.startRow,visibleBounds.startCol,visibleBounds.endRow,visibleBounds.endCol);}} onSelectCell={(sheet,row,col)=>moveToExplanation(row,col,sheet,()=>{clearDependencyTrace();setIsCloseOpen(false);})}/></Suspense>}
       {isQuestionsOpen && <OpenQuestions onClose={() => setIsQuestionsOpen(false)} onNavigate={question => {
         moveToExplanation(question.coord.row, question.coord.col, question.sheet_name, () => {
           clearDependencyTrace(); setIsQuestionsOpen(false);

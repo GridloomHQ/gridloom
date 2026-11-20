@@ -28,6 +28,10 @@ try{
  await cell('A1').click();await cell('B1').click({modifiers:['Shift']});await page.waitForTimeout(200);await page.keyboard.press('Control+c');await cell('D1').click();await page.keyboard.press('Control+v');await expectText(cell('E1'),'6');
  page.once('dialog',d=>d.accept('Second sheet'));await page.getByRole('button',{name:'Add worksheet',exact:true}).click();await page.getByRole('grid',{name:'Second sheet worksheet'}).waitFor();
  await edit('A1','=Sheet1!B1+1');await expectText(cell('A1'),'7');
+ assert.equal(await page.getByRole('button',{name:'Monthly close',exact:true}).count(),0);
+ await page.getByRole('button',{name:'Add-ons',exact:true}).click();
+ await page.getByRole('checkbox',{name:'Enable Monthly close add-on',exact:true}).check();
+ await page.getByRole('button',{name:'Add-ons',exact:true}).click();
  await page.getByRole('button',{name:'Monthly close',exact:true}).click();const modal=page.getByRole('dialog',{name:'Monthly close',exact:true});
  await modal.getByLabel('Import period',{exact:true}).fill('2026-10');
  const csv='account,name,debit,credit\n1000,Cash,10000,0\n1200,Processor clearing,5000,0\n4000,Sales,0,16000\n5000,Processor fees,1000,0';

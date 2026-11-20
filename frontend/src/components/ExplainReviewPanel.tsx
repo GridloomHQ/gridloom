@@ -119,12 +119,11 @@ export function ExplainReviewPanel({ drafts, sheetName, row, col, revision, onCl
     });
   };
   return <aside aria-label="Explain and review selected cell" className="w-[400px] max-w-[85vw] shrink-0 border-l border-slate-300 bg-slate-50 overflow-y-auto text-xs select-text">
-    <header className="sticky top-0 z-10 bg-white border-b p-3 flex items-center justify-between">
+    <header className="sticky top-0 z-10 bg-white border-b p-3 flex items-center justify-between gap-2">
       <div><h2 className="font-bold text-sm">Explain &amp; Review</h2><p className="text-slate-500 mt-1">{sheetName} · {coordToA1(row, col)}</p></div>
-      <button aria-label="Close explanation" onClick={onClose} className="p-2 rounded hover:bg-slate-100">✕</button>
+      <div className="flex items-center gap-2"><button disabled={loading || busy} onClick={() => setReload(n => n + 1)} className="text-indigo-700 underline disabled:opacity-50">Refresh</button><button aria-label="Close explanation" onClick={onClose} className="p-2 rounded hover:bg-slate-100">✕</button></div>
     </header>
     <div className="p-4 space-y-5">
-      <div className="flex justify-between gap-2"><span className="text-slate-500">Calculation dependencies, not audit assurance</span><button disabled={loading || busy} onClick={() => setReload(n => n + 1)} className="text-indigo-700 underline disabled:opacity-50">Refresh</button></div>
       {path.length > 0 && <nav aria-label="Dependency trail" className="flex flex-wrap gap-2 items-center text-slate-600">
         <button disabled={busy} onClick={onBack} className="text-indigo-700 underline">Back one cell</button>
         <span className="break-all">{path.map(step => step.sheetName + '!' + coordToA1(step.row, step.col)).join(' → ')} → {sheetName}!{coordToA1(row, col)}</span>
@@ -134,7 +133,7 @@ export function ExplainReviewPanel({ drafts, sheetName, row, col, revision, onCl
       {loading && <p role="status">Loading current calculation…</p>}
       {explanation && <>
         <section className="rounded bg-white border p-3 space-y-2"><h3 className="text-slate-500 font-semibold">Current calculated value</h3><p className="text-xl font-mono break-words">{displayValue(explanation.value) || '(blank)'}</p>{explanation.formula && <code className="block break-all text-indigo-800">{explanation.formula}</code>}</section>
-        {explanation.warnings.length > 0 && <ul className="list-disc pl-5 space-y-1 text-amber-900">{explanation.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>}
+        {signoffBlocked && <p className="text-amber-900">Review is unavailable while this trace is incomplete or has open questions.</p>}
         <DependencyNavigation sheetName={sheetName} row={row} col={col} revision={revision} onNavigate={onNavigate} onHighlight={onHighlight} onDrilldown={name => void inspect(async () => {
           const data = await api.getSourceDrilldown(name, 0, 50); if (mounted.current) setDrilldown(data);
         })} />
@@ -196,7 +195,6 @@ export function ExplainReviewPanel({ drafts, sheetName, row, col, revision, onCl
             <div className="space-y-2"><h4 className="font-semibold">Attach versioned support</h4><p className="text-slate-500">Files are retained in this review (2 MiB each, 8 MiB total). Contents are not verified. Download files only from sources you trust.</p><input aria-label="Attach support files" type="file" multiple onChange={e => { const files = Array.from(e.target.files ?? []); e.target.value = ''; void inspect(async () => { const problem = validateAttachmentSizes(attachments.map(a => a.bytes.length), files.map(f => f.size)); if (problem) throw new Error(problem); const uploads = await Promise.all(files.map(async f => ({ filename: f.name, media_type: f.type || 'application/octet-stream', bytes: Array.from(new Uint8Array(await f.arrayBuffer())) }))); if (mounted.current) setAttachments(a => [...a, ...uploads]); }); }} />{attachments.map((file, i) => <div key={i} className="border rounded p-2 bg-white space-y-1"><p className="break-all">{file.filename} · {file.bytes.length.toLocaleString()} bytes</p><label className="block">Version of<select className={inputClass} value={file.replaces ?? ''} onChange={e => setAttachments(a => a.map((f, n) => n === i ? { ...f, replaces: e.target.value || undefined } : f))}><option value="">New evidence item</option>{latestAttachments.map(a => <option key={a.id} value={a.id}>{a.filename} · v{a.version}</option>)}</select></label><button type="button" className="text-rose-700" onClick={() => setAttachments(a => a.filter((_, n) => n !== i))}>Remove attachment</button></div>)}</div>
             <button type="submit" className="w-full bg-indigo-700 text-white rounded px-3 py-2 font-semibold hover:bg-indigo-800">{busy ? 'Recording…' : effectiveDecision === 'Question' ? 'Circle up this cell' : 'Record review'}</button>
           </fieldset>
-          {signoffBlocked && <p className="text-amber-900">Sign-off is blocked until the calculation is reviewable and its open questions are resolved. You can still circle up this cell.</p>}
           <p className="text-slate-500">Changes to the calculation or its inputs can invalidate a review. Drafts are kept per cell for this session only. Record a review and save the workbook to retain it.</p>
         </form>
         {history.filter(r => r.decision === 'Reviewed').length > 1 && <details className="border-t pt-3"><summary className="cursor-pointer font-semibold">Review history ({history.length})</summary><div className="mt-3 space-y-2">{history.filter(r => r.decision === 'Reviewed').map(review => <ReviewCard key={review.id} review={review} />)}</div></details>}
