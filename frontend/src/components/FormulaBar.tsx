@@ -4,7 +4,7 @@ import { Check, X } from 'lucide-react';
 import { CellRenderData } from '../types';
 import { a1ToCoord, coordToA1 } from '../utils/coords';
 import {cycleReference} from '../utils/referenceCycle';
-import {api} from '../api';
+import {referenceSlot} from '../utils/formulaDraft';
 import {functionCompletion,applyFunctionCompletion,completionEvent,FunctionCompletion} from '../utils/functionCompletion';
 
 interface FormulaBarProps {
@@ -15,6 +15,10 @@ interface FormulaBarProps {
   onCommit: (rawInput: string) => Promise<boolean>;
   onDraftChange:(active:boolean)=>void;
   sheetName:string;
+  onDraftText:(text:string|null)=>void;
+  functionNames:string[];
+  catalogStatus:'loading'|'ready'|'error';
+  onReloadCatalog:()=>void;
   onGoTo: (row:number,col:number) => void;
   maxRows:number; maxCols:number;
 }
@@ -24,7 +28,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
   selectedRow,
   selectedCol,
   activeCellData,
-  onCommit, onGoTo, maxRows, maxCols, onDraftChange,sheetName,
+  onCommit, onGoTo, maxRows, maxCols, onDraftChange,sheetName,onDraftText,functionNames,catalogStatus,onReloadCatalog,
 }) => {
   const [address,setAddress]=useState('');
   const [addressError,setAddressError]=useState('');
@@ -32,13 +36,15 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
   useEffect(()=>{setAddress(coordA1);setAddressError('');},[coordA1]);
   const [inputValue, setInputValue] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [functionNames,setFunctionNames]=useState<string[]>([]);
+  const [picker,setPicker]=useState(false);
+  const [search,setSearch]=useState('');
+  const pickerButton=useRef<HTMLButtonElement>(null);
+  const pickerSelection=useRef<{start:number;end:number}|null>(null);
   const [completion,setCompletion]=useState<FunctionCompletion|null>(null);
   const [suggestionIndex,setSuggestionIndex]=useState(0);
   const completionKey=useRef<string|null>(null);
   const filterSuggestions=completion?functionNames.filter(name=>name.startsWith(completion.prefix)):[];
   const suggestionsVisible=showSuggestions&&filterSuggestions.length>0;
-  useEffect(()=>{let current=true;api.functionCatalog().then(data=>{if(current)setFunctionNames(data.functions);}).catch(()=>{});return()=>{current=false;};},[]);
   useEffect(()=>{if(suggestionsVisible)document.getElementById(`formula-function-${suggestionIndex}`)?.scrollIntoView({block:'nearest'});},[suggestionsVisible,suggestionIndex]);
   const inputRef = useRef<HTMLInputElement>(null);
   const referenceSelection=useRef<{start:number;end:number}|null>(null);
@@ -49,17 +55,19 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
   const latestIdentity=useRef(currentIdentity);latestIdentity.current=currentIdentity;
   const committing=useRef(false);
   useEffect(()=>()=>onDraftChange(false),[onDraftChange]);
-  const reset = () => { completionKey.current=null;dirty.current = false; onDraftChange(false);setInputValue(editableCellInput(activeCellData)); setShowSuggestions(false); };
+  useEffect(()=>{onDraftText(dirty.current&&identity.current===currentIdentity?inputValue:null);},[inputValue,currentIdentity,onDraftText]);
+  useEffect(()=>()=>onDraftText(null),[onDraftText]);
+  const reset = () => { completionKey.current=null;dirty.current = false; onDraftChange(false);onDraftText(null);setPicker(false);setInputValue(editableCellInput(activeCellData)); setShowSuggestions(false); };
   const commit = async () => {
     if(committing.current||disabled)return;committing.current=true;const target=currentIdentity, submitted=inputValue;
-    try {const success=await onCommit(submitted);if(success&&latestIdentity.current===target){dirty.current=false;onDraftChange(false);setShowSuggestions(false);}}
+    try {const success=await onCommit(submitted);if(success&&latestIdentity.current===target){dirty.current=false;onDraftChange(false);onDraftText(null);setShowSuggestions(false);}}
     finally {committing.current=false;}
   };
 
   useEffect(() => {
-    if (identity.current !== currentIdentity) { dirty.current = false; identity.current = currentIdentity;completionKey.current=null;onDraftChange(false); setShowSuggestions(false); }
+    if (identity.current !== currentIdentity) { dirty.current = false; identity.current = currentIdentity;completionKey.current=null;onDraftChange(false);onDraftText(null);setPicker(false); setShowSuggestions(false); }
     if (!dirty.current) setInputValue(editableCellInput(activeCellData));
-  }, [activeCellData, currentIdentity,onDraftChange]);
+  }, [activeCellData, currentIdentity,onDraftChange,onDraftText]);
 
   const updateCompletion=(value:string,start:number|null,end:number|null,inputChanged=false)=>{
     // React can deliver onSelect after onChange for the same caret. Do not reset
@@ -78,6 +86,19 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
     const result=applyFunctionCompletion(inputValue,completion,fnName);
     dirty.current=true;onDraftChange(true);setInputValue(result.value);setShowSuggestions(false);setCompletion(null);
     referenceSelection.current={start:result.caret,end:result.caret};inputRef.current?.focus();if(result.value===inputValue){inputRef.current?.setSelectionRange(result.caret,result.caret);referenceSelection.current=null;}
+  };
+  const pickFunction=(name:string)=>{
+    if(!functionNames.includes(name)||disabled||committing.current)return;
+    const point=pickerSelection.current;
+    const context=point&&functionCompletion(inputValue,point.start,point.end);
+    const slot=point&&referenceSlot(inputValue,point.start,point.end);
+    const next=context?applyFunctionCompletion(inputValue,context,name)
+      :slot?applyFunctionCompletion(inputValue,{...slot,prefix:''},name)
+      :{value:`=${name}(`,caret:name.length+2};
+    setPicker(false);setShowSuggestions(false);setCompletion(null);
+    dirty.current=true;onDraftChange(true);setInputValue(next.value);
+    inputRef.current?.focus();referenceSelection.current={start:next.caret,end:next.caret};
+    if(next.value===inputValue){inputRef.current?.setSelectionRange(next.caret,next.caret);referenceSelection.current=null;}
   };
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if(e.nativeEvent.isComposing)return;
@@ -155,9 +176,26 @@ export const FormulaBar: React.FC<FormulaBarProps> = ({
         </button>
       </div>
 
-      {/* Function indicator fx */}
-      <div className="font-serif italic font-bold text-slate-400 text-sm px-1">
-        fx
+      <div className="relative">
+        <button type="button" ref={pickerButton} disabled={disabled} aria-label="Insert function" aria-expanded={picker} aria-controls="function-picker"
+          onClick={()=>{
+            const start=inputRef.current?.selectionStart??inputValue.length,end=inputRef.current?.selectionEnd??start;
+            pickerSelection.current={start,end};setSearch('');setShowSuggestions(false);setPicker(!picker);
+          }}
+          className="font-serif italic font-bold text-slate-700 text-sm rounded px-2 py-1 hover:bg-slate-100">fx</button>
+        {picker&&<div id="function-picker" role="dialog" aria-label="Insert function"
+          onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();setPicker(false);pickerButton.current?.focus();}}}
+          onBlur={e=>{if(e.relatedTarget!==pickerButton.current&&!e.currentTarget.contains(e.relatedTarget))setPicker(false);}}
+          className="absolute left-0 top-full w-64 z-50 rounded border bg-white p-2 shadow-lg">
+          <input autoFocus aria-label="Search functions" placeholder="Search functions" value={search} onChange={e=>setSearch(e.target.value)} className="mb-2 w-full rounded border p-1"/>
+          {catalogStatus==='loading'&&<p role="status">Loading functions…</p>}
+          {catalogStatus==='error'&&<button type="button" onClick={onReloadCatalog}>Couldn’t load functions. Retry</button>}
+          {catalogStatus==='ready'&&<div className="max-h-48 overflow-auto">
+            {functionNames.filter(name=>name.includes(search.trim().toUpperCase())).map(name=><button type="button" key={name} onClick={()=>pickFunction(name)} className="block w-full px-2 py-1 text-left font-mono hover:bg-slate-100">{name}</button>)}
+            {!functionNames.some(name=>name.includes(search.trim().toUpperCase()))&&<p role="status">No matching functions.</p>}
+          </div>}
+          {inputValue.trim()&&pickerSelection.current&&!referenceSlot(inputValue,pickerSelection.current.start,pickerSelection.current.end)&&!functionCompletion(inputValue,pickerSelection.current.start,pickerSelection.current.end)&&<p className="mt-2 text-slate-500">Choosing a function replaces this draft. Use Cancel to restore the cell.</p>}
+        </div>}
       </div>
 
       {/* Formula Input */}
