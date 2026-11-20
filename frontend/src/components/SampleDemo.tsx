@@ -1,57 +1,49 @@
 import {version} from '../../package.json';
 import {useEffect,useRef,useState} from 'react';
 import {api} from '../api';
-import type {SampleStatus} from '../api';
+import type {InvoiceSampleStatus} from '../api';
 
-const ms=(value:number)=>value>=1000?`${(value/1000).toFixed(2)} s`:`${value.toFixed(1)} ms`;
-function cents(value:string){
-  const amount=BigInt(value);
-  const whole=amount<0n?-amount:amount;
-  return `${amount<0n?'−':''}${(whole/100n).toLocaleString()}.${(whole%100n).toString().padStart(2,'0')}`;
-}
-
-export function SampleDemo({onClose,onOpenWorksheet}:{onClose:()=>void;onOpenWorksheet:()=>void}){
-  const [status,setStatus]=useState<SampleStatus|null>(null);
+export function SampleDemo({onClose}:{onClose:()=>void}){
+  const [status,setStatus]=useState<InvoiceSampleStatus|null>(null);
   const [pending,setPending]=useState(false);
   const [error,setError]=useState('');
   const closeButton=useRef<HTMLButtonElement|null>(null);
   const command=useRef<AbortController|null>(null);
-  const busy=status?.state==='generating'||status?.state==='cancelling';
-  useEffect(()=>()=>{
-    command.current?.abort();
-  },[]);
+  const running=status?.state==='generating'||status?.state==='cancelling';
   useEffect(()=>{
     closeButton.current?.focus();
+    return()=>command.current?.abort();
   },[]);
   useEffect(()=>{
     if(pending)return;
     const controller=new AbortController();
+    let timer:number|undefined;
     const refresh=async()=>{
       try {
-        const next=await api.sampleStatus(controller.signal);
+        const next=await api.invoiceSampleStatus(controller.signal);
         if(controller.signal.aborted)return;
         setStatus(next);setError('');
         if(next.state!=='generating'&&next.state!=='cancelling')return;
-      }catch(e){
+      } catch(e) {
         if(controller.signal.aborted)return;
-        setError(String(e));
-        if(!busy)return;
+        setError(e instanceof Error?e.message:String(e));
+        if(!running)return;
       }
       timer=window.setTimeout(()=>void refresh(),750);
     };
-    let timer=window.setTimeout(()=>void refresh(),0);
+    void refresh();
     return()=>{controller.abort();window.clearTimeout(timer);};
-  },[pending,busy]);
+  },[pending,running]);
   const update=async(action:'start'|'cancel')=>{
     if(command.current)return;
     const controller=new AbortController();
     command.current=controller;
     setPending(true);setError('');
     try {
-      const next=await (action==='start'?api.startSample:api.cancelSample)(controller.signal);
+      const next=await (action==='start'?api.startInvoiceSample:api.cancelInvoiceSample)(controller.signal);
       if(!controller.signal.aborted)setStatus(next);
     } catch(e) {
-      if(!controller.signal.aborted)setError(String(e));
+      if(!controller.signal.aborted)setError(e instanceof Error?e.message:String(e));
     } finally {
       if(!controller.signal.aborted)setPending(false);
       command.current=null;
@@ -74,28 +66,22 @@ export function SampleDemo({onClose,onOpenWorksheet}:{onClose:()=>void;onOpenWor
       </header>
       <section aria-labelledby="gridloom-sample-title" className="border-t pt-4 space-y-3">
         <h3 id="gridloom-sample-title" className="font-semibold">Sample</h3>
-        <p className="text-sm">Explore 10 million synthetic journal entries. SQLite keeps the rows on disk; Gridloom reads only the pages you browse.</p>
-        <p className="text-sm text-slate-600">Allow about 1 GB of free disk space. The sample stays on this computer and won’t change your workbook.</p>
+        <p className="text-sm">Add synthetic invoices to the existing demo table until it has 10 million rows. Existing invoices are kept.</p>
+        <p className="text-sm text-slate-600">Allow roughly 1 GB of free disk space. This updates only <code>SalesDB.invoices</code> on this computer; it doesn’t import the new rows into the worksheet.</p>
         {status?.state==='generating'&&<div className="text-sm space-y-1">
-          <p role="status">{status.phase} · {status.rows_written.toLocaleString()} of {status.target_rows.toLocaleString()} rows</p>
-          <progress className="w-full" aria-label="Sample rows written" max={status.target_rows} value={status.rows_written}/>
+          <p role="status">{status.phase??'Generating'} · {(status.rows_written??0).toLocaleString()} of {(status.target_rows??10_000_000).toLocaleString()} rows</p>
+          <progress className="w-full" aria-label="Invoice sample progress" max={status.target_rows??10_000_000} value={status.rows_written??0}/>
         </div>}
-        {status?.state==='cancelling'&&<p role="status" className="text-sm">Cancelling after the current SQLite step…</p>}
-        {status?.state==='cancelled'&&<p role="status" className="text-sm">Sample generation cancelled. No finished sample was saved.</p>}
+        {status?.state==='cancelling'&&<p role="status" className="text-sm">Cancelling and rolling back…</p>}
+        {status?.state==='cancelled'&&<p role="status" className="text-sm">Generation cancelled. No invoices were added.</p>}
         {status?.state==='failed'&&<p role="alert" className="text-sm text-red-700">{status.message}</p>}
         {error&&<p role="alert" className="text-sm text-red-700">{error}</p>}
-        {status?.state==='ready'&&<div className="bg-slate-100 rounded p-3 text-sm space-y-1">
-          <p><strong>{status.stats.rows.toLocaleString()} rows</strong> · {(status.stats.bytes/1024**2).toFixed(0)} MiB on disk</p>
-          <p>{status.stats.generation_ms===null?'Reused the local sample':`Generated and indexed in ${ms(status.stats.generation_ms)}`}</p>
-          <p>Count and sum: {ms(status.stats.totals_ms)} · total {cents(status.stats.total_cents)}</p>
-          <p>Indexed filter (account 1100, Jan 1–7): {ms(status.stats.filter_ms)} · {status.stats.filtered_rows.toLocaleString()} rows · total {cents(status.stats.filtered_cents)}</p>
-          <p>Indexed lookup of last entry: {ms(status.stats.seek_ms)}</p>
-          <p className="text-xs text-slate-600">SQLite timings measured on this computer. Not a comparison with Excel.</p>
-        </div>}
+        {status?.state==='ready'&&<p role="status" className="bg-slate-100 rounded p-3 text-sm">
+          <strong>{status.rows.toLocaleString()} invoices</strong> in the demo database. {status.added.toLocaleString()} added.
+        </p>}
         <div className="flex flex-wrap gap-2">
-          {status?.state==='ready'?<button onClick={onOpenWorksheet} className="px-3 py-1.5 bg-slate-900 text-white rounded">Open sample worksheet</button>
-          :busy?<button disabled={pending||status?.state==='cancelling'} onClick={()=>void update('cancel')} className="px-3 py-1.5 border rounded disabled:opacity-50">Cancel generation</button>
-          :<button disabled={pending} onClick={()=>void update('start')} className="px-3 py-1.5 bg-slate-900 text-white rounded disabled:opacity-50">Generate 10-million-row sample</button>}
+          {running?<button disabled={pending||status?.state==='cancelling'} onClick={()=>void update('cancel')} className="px-3 py-1.5 border rounded disabled:opacity-50">Cancel generation</button>
+          :<button disabled={pending||(!status&&!!error)} onClick={()=>void update('start')} className="px-3 py-1.5 bg-slate-900 text-white rounded disabled:opacity-50">Generate demo invoices</button>}
         </div>
       </section>
     </section>

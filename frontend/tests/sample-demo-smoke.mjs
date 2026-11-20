@@ -7,69 +7,62 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
-const temp=mkdtempSync(path.join(tmpdir(),'gridloom-sample-ui-'));
-const server=spawn(process.env.GRIDLOOM_SERVER??path.join(root,'target/debug/gridloom-server'),['--port','0','--no-samples'],{
-  cwd:root,env:{...process.env,GRIDLOOM_RECOVERY_DIR:temp},stdio:['ignore','pipe','pipe']
-});
-let log='',browser;
-server.stdout.on('data',d=>log+=d);
-server.stderr.on('data',d=>log+=d);
-try{
-  let base;
-  const deadline=Date.now()+30000;
+const temp=mkdtempSync(path.join(tmpdir(),'gridloom-demo-invoices-'));
+const binary=process.env.GRIDLOOM_SERVER??path.join(root,'target/debug/gridloom-server');
+const args=['--port','0'];
+const options={cwd:temp,env:{...process.env,GRIDLOOM_RECOVERY_DIR:path.join(temp,'recovery'),GRIDLOOM_FRONTEND_DIR:path.join(root,'frontend/dist')},stdio:['ignore','pipe','pipe']};
+let server,browser;
+async function start(){
+  server=spawn(binary,args,options);
+  let log='',base;
+  server.stdout.on('data',d=>log+=d);
+  server.stderr.on('data',d=>log+=d);
+  const deadline=Date.now()+25_000;
   while(Date.now()<deadline && server.exitCode===null && !(base=log.match(/Server running at (http:\/\/127\.0\.0\.1:\d+)/)?.[1]))await new Promise(r=>setTimeout(r,50));
   assert(base,log);
+  return base;
+}
+async function stop(){
+  if(server?.exitCode===null && server.signalCode===null && server.pid){
+    const exited=new Promise(resolve=>server.once('exit',resolve));
+    if(server.kill())await exited;
+  }
+}
+try{
+  let base=await start();
   browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH||(existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined),args:['--no-sandbox']});
   const page=await browser.newPage({locale:'en-US'});
+  async function query(sql){
+    const response=await page.request.post(base+'/api/query/execute',{data:{connection_name:'SalesDB',sql}});
+    assert(response.ok(),await response.text());
+    return (await response.json()).rows;
+  }
+  const original=await query('SELECT * FROM invoices ORDER BY id LIMIT 10');
+  assert.equal(original.length,10);
   await page.goto(base);
   await page.getByRole('tab',{name:'Help',exact:true}).click();
-  await page.getByText('About',{exact:true}).click();
+  await page.getByRole('button',{name:'About',exact:true}).click();
   const about=page.getByRole('dialog',{name:'About Gridloom'});
-  await about.getByRole('button',{name:'Generate 10-million-row sample'}).click();
-  const browse=about.getByRole('button',{name:'Open sample worksheet'});
-  await browse.waitFor({timeout:180_000});
-  assert((await about.innerText()).includes('10,000,000 rows'));
-  await browse.click();
-  const ledger=page.getByRole('region',{name:'Sample ledger rows'});
-  await ledger.getByText(/10,000,000 matching rows/).waitFor({timeout:30_000});
-  await ledger.getByLabel('Go to row').fill('10000000');
-  const [response]=await Promise.all([
-    page.waitForResponse(r=>r.url().endsWith('/api/sample/ledger')&&r.request().postDataJSON().offset===9999900),
-    ledger.getByRole('button',{name:'Go',exact:true}).click(),
-  ]);
-  assert(response.ok(),await response.text());
-  const data=await response.json();
-  assert.equal(data.rows.at(-1)[0],'10000000');
-  assert(data.rows.length<=200);
-  await ledger.getByLabel('Account code').fill('1100');
-  await ledger.getByLabel('From',{exact:true}).fill('2026-01-01');
-  await ledger.getByLabel('Through',{exact:true}).fill('2026-01-07');
-  await ledger.getByRole('button',{name:'Load / reload'}).click();
-  await ledger.getByText(/70,000 matching rows/).waitFor({timeout:30_000});
-  const worksheet=page.getByRole('region',{name:'Sample worksheet'});
-  await worksheet.getByRole('button',{name:'SQL',exact:true}).click();
-  await worksheet.getByRole('button',{name:'Run query'}).click();
-  const results=worksheet.getByRole('table');
-  await results.getByRole('cell',{name:'10000000',exact:true}).waitFor();
-  await worksheet.getByRole('button',{name:'Last entry'}).click();
-  await worksheet.getByRole('button',{name:'Run query'}).click();
-  await results.getByRole('columnheader',{name:'id',exact:true}).waitFor();
-  await results.getByRole('cell',{name:'10000000',exact:true}).waitFor();
-  await worksheet.getByLabel('SQL against the sample').fill('SELECT id FROM entries ORDER BY id');
-  await worksheet.getByRole('button',{name:'Run query'}).click();
-  await worksheet.getByText('Showing the first 200 result rows.').waitFor();
-  assert.equal(await results.getByRole('row').count(),201);
-  await worksheet.getByRole('button',{name:'Back to workbook'}).click();
-  await page.getByRole('button',{name:'Sheet1',exact:true}).waitFor();
-  await page.getByRole('button',{name:'Sample ledger (read-only)',exact:true}).click();
-  await worksheet.getByRole('heading',{name:'Sample worksheet'}).waitFor();
-  const denied=await page.request.post(base+'/api/sample/query',{data:{sql:'DELETE FROM entries'}});
-  assert.equal(denied.status(),400);
-  assert.deepEqual(await (await page.request.get(base+'/api/connections')).json(),[]);
-  console.log('10-million-row sample browser smoke passed');
+  const generate=about.getByRole('button',{name:'Generate demo invoices'});
+  await generate.click();
+  await about.getByText('10,000,000 invoices',{exact:true}).waitFor({timeout:240_000});
+  assert.match(await about.innerText(),/9,999,990 added/);
+  assert.deepEqual(await query('SELECT * FROM invoices ORDER BY id LIMIT 10'),original);
+  const count=await query('SELECT count(*), max(id) FROM invoices');
+  assert.deepEqual(count[0].map(cell=>Number(cell.value)),[10_000_000,10_000_000]);
+  await generate.click();
+  await about.getByText(/database\. 0 added\./).waitFor({timeout:20_000});
+  const summary=await (await page.request.get(base+'/api/workbook')).json();
+  assert.equal(summary.sheets.length,1,'generation should not add a workbook sheet');
+  assert.equal(summary.sheets[0].tables.find(t=>t.name==='Invoices').range.end_row,11);
+  await stop();
+  base=await start();
+  const reopened=await (await page.request.get(base+'/api/workbook')).json();
+  assert.equal(reopened.sheets[0].tables.find(t=>t.name==='Invoices').range.end_row,11,'restart should not load all invoices into the worksheet');
+  assert.equal(Number((await query('SELECT count(*) FROM invoices'))[0][0].value),10_000_000);
+  console.log('PASS: the sample button adds and preserves 10,000,000 invoices in SalesDB, without a new worksheet or eager import.');
 }finally{
   await browser?.close();
-  server.kill();
-  if(server.exitCode===null&&server.signalCode===null)await new Promise(resolve=>server.once('exit',resolve));
+  await stop();
   rmSync(temp,{recursive:true,force:true});
 }
