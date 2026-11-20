@@ -150,6 +150,10 @@ jobs:
         working-directory: frontend
         run: node tests/row-insert-smoke.mjs
 
+      - name: Real browser worksheet tab actions
+        working-directory: frontend
+        run: node tests/sheet-tabs-smoke.mjs
+
       - name: Real browser worksheet sort and filter
         working-directory: frontend
         run: node tests/sort-filter-smoke.mjs

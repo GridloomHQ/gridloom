@@ -68,6 +68,7 @@ export const api = {
     fetchJson<{status: string}>('/api/sheets/insert-rows', {method:'POST', body:JSON.stringify({sheet_name,before_row,count})}),
   selectSheet: (name: string) => fetchJson<{status: string}>('/api/sheets/select', { method: 'POST', body: JSON.stringify({name}) }),
   renameSheet: (old_name: string, new_name: string) => fetchJson<{status: string}>('/api/sheets/rename', { method: 'POST', body: JSON.stringify({old_name,new_name}) }),
+  deleteSheet: (name: string) => fetchJson<{active_sheet: string}>('/api/sheets/delete', { method: 'POST', body: JSON.stringify({name}) }),
   editRange: (sheet_name: string, row: number, col: number, values: string[][]) => fetchJson<{status: string}>('/api/ranges/edit', { method: 'POST', body: JSON.stringify({sheet_name,row,col,values}) }),
   captureRange: (sheet_name:string, range:CellRange) => fetchJson<{values:string[][];snapshot:string}>('/api/ranges/capture',{method:'POST',body:JSON.stringify({sheet_name,range:wireRange(range)})}),
   readRange: (sheet_name: string, range: CellRange) => fetchJson<string[][]>('/api/ranges/read', { method: 'POST', body: JSON.stringify({sheet_name,range:wireRange(range)}) }),

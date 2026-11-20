@@ -277,6 +277,94 @@ impl Workbook {
         self.edit_history = Default::default();
         self.recalculate(new)
     }
+    /// Remove an ordinary worksheet without breaking references or discarding recorded evidence.
+    /// Data sources and pending database edits belong to the workbook, not the sheet.
+    pub fn delete_sheet(&mut self, name: &str) -> Result<(), String> {
+        let removed = self.sheets.get(name).ok_or("Worksheet not found.")?;
+        if self.sheets.len() <= 1 {
+            return Err("Keep at least one worksheet in the workbook.".into());
+        }
+        if self
+            .close_periods
+            .iter()
+            .any(|period| period.sheet_name == name)
+        {
+            return Err(
+                "This worksheet belongs to Monthly close and cannot be deleted here.".into(),
+            );
+        }
+        if self.reviews.iter().any(|review| review.sheet_name == name) {
+            return Err(
+                "This worksheet has recorded reviews or evidence and cannot be deleted.".into(),
+            );
+        }
+
+        let refers_to_removed = |expr: &crate::ast::Expr| {
+            fn check(expr: &crate::ast::Expr, name: &str, removed: &Sheet) -> bool {
+                use crate::ast::Expr;
+                match expr {
+                    Expr::SheetRef { sheet, expr } => sheet == name || check(expr, name, removed),
+                    Expr::StructuredRef(reference) => {
+                        removed.tables.contains_key(&reference.table_name)
+                    }
+                    Expr::Unary { expr, .. } => check(expr, name, removed),
+                    Expr::Binary { left, right, .. } => {
+                        check(left, name, removed) || check(right, name, removed)
+                    }
+                    Expr::FunctionCall { args, .. } => {
+                        args.iter().any(|arg| check(arg, name, removed))
+                    }
+                    Expr::ArrayLiteral(rows) => {
+                        rows.iter().flatten().any(|cell| check(cell, name, removed))
+                    }
+                    _ => false,
+                }
+            }
+            check(expr, name, removed)
+        };
+        let first_reference = self
+            .sheets
+            .iter()
+            .filter(|(sheet, _)| sheet.as_str() != name)
+            .flat_map(|(sheet, data)| {
+                data.cells.values().filter_map(|cell| {
+                    let formula = cell.formula.as_deref()?;
+                    crate::parser::parse_formula(formula)
+                        .ok()
+                        .filter(&refers_to_removed)
+                        .map(|_| (sheet, cell.coord.to_a1()))
+                })
+            })
+            .min();
+        if let Some((sheet, cell)) = first_reference {
+            return Err(format!(
+                "Remove the reference from {sheet}!{cell} before deleting this worksheet."
+            ));
+        }
+
+        let original_sheets = self.sheets.clone();
+        let original_graph = self.dep_graph.clone();
+        let original_stale = self.stale_calculation_sheets.clone();
+        self.sheets.remove(name);
+        self.stale_calculation_sheets.remove(name);
+        let next = if self.active_sheet == name {
+            // Choose the next active worksheet deterministically.
+            self.sheets.keys().min().expect("a sheet remains").clone()
+        } else {
+            self.active_sheet.clone()
+        };
+        if let Err(error) = self.recalculate(&next) {
+            self.sheets = original_sheets;
+            self.dep_graph = original_graph;
+            self.stale_calculation_sheets = original_stale;
+            return Err(format!(
+                "Could not recalculate after removing the worksheet: {error}."
+            ));
+        }
+        self.active_sheet = next;
+        self.clear_edit_history();
+        Ok(())
+    }
     fn commit_cells(
         &mut self,
         name: &str,

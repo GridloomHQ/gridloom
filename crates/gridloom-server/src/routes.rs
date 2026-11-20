@@ -39,6 +39,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/sheets/select", post(select_sheet))
         .route("/api/sheets/insert-rows", post(crate::row_insert::insert_rows))
         .route("/api/sheets/rename", post(rename_sheet))
+        .route("/api/sheets/delete", post(delete_sheet))
         .route("/api/sheets/column-width", post(set_column_width))
         .route("/api/sheets/freeze", post(set_freeze_panes))
         .route("/api/sheets/show-formulas", post(set_show_formulas))
@@ -752,6 +753,14 @@ async fn rename_sheet(
         .rename_sheet(&req.old_name, &req.new_name)
         .map_err(bad_request)?;
     Ok(Json(serde_json::json!({"status":"renamed"})))
+}
+async fn delete_sheet(
+    State(state): State<AppState>,
+    Json(req): Json<SheetNameRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let mut workbook = state.workbook.write().await;
+    workbook.delete_sheet(&req.name).map_err(bad_request)?;
+    Ok(Json(serde_json::json!({"active_sheet":workbook.active_sheet})))
 }
 #[derive(Deserialize)]
 struct EditRangeRequest {
