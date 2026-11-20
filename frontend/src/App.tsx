@@ -482,10 +482,10 @@ export const App: React.FC = () => {
         onRefreshAll={handleRefreshAll}
         onApplyFormat={handleApplyFormat}
         fileExtras={<>
-<button disabled={busy} onClick={()=>void handleRecoverWorkbook()} className="border rounded px-2 py-1">Recover autosave</button>
+        <button disabled={busy} onClick={()=>void handleRecoverWorkbook()} className="border rounded px-2 py-1">Recover autosave</button>
         </>}
         homeExtras={<>
-<button disabled={busy} onClick={()=>setIsFindOpen(true)} className="border rounded px-2 py-1">Find (Ctrl+F)</button>
+        <button disabled={busy} onClick={()=>setIsFindOpen(true)} className="border rounded px-2 py-1">Find (Ctrl+F)</button>
         <PasteControls open={pasteSpecialOpen} onOpen={()=>setPasteSpecialOpen(true)} onClose={()=>setPasteSpecialOpen(false)}
           onPaste={handlePasteSpecial} busy={busy||gridDraft||formulaDraft}
           copySource={clipboard.current ? `${clipboard.current.sheet}!${coordToA1(clipboard.current.range.start.row,clipboard.current.range.start.col)}:${coordToA1(clipboard.current.range.end.row,clipboard.current.range.end.col)}` : null}/>
@@ -500,7 +500,7 @@ export const App: React.FC = () => {
         {activeCellData?.table_name&&!activeCellData.is_table_header&&<button disabled={busy||gridDraft||formulaDraft} onClick={()=>void handleCommitCell(selectedRow,selectedCol,'',true)} className="border rounded px-2 py-1" title="Stage SQL NULL; use a normal edit to enter empty or literal text">Set SQL NULL</button>}
         </>}
         viewExtras={<>
-<form className="flex items-center gap-1" onSubmit={e=>{e.preventDefault();resizeColumn(selectedCol,Number(widthDraft));}}>
+        <form className="flex items-center gap-1" onSubmit={e=>{e.preventDefault();resizeColumn(selectedCol,Number(widthDraft));}}>
           <label htmlFor="column-width">Column {colIndexToName(selectedCol)} width</label><input id="column-width" aria-label="Column width in pixels" type="number" min="48" max="600" step="1" disabled={busy} value={widthDraft} onChange={e=>setWidthDraft(e.target.value)} className="w-16 border rounded p-1"/>
           <span>px</span><button disabled={busy} className="border rounded px-2 py-1">Set width</button><button type="button" disabled={busy} onClick={()=>resizeColumn(selectedCol,null)} className="border rounded px-2 py-1">Reset width</button>
         </form>
