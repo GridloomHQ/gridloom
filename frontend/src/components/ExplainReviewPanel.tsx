@@ -133,7 +133,7 @@ export function ExplainReviewPanel({ drafts, sheetName, row, col, revision, onCl
       {loading && <p role="status">Loading current calculation…</p>}
       {explanation && <>
         <section className="rounded bg-white border p-3 space-y-2"><h3 className="text-slate-500 font-semibold">Current calculated value</h3><p className="text-xl font-mono break-words">{displayValue(explanation.value) || '(blank)'}</p>{explanation.formula && <code className="block break-all text-indigo-800">{explanation.formula}</code>}</section>
-        {signoffBlocked && <p className="text-amber-900">Review is unavailable while this trace is incomplete or has open questions.</p>}
+        {signoffBlocked && <p className="text-amber-900">You can record a question, but cannot mark this calculation reviewed yet.</p>}
         <DependencyNavigation sheetName={sheetName} row={row} col={col} revision={revision} onNavigate={onNavigate} onHighlight={onHighlight} onDrilldown={name => void inspect(async () => {
           const data = await api.getSourceDrilldown(name, 0, 50); if (mounted.current) setDrilldown(data);
         })} />
