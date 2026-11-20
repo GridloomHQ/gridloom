@@ -121,3 +121,38 @@ fn freezing_does_not_replace_or_clear_cell_undo_redo() {
     );
     assert!(wb.sheets["Sheet1"].freeze_first_column);
 }
+
+#[test]
+fn arbitrary_freeze_roundtrips_and_rejects_invalid_axes_atomically() {
+    let mut wb = Workbook::new();
+    wb.add_sheet("Other").unwrap();
+    wb.set_frozen_counts("Sheet1", 8, 4).unwrap();
+    assert!(wb.set_frozen_counts("Sheet1", 0, 100).is_err());
+    assert_eq!(wb.sheets["Sheet1"].frozen_row_count(), 8);
+    assert_eq!(wb.sheets["Sheet1"].frozen_column_count(), 4);
+    assert_eq!(wb.sheets["Other"].frozen_row_count(), 0);
+    wb.set_frozen_counts("Sheet1", 8, 0).unwrap();
+    assert_eq!(wb.sheets["Sheet1"].frozen_column_count(), 0);
+
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("freeze.gridloom");
+    wb.save_to_file(&file).unwrap();
+    let loaded = Workbook::open_from_file(&file).unwrap();
+    assert_eq!(loaded.sheets["Sheet1"].frozen_row_count(), 8);
+    assert_eq!(loaded.sheets["Sheet1"].frozen_column_count(), 0);
+
+    // A legacy payload with only flags still yields the correct effective counts.
+    let legacy = serde_json::json!({
+        "freeze_top_row": true,
+        "freeze_first_column": false
+    });
+    let mut sheet = serde_json::to_value(&loaded.sheets["Sheet1"]).unwrap();
+    sheet.as_object_mut().unwrap().remove("frozen_rows");
+    sheet
+        .as_object_mut()
+        .unwrap()
+        .extend(legacy.as_object().unwrap().clone());
+    let legacy: gridloom_core::workbook::Sheet = serde_json::from_value(sheet).unwrap();
+    assert_eq!(legacy.frozen_row_count(), 1);
+    assert_eq!(legacy.frozen_column_count(), 0);
+}

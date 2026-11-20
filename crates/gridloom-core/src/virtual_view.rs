@@ -47,8 +47,15 @@ pub struct ViewportResponse {
 pub struct ViewportPanesRequest {
     #[serde(flatten)]
     pub viewport: ViewportRequest,
+    #[serde(default)]
     pub freeze_top_row: bool,
+    #[serde(default)]
     pub freeze_first_column: bool,
+    // These counts describe only the visible frozen prefix, not the saved pane split.
+    #[serde(default)]
+    pub visible_frozen_rows: Option<u32>,
+    #[serde(default)]
+    pub visible_frozen_columns: Option<u32>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LoadedRange {
@@ -84,7 +91,7 @@ impl crate::Workbook {
         {
             return Err(crate::CellError::Ref);
         }
-        let bounds = LoadedRange {
+        let mut bounds = LoadedRange {
             start_row: main.start_row.saturating_sub(main.overscan),
             start_col: main.start_col.saturating_sub(main.overscan),
             end_row: main
@@ -96,36 +103,52 @@ impl crate::Workbook {
                 .saturating_add(main.overscan)
                 .min(sheet.max_cols - 1),
         };
-        let count = (u64::from(bounds.end_row - bounds.start_row) + 1)
-            * (u64::from(bounds.end_col - bounds.start_col) + 1);
+        // Skip the portion already covered by the main bounds. The extra strips
+        // and their top-left intersection are non-overlapping.
+        let visible_rows = req
+            .visible_frozen_rows
+            .unwrap_or(u32::from(req.freeze_top_row))
+            .min(sheet.max_rows);
+        let visible_columns = req
+            .visible_frozen_columns
+            .unwrap_or(u32::from(req.freeze_first_column))
+            .min(sheet.max_cols);
+        if visible_rows > bounds.start_row && visible_rows - 1 > bounds.end_row {
+            bounds.end_row = visible_rows - 1;
+        }
+        if visible_columns > bounds.start_col && visible_columns - 1 > bounds.end_col {
+            bounds.end_col = visible_columns - 1;
+        }
+        let top = visible_rows.min(bounds.start_row);
+        let left = visible_columns.min(bounds.start_col);
+        let count = (u64::from(bounds.end_row - bounds.start_row) + 1 + u64::from(top))
+            .saturating_mul(u64::from(bounds.end_col - bounds.start_col) + 1 + u64::from(left));
         if count > 20_000 {
             return Err(crate::CellError::Value);
         }
         let mut ranges = vec![bounds.clone()];
-        let top = req.freeze_top_row && bounds.start_row > 0;
-        let left = req.freeze_first_column && bounds.start_col > 0;
-        if top {
+        if top > 0 {
             ranges.push(LoadedRange {
                 start_row: 0,
-                end_row: 0,
+                end_row: top - 1,
                 start_col: bounds.start_col,
                 end_col: bounds.end_col,
             });
         }
-        if left {
+        if left > 0 {
             ranges.push(LoadedRange {
                 start_row: bounds.start_row,
                 end_row: bounds.end_row,
                 start_col: 0,
-                end_col: 0,
+                end_col: left - 1,
             });
         }
-        if top && left {
+        if top > 0 && left > 0 {
             ranges.push(LoadedRange {
                 start_row: 0,
-                end_row: 0,
+                end_row: top - 1,
                 start_col: 0,
-                end_col: 0,
+                end_col: left - 1,
             });
         }
         let render = |range: &LoadedRange| {

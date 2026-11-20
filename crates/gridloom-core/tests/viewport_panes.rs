@@ -12,6 +12,8 @@ fn req() -> ViewportPanesRequest {
         },
         freeze_top_row: true,
         freeze_first_column: true,
+        visible_frozen_rows: None,
+        visible_frozen_columns: None,
     }
 }
 #[test]
@@ -73,6 +75,41 @@ fn composite_rejects_unbounded_requests_and_clamps_sheet_edges() {
     r.viewport.end_row = 10;
     assert!(wb.get_viewport_panes(&r).is_err());
 }
+#[test]
+fn multiple_frozen_rows_and_columns_are_sparse_and_count_toward_limit() {
+    let mut wb = Workbook::new();
+    for (row, col) in [(2, 3), (2, 50), (500, 3), (500, 50), (200, 20)] {
+        wb.set_cell("Sheet1", CellCoord::new(row, col), "present".into())
+            .unwrap();
+    }
+    let mut r = req();
+    r.visible_frozen_rows = Some(3);
+    r.visible_frozen_columns = Some(4);
+    let result = wb.get_viewport_panes(&r).unwrap();
+    assert_eq!(result.loaded_ranges.len(), 4);
+    assert_eq!(result.viewport.cells.len(), 4);
+    assert_eq!(result.loaded_ranges[3].end_row, 2);
+    assert_eq!(result.loaded_ranges[3].end_col, 3);
+
+    r.viewport.start_row = 0;
+    r.viewport.end_row = 0;
+    r.viewport.start_col = 0;
+    r.viewport.end_col = 0;
+    r.viewport.overscan = 0;
+    let result = wb.get_viewport_panes(&r).unwrap();
+    assert_eq!(result.loaded_ranges.len(), 1);
+    assert_eq!(result.loaded_ranges[0].end_row, 2);
+    assert_eq!(result.loaded_ranges[0].end_col, 3);
+
+    r.viewport.start_row = 499;
+    r.viewport.end_row = 500;
+    r.viewport.start_col = 49;
+    r.viewport.end_col = 50;
+    r.visible_frozen_rows = Some(u32::MAX);
+    r.visible_frozen_columns = Some(u32::MAX);
+    assert!(wb.get_viewport_panes(&r).is_err());
+}
+
 #[test]
 fn frozen_and_scrolling_cells_share_current_staged_overlay() {
     use gridloom_core::db::sqlite::{ColumnMeta, QueryResult};

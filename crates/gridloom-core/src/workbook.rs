@@ -140,6 +140,11 @@ pub struct Sheet {
     pub freeze_top_row: bool,
     #[serde(default)]
     pub freeze_first_column: bool,
+    /// Optional counts distinguish a saved zero from an old workbook with only flags.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frozen_rows: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frozen_columns: Option<u32>,
     #[serde(default)]
     pub show_formulas: bool,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -158,9 +163,23 @@ impl Sheet {
             column_widths: HashMap::new(),
             freeze_top_row: false,
             freeze_first_column: false,
+            frozen_rows: None,
+            frozen_columns: None,
             show_formulas: false,
             ledger_links: HashMap::new(),
         }
+    }
+
+    pub fn frozen_row_count(&self) -> u32 {
+        self.frozen_rows
+            .unwrap_or(u32::from(self.freeze_top_row))
+            .min(self.max_rows.saturating_sub(1))
+    }
+
+    pub fn frozen_column_count(&self) -> u32 {
+        self.frozen_columns
+            .unwrap_or(u32::from(self.freeze_first_column))
+            .min(self.max_cols.saturating_sub(1))
     }
 
     pub fn get_cell(&self, coord: &CellCoord) -> Option<&CellData> {

@@ -131,6 +131,8 @@ struct SheetSummary {
     freeze_top_row: bool,
     show_formulas: bool,
     freeze_first_column: bool,
+    frozen_rows: u32,
+    frozen_columns: u32,
     tables: Vec<gridloom_core::table::WorksheetTable>,
 }
 
@@ -157,6 +159,8 @@ async fn get_workbook_summary(State(state): State<AppState>) -> impl IntoRespons
                 freeze_top_row: s.freeze_top_row,
                 show_formulas: s.show_formulas,
                 freeze_first_column: s.freeze_first_column,
+                frozen_rows: s.frozen_row_count(),
+                frozen_columns: s.frozen_column_count(),
                 tables: s.tables.values().cloned().collect(),
             })
             .collect(),
@@ -1118,20 +1122,44 @@ async fn set_column_width(
 }
 
 #[derive(Deserialize)]
-struct FreezePanesRequest {
-    sheet_name: String,
-    freeze_top_row: bool,
-    freeze_first_column: bool,
+#[serde(untagged)]
+enum FreezePanesRequest {
+    Counts {
+        sheet_name: String,
+        frozen_rows: u32,
+        frozen_columns: u32,
+    },
+    Legacy {
+        sheet_name: String,
+        freeze_top_row: bool,
+        freeze_first_column: bool,
+    },
 }
 async fn set_freeze_panes(
     State(state): State<AppState>,
     Json(req): Json<FreezePanesRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let (sheet_name, rows, columns) = match req {
+        FreezePanesRequest::Counts {
+            sheet_name,
+            frozen_rows,
+            frozen_columns,
+        } => (sheet_name, frozen_rows, frozen_columns),
+        FreezePanesRequest::Legacy {
+            sheet_name,
+            freeze_top_row,
+            freeze_first_column,
+        } => (
+            sheet_name,
+            u32::from(freeze_top_row),
+            u32::from(freeze_first_column),
+        ),
+    };
     state
         .workbook
         .write()
         .await
-        .set_freeze_panes(&req.sheet_name, req.freeze_top_row, req.freeze_first_column)
+        .set_frozen_counts(&sheet_name, rows, columns)
         .map_err(bad_request)?;
     Ok(Json(serde_json::json!({"status":"updated"})))
 }
