@@ -50,7 +50,9 @@ try {
  await cell('B1').click();
  await grid().press('F2');
  const inline=page.getByRole('textbox',{name:'Edit B1',exact:true});
- await inline.fill('=SU');await list.getByRole('option',{name:'SUM',exact:true}).waitFor();
+ await inline.fill('=SU');const sumOption=list.getByRole('option',{name:'SUM',exact:true});await sumOption.waitFor();
+ for(let i=0,n=await list.getByRole('option').count();i<n&&await sumOption.getAttribute('aria-selected')!=='true';i++)await inline.press('ArrowDown');
+ assert.equal(await sumOption.getAttribute('aria-selected'),'true');
  await inline.press('Tab');assert.equal(await inline.inputValue(),'=SUM(');
  const beforeInline=writes;
  await inline.press('ArrowLeft');assert.equal(await inline.inputValue(),'=SUM(A1');

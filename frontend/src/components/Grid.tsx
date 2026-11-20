@@ -302,7 +302,7 @@ export const Grid: React.FC<GridProps> = (props) => {
           onSelect={e=>updateCompletion(e.currentTarget.value,e.currentTarget.selectionStart,e.currentTarget.selectionEnd)}
           onClick={()=>{picked.current=null;}}
           onBlur={()=>{setCompletion(null);void finish(true);}} readOnly={busy}
-          className="h-full w-full px-1 text-xs border-2 border-blue-600 bg-white outline-none"/>
+          className="block h-full w-full px-1 text-xs border-2 border-blue-600 bg-white outline-none"/>
         {showSuggestions&&<div id="inline-function-suggestions" role="listbox" aria-label="Function suggestions"
           className="absolute left-0 z-50 w-64 max-h-40 overflow-y-auto rounded border border-slate-200 bg-white py-1 shadow"
           style={cellTop(selectedRow)-scroll.top>size.height-190?{bottom:H}:{top:H}}>
