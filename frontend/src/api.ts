@@ -45,7 +45,7 @@ let pendingMutations=0;
 const mutationListeners=new Set<()=>void>();
 export const getPendingMutations=()=>pendingMutations;
 export const subscribeMutations=(listener:()=>void)=>{mutationListeners.add(listener);return()=>{mutationListeners.delete(listener);};};
-const readPostPaths=new Set(['/api/ranges/sort-filter','/api/ledger/page','/api/sample','/api/sample/ledger','/api/pivots/refresh','/api/ranges/summary','/api/ranges/capture','/api/ranges/read','/api/cells/find','/api/cells/explain','/api/cells/dependencies','/api/cells/viewport','/api/cells/viewport-panes','/api/query/analyze','/api/writeback/review','/api/benchmark/run']);
+const readPostPaths=new Set(['/api/ranges/sort-filter','/api/ledger/page','/api/sample','/api/sample/ledger','/api/sample/query','/api/pivots/refresh','/api/ranges/summary','/api/ranges/capture','/api/ranges/read','/api/cells/find','/api/cells/explain','/api/cells/dependencies','/api/cells/viewport','/api/cells/viewport-panes','/api/query/analyze','/api/writeback/review','/api/benchmark/run']);
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const changing=!!options?.method && options.method!=='GET' && !readPostPaths.has(url);
   if(changing){pendingMutations++;mutationListeners.forEach(listener=>listener());}
@@ -116,6 +116,7 @@ export const api = {
   sampleStatus: (signal?:AbortSignal) => fetchJson<SampleStatus>('/api/sample',{signal}),
   startSample: (signal?:AbortSignal) => fetchJson<SampleStatus>('/api/sample',{method:'POST', signal}),
   cancelSample: (signal?:AbortSignal) => fetchJson<SampleStatus>('/api/sample',{method:'DELETE', signal}),
+  sampleQuery: (sql:string, signal?:AbortSignal) => fetchJson<{columns:string[]; rows:(string|null)[][]; truncated:boolean}>('/api/sample/query',{method:'POST',body:JSON.stringify({sql}),signal}),
   samplePage: (input:LedgerRequest, signal?:AbortSignal) => fetchJson<LedgerPage>('/api/sample/ledger',{method:'POST',body:JSON.stringify(input),signal}),
   ledgerPage: (input: LedgerRequest, signal?: AbortSignal) => fetchJson<LedgerPage>("/api/ledger/page", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(input), signal}),
   getConnections: () => fetchJson<{ name: string; kind: string; path: string }[]>('/api/connections'),

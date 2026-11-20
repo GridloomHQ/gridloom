@@ -2,7 +2,6 @@ import {version} from '../../package.json';
 import {useEffect,useRef,useState} from 'react';
 import {api} from '../api';
 import type {SampleStatus} from '../api';
-import {LedgerPanel} from './LedgerPanel';
 
 const ms=(value:number)=>value>=1000?`${(value/1000).toFixed(2)} s`:`${value.toFixed(1)} ms`;
 function cents(value:string){
@@ -11,11 +10,10 @@ function cents(value:string){
   return `${amount<0n?'−':''}${(whole/100n).toLocaleString()}.${(whole%100n).toString().padStart(2,'0')}`;
 }
 
-export function SampleDemo({onClose}:{onClose:()=>void}){
+export function SampleDemo({onClose,onOpenWorksheet}:{onClose:()=>void;onOpenWorksheet:()=>void}){
   const [status,setStatus]=useState<SampleStatus|null>(null);
   const [pending,setPending]=useState(false);
   const [error,setError]=useState('');
-  const [ledger,setLedger]=useState(false);
   const closeButton=useRef<HTMLButtonElement|null>(null);
   const command=useRef<AbortController|null>(null);
   const busy=status?.state==='generating'||status?.state==='cancelling';
@@ -23,11 +21,10 @@ export function SampleDemo({onClose}:{onClose:()=>void}){
     command.current?.abort();
   },[]);
   useEffect(()=>{
-    if(ledger)return;
     closeButton.current?.focus();
-  },[ledger]);
+  },[]);
   useEffect(()=>{
-    if(pending||ledger)return;
+    if(pending)return;
     const controller=new AbortController();
     const refresh=async()=>{
       try {
@@ -44,7 +41,7 @@ export function SampleDemo({onClose}:{onClose:()=>void}){
     };
     let timer=window.setTimeout(()=>void refresh(),0);
     return()=>{controller.abort();window.clearTimeout(timer);};
-  },[pending,busy,ledger]);
+  },[pending,busy]);
   const update=async(action:'start'|'cancel')=>{
     if(command.current)return;
     const controller=new AbortController();
@@ -60,7 +57,6 @@ export function SampleDemo({onClose}:{onClose:()=>void}){
       command.current=null;
     }
   };
-  if(ledger)return <LedgerPanel sample onClose={()=>setLedger(false)}/>;
   return <div className="fixed inset-0 z-50 flex justify-center items-center bg-black/30 p-4" onKeyDown={e=>{
     e.stopPropagation();
     if(e.key==='Escape')onClose();
@@ -97,7 +93,7 @@ export function SampleDemo({onClose}:{onClose:()=>void}){
           <p className="text-xs text-slate-600">SQLite timings measured on this computer. Not a comparison with Excel.</p>
         </div>}
         <div className="flex flex-wrap gap-2">
-          {status?.state==='ready'?<button onClick={()=>setLedger(true)} className="px-3 py-1.5 bg-slate-900 text-white rounded">Browse sample ledger</button>
+          {status?.state==='ready'?<button onClick={onOpenWorksheet} className="px-3 py-1.5 bg-slate-900 text-white rounded">Open sample worksheet</button>
           :busy?<button disabled={pending||status?.state==='cancelling'} onClick={()=>void update('cancel')} className="px-3 py-1.5 border rounded disabled:opacity-50">Cancel generation</button>
           :<button disabled={pending} onClick={()=>void update('start')} className="px-3 py-1.5 bg-slate-900 text-white rounded disabled:opacity-50">Generate 10-million-row sample</button>}
         </div>
