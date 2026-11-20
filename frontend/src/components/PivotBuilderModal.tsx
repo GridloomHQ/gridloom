@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, PieChart, RefreshCw, Table as TableIcon } from 'lucide-react';
 import { api } from '../api';
 import { PivotAggregation, PivotDefinition, PivotResult, WorksheetTable } from '../types';
+import { FieldWells } from './FieldWells';
 import { displayValue } from '../utils/values';
 
 interface PivotBuilderModalProps {
@@ -15,7 +16,8 @@ export const PivotBuilderModal: React.FC<PivotBuilderModalProps> = ({ isOpen, on
   const [selected, setSelected] = useState<PivotDefinition | null>(null);
   const [pivotName, setPivotName] = useState('');
   const [sourceTable, setSourceTable] = useState('');
-  const [rowField, setRowField] = useState('');
+  const [rowFields, setRowFields] = useState<string[]>([]);
+  const [colFields, setColFields] = useState<string[]>([]);
   const [valField, setValField] = useState('');
   const [aggregation, setAggregation] = useState<PivotAggregation>('Sum');
   const [loading, setLoading] = useState(false);
@@ -33,7 +35,8 @@ export const PivotBuilderModal: React.FC<PivotBuilderModalProps> = ({ isOpen, on
     setError(null);
     setPivotName('');
     setSourceTable('');
-    setRowField('');
+    setRowFields([]);
+    setColFields([]);
     setValField('');
     setAggregation('Sum');
     setLoading(true);
@@ -49,7 +52,8 @@ export const PivotBuilderModal: React.FC<PivotBuilderModalProps> = ({ isOpen, on
   const setTable = (name: string) => {
     setSourceTable(name);
     const cols = tables.find(t => t.name === name)?.columns ?? [];
-    setRowField(cols[0] ?? '');
+    setRowFields(cols[0] ? [cols[0]] : []);
+    setColFields([]);
     setValField(cols[cols.length - 1] ?? '');
   };
 
@@ -70,6 +74,9 @@ export const PivotBuilderModal: React.FC<PivotBuilderModalProps> = ({ isOpen, on
     setSelected(def);
     setResult(null);
     if (!def) {
+      request.current?.abort();
+      setLoading(false);
+      setError(null);
       setPivotName('');
       setTable('');
       setAggregation('Sum');
@@ -77,7 +84,8 @@ export const PivotBuilderModal: React.FC<PivotBuilderModalProps> = ({ isOpen, on
     }
     setPivotName(def.name);
     setSourceTable(tables.find(t => t.source_name === def.source_table)?.name ?? '');
-    setRowField(def.row_fields[0] ?? '');
+    setRowFields(def.row_fields);
+    setColFields(def.col_fields);
     setValField(def.value_field);
     setAggregation(def.aggregation);
     const controller = begin();
@@ -92,14 +100,14 @@ export const PivotBuilderModal: React.FC<PivotBuilderModalProps> = ({ isOpen, on
   };
 
   const handleSave = async () => {
-    if (!table || !rowField || !valField || !pivotName.trim()) return;
+    if (!table || !valField || !pivotName.trim()) return;
     const controller = begin();
     try {
       const def: PivotDefinition = {
         name: pivotName.trim(),
         source_table: table.source_name,
-        row_fields: [rowField, ...(selected?.source_table === table.source_name ? selected.row_fields.slice(1) : [])],
-        col_fields: selected?.source_table === table.source_name ? selected.col_fields : [],
+        row_fields: rowFields,
+        col_fields: colFields,
         value_field: valField,
         aggregation,
       };
@@ -134,16 +142,11 @@ export const PivotBuilderModal: React.FC<PivotBuilderModalProps> = ({ isOpen, on
 
   const selectClass = 'w-full px-2.5 py-1.5 border border-slate-300 rounded bg-white text-xs';
   const buttonClass = 'px-3 py-2 border border-slate-300 rounded font-semibold disabled:opacity-50';
-  const optionalField = (label: string, value: string, onChange: (value: string) => void) => (
-    <label>{label}<select className={selectClass} value={value} onChange={e => onChange(e.target.value)}>
-      <option value="">Choose a field</option>
-      {columns.map(column => <option key={column}>{column}</option>)}
-    </select></label>
-  );
   const nameInUse = saved.some(p => p.name === pivotName.trim() && p.name !== selected?.name);
   const draftChanged = selected && (
     pivotName !== selected.name || (table && table.source_name !== selected.source_table) ||
-    rowField !== (selected.row_fields[0] ?? '') || valField !== selected.value_field || aggregation !== selected.aggregation
+    JSON.stringify(rowFields) !== JSON.stringify(selected.row_fields) ||
+    JSON.stringify(colFields) !== JSON.stringify(selected.col_fields) || valField !== selected.value_field || aggregation !== selected.aggregation
   );
 
   return (
@@ -172,13 +175,15 @@ export const PivotBuilderModal: React.FC<PivotBuilderModalProps> = ({ isOpen, on
               <option value="">{selected ? selected.source_table + ' (saved source)' : 'Choose a table'}</option>
               {tables.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
             </select></label>
-            {optionalField('Row dimension', rowField, setRowField)}
-            {optionalField('Value field', valField, setValField)}
+            <FieldWells columns={columns} wells={[
+              {label: 'Rows', fields: rowFields, onChange: setRowFields, multiple: true},
+              {label: 'Columns', fields: colFields, onChange: setColFields, multiple: true},
+              {label: 'Values', fields: valField ? [valField] : [], onChange: fields => setValField(fields[0] ?? '')},
+            ]} />
             <label>Aggregation<select className={selectClass} value={aggregation} onChange={e => setAggregation(e.target.value as PivotAggregation)}>
               {(['Sum', 'Count', 'Average', 'Min', 'Max'] as const).map(item => <option key={item}>{item}</option>)}
             </select></label>
-            {Boolean(selected?.col_fields.length) && <p>Column grouping is not yet shown; the saved definition is retained.</p>}
-            <button className={buttonClass} onClick={() => void handleSave()} disabled={!table || !columns.includes(rowField) || !columns.includes(valField) || !pivotName.trim() || nameInUse}>
+            <button className={buttonClass} onClick={() => void handleSave()} disabled={!table || ![...rowFields, ...colFields, valField].every(field => columns.includes(field)) || !pivotName.trim() || nameInUse}>
               {pivotName.trim() === selected?.name ? 'Update layout and preview' : 'Save and preview'}
             </button>
             <button className={buttonClass} onClick={() => void handleRefresh()} disabled={!selected}>
