@@ -116,9 +116,22 @@ fn main() -> anyhow::Result<()> {
         println!("Gridloom native window constructed.");
 
         let webview_url = format!("http://127.0.0.1:{}", actual_port);
-        let _webview = WebViewBuilder::new()
-            .with_url(&webview_url)
-            .build(&window)?;
+        let builder = WebViewBuilder::new().with_url(&webview_url);
+
+        // Wry's raw window handle builder accepts only X11 on Linux. Tao's GTK
+        // container embeds WebKitGTK on both Wayland and X11.
+        #[cfg(target_os = "linux")]
+        let _webview = {
+            use tao::platform::unix::WindowExtUnix;
+            use wry::WebViewBuilderExtUnix;
+
+            let container = window
+                .default_vbox()
+                .ok_or_else(|| anyhow::anyhow!("Gridloom native window has no GTK container"))?;
+            builder.build_gtk(container)?
+        };
+        #[cfg(not(target_os = "linux"))]
+        let _webview = builder.build(&window)?;
         println!("Gridloom native webview initialized.");
 
         event_loop.run(move |event, _, control_flow| {
