@@ -158,7 +158,7 @@ Set `GRIDLOOM_RECOVERY_DIR` to choose a private recovery directory. By default i
 - **Protect the files.** Workbooks and embedded evidence are unencrypted. Connection paths refer to the machine running the server; source databases are not embedded backups. Keep the local service private rather than exposing it as a multi-user server.
 - **Save deliberately.** Use Save or Save As for your named workbook. Recovery may not include changes made just before a crash, and there is no universal native-window-close guard.
 - **Know the scale.** The grid is virtualized. SQL results imported into worksheet tables are fully materialized; the read-only SQLite ledger view loads pages instead. Source refresh is explicit, not automatic monitoring. Find and bulk worksheet operations have bounded limits.
-- **Standards are not implemented.** IFRS/XBRL taxonomy validation and an add-on system are not current capabilities.
+- **Extensions.** Monthly close is a built-in opt-in add-on. Third-party add-on installation and IFRS/XBRL taxonomy validation are not available.
 
 ## Development and verification
 
