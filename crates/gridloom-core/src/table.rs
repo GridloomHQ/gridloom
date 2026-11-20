@@ -2,6 +2,7 @@ use crate::ast::StructuredRef;
 use crate::db::sqlite::QueryResult;
 use crate::error::CellError;
 use crate::lineage::LineageReport;
+use crate::spreadsheet::CellStyle;
 use crate::value::{CellCoord, CellRange, Value};
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +23,36 @@ pub struct NamedSource {
     pub lineage: Option<LineageReport>,
 }
 
+/// Each change is a rectangle relative to the table, not one entry per cell.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct TableFormat {
+    pub range: CellRange,
+    /// When applied to an entire data column, include rows added by future refreshes.
+    pub through_end: bool,
+    pub change: FormatChange,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) enum FormatChange {
+    Style(CellStyle),
+    Bold(bool),
+    Italic(bool),
+    Fill(Option<String>),
+    NumberFormat(String),
+}
+
+impl FormatChange {
+    pub(crate) fn apply(&self, style: &mut CellStyle) {
+        match self {
+            Self::Style(value) => *style = value.clone(),
+            Self::Bold(value) => style.bold = *value,
+            Self::Italic(value) => style.italic = *value,
+            Self::Fill(value) => style.fill = value.clone(),
+            Self::NumberFormat(value) => style.number_format = Some(value.clone()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorksheetTable {
     pub name: String,
@@ -31,6 +62,8 @@ pub struct WorksheetTable {
     pub columns: Vec<String>,
     pub has_headers: bool,
     pub has_totals: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) formats: Vec<TableFormat>,
 }
 
 impl WorksheetTable {
@@ -58,7 +91,27 @@ impl WorksheetTable {
             columns,
             has_headers: true,
             has_totals: false,
+            formats: Vec::new(),
         }
+    }
+
+    pub(crate) fn cell_style(&self, coord: CellCoord) -> CellStyle {
+        let row = coord.row - self.anchor.row;
+        let col = coord.col - self.anchor.col;
+        let mut style = CellStyle {
+            bold: row == 0,
+            ..CellStyle::default()
+        };
+        for format in &self.formats {
+            if row >= format.range.start_row
+                && (format.through_end || row <= format.range.end_row)
+                && col >= format.range.start_col
+                && col <= format.range.end_col
+            {
+                format.change.apply(&mut style);
+            }
+        }
+        style
     }
 
     /// Resolve a structured reference such as Invoices[Amount] into a CellRange

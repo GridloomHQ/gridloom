@@ -468,6 +468,8 @@ impl Workbook {
             }
         }
 
+        sheet.max_rows = sheet.max_rows.max(table.range.end_row + 1);
+        sheet.max_cols = sheet.max_cols.max(table.range.end_col + 1);
         sheet.tables.insert(table_name.to_string(), table.clone());
         self.recalculate(sheet_name)?;
         self.invalidate_changed_reviews();
@@ -703,6 +705,8 @@ impl Workbook {
                 }
 
                 if let Some((table, is_header)) = table_hit {
+                    let style = table.cell_style(coord);
+                    let number_format = style.number_format.clone();
                     let col_offset = (coord.col - table.anchor.col) as usize;
                     if is_header {
                         let col_name = table.columns.get(col_offset).cloned().unwrap_or_default();
@@ -710,12 +714,12 @@ impl Workbook {
                             a1.clone(),
                             CellRenderData {
                                 raw_input: None,
-                                style: Default::default(),
+                                style,
                                 coord,
                                 display_text: col_name.clone(),
                                 raw_value: Value::Text(col_name),
                                 formula: None,
-                                number_format: None,
+                                number_format,
                                 is_staged: false,
                                 is_spill: false,
                                 is_error: false,
@@ -772,12 +776,12 @@ impl Workbook {
                                         a1.clone(),
                                         CellRenderData {
                                             raw_input: None,
-                                            style: Default::default(),
+                                            style,
                                             coord,
-                                            display_text: val.to_string_repr(),
+                                            display_text: crate::spreadsheet::format_value(&val, number_format.as_deref()),
                                             raw_value: val,
                                             formula: None,
-                                            number_format: None,
+                                            number_format,
                                             is_staged,
                                             is_spill: false,
                                             is_error: false,
@@ -789,6 +793,27 @@ impl Workbook {
                                 }
                             }
                         }
+
+                        // An empty result still reserves a body row; its formatting is live
+                        // even before the next refresh supplies rows.
+                        cells_data.insert(
+                            a1.clone(),
+                            CellRenderData {
+                                raw_input: None,
+                                style,
+                                coord,
+                                display_text: String::new(),
+                                raw_value: Value::Blank,
+                                formula: None,
+                                number_format,
+                                is_staged: false,
+                                is_spill: false,
+                                is_error: false,
+                                table_name: Some(table.name.clone()),
+                                is_table_header: false,
+                            },
+                        );
+                        continue;
                     }
                 }
 

@@ -1,4 +1,5 @@
 //! Atomic worksheet operations. History never restores database writes, evidence or reviews.
+use crate::table::{FormatChange, TableFormat};
 use crate::workbook::{CellData, Sheet};
 use crate::{CellCoord, CellError, CellRange, Value, Workbook};
 use serde::{Deserialize, Serialize};
@@ -33,6 +34,7 @@ struct CellChange {
     sheet: String,
     before: HashMap<String, Option<CellData>>,
     after: HashMap<String, Option<CellData>>,
+    table_formats: Vec<(String, TableFormat)>,
 }
 
 pub fn format_value(value: &Value, format: Option<&str>) -> String {
@@ -58,6 +60,63 @@ pub fn format_value(value: &Value, format: Option<&str>) -> String {
         Some("$0.00") | Some("currency") => format!("$ {:.2}", n),
         _ => value.to_string_repr(),
     }
+}
+fn valid_fill(value: &str) -> bool {
+    value.len() == 7 && value.starts_with('#') && value[1..].bytes().all(|b| b.is_ascii_hexdigit())
+}
+fn valid_number_format(value: &str) -> bool {
+    [
+        "general", "number", "percent", "currency", "0.00", "0%", "0.00%", "$0.00",
+    ]
+    .contains(&value)
+}
+fn intersection(a: CellRange, b: CellRange) -> CellRange {
+    CellRange::new(
+        a.start_row.max(b.start_row),
+        a.start_col.max(b.start_col),
+        a.end_row.min(b.end_row),
+        a.end_col.min(b.end_col),
+    )
+}
+fn without(block: CellRange, area: CellRange) -> Vec<CellRange> {
+    if !block.intersects(&area) {
+        return vec![block];
+    }
+    let cut = intersection(block, area);
+    let mut remains = Vec::new();
+    if block.start_row < cut.start_row {
+        remains.push(CellRange::new(
+            block.start_row,
+            block.start_col,
+            cut.start_row - 1,
+            block.end_col,
+        ));
+    }
+    if cut.end_row < block.end_row {
+        remains.push(CellRange::new(
+            cut.end_row + 1,
+            block.start_col,
+            block.end_row,
+            block.end_col,
+        ));
+    }
+    if block.start_col < cut.start_col {
+        remains.push(CellRange::new(
+            cut.start_row,
+            block.start_col,
+            cut.end_row,
+            cut.start_col - 1,
+        ));
+    }
+    if cut.end_col < block.end_col {
+        remains.push(CellRange::new(
+            cut.start_row,
+            cut.end_col + 1,
+            cut.end_row,
+            block.end_col,
+        ));
+    }
+    remains
 }
 fn coords(range: CellRange) -> Result<Vec<CellCoord>, CellError> {
     if range.start_row > range.end_row || range.start_col > range.end_col {
@@ -239,26 +298,30 @@ impl Workbook {
             return Err(e);
         }
         if history {
-            self.edit_history.undo.push(CellChange {
+            self.record_cell_change(CellChange {
                 sheet: name.into(),
                 before,
                 after,
+                table_formats: Vec::new(),
             });
-            while self.edit_history.undo.len() > 100
-                || self
-                    .edit_history
-                    .undo
-                    .iter()
-                    .map(|c| c.before.len() + c.after.len())
-                    .sum::<usize>()
-                    > 100_000
-            {
-                self.edit_history.undo.remove(0);
-            }
-            self.edit_history.redo.clear();
         }
         self.invalidate_changed_reviews();
         Ok(())
+    }
+    fn record_cell_change(&mut self, change: CellChange) {
+        self.edit_history.undo.push(change);
+        while self.edit_history.undo.len() > 100
+            || self
+                .edit_history
+                .undo
+                .iter()
+                .map(|c| c.before.len() + c.after.len() + c.table_formats.len())
+                .sum::<usize>()
+                > 100_000
+        {
+            self.edit_history.undo.remove(0);
+        }
+        self.edit_history.redo.clear();
     }
     fn clipboard_viewport(
         &self,
@@ -348,48 +411,17 @@ impl Workbook {
         attribute: &str,
         value: &str,
     ) -> Result<(), CellError> {
-        match attribute {
-            "bold" | "italic" if matches!(value, "true" | "false") => {}
-            "fill"
-                if value.is_empty()
-                    || (value.len() == 7
-                        && value.starts_with('#')
-                        && value[1..].bytes().all(|b| b.is_ascii_hexdigit())) => {}
-            "number_format"
-                if [
-                    "general", "number", "percent", "currency", "0.00", "0%", "0.00%", "$0.00",
-                ]
-                .contains(&value) => {}
+        let change = match attribute {
+            "bold" if matches!(value, "true" | "false") => FormatChange::Bold(value == "true"),
+            "italic" if matches!(value, "true" | "false") => FormatChange::Italic(value == "true"),
+            "fill" if value.is_empty() => FormatChange::Fill(None),
+            "fill" if valid_fill(value) => FormatChange::Fill(Some(value.into())),
+            "number_format" if valid_number_format(value) => {
+                FormatChange::NumberFormat(value.into())
+            }
             _ => return Err(CellError::Value),
-        }
-        let sheet = self.sheets.get(name).ok_or(CellError::Ref)?;
-        let changes = coords(range)?
-            .into_iter()
-            .map(|coord| {
-                let mut data = sheet
-                    .get_cell(&coord)
-                    .cloned()
-                    .unwrap_or_else(|| CellData::new(coord, String::new()));
-                match attribute {
-                    "bold" => data.style.bold = value == "true",
-                    "italic" => data.style.italic = value == "true",
-                    "fill" => {
-                        data.style.fill = if value.is_empty() {
-                            None
-                        } else {
-                            Some(value.into())
-                        }
-                    }
-                    "number_format" => {
-                        data.style.number_format = Some(value.into());
-                        data.number_format = Some(value.into());
-                    }
-                    _ => unreachable!(),
-                }
-                (coord, Some(data))
-            })
-            .collect();
-        self.commit_cells(name, changes, true)
+        };
+        self.apply_range_format(name, range, change)
     }
     pub fn format_range(
         &mut self,
@@ -397,33 +429,108 @@ impl Workbook {
         range: CellRange,
         style: CellStyle,
     ) -> Result<(), CellError> {
-        if style.fill.as_ref().is_some_and(|s| {
-            s.len() != 7 || !s.starts_with('#') || !s[1..].bytes().all(|b| b.is_ascii_hexdigit())
-        }) {
+        if style
+            .fill
+            .as_deref()
+            .is_some_and(|value| !valid_fill(value))
+            || style
+                .number_format
+                .as_deref()
+                .is_some_and(|value| !valid_number_format(value))
+        {
             return Err(CellError::Value);
         }
-        if style.number_format.as_ref().is_some_and(|s| {
-            ![
-                "general", "number", "percent", "currency", "0.00", "0%", "0.00%", "$0.00",
-            ]
-            .contains(&s.as_str())
-        }) {
-            return Err(CellError::Value);
-        }
+        self.apply_range_format(name, range, FormatChange::Style(style))
+    }
+
+    fn apply_range_format(
+        &mut self,
+        name: &str,
+        range: CellRange,
+        change: FormatChange,
+    ) -> Result<(), CellError> {
         let sheet = self.sheets.get(name).ok_or(CellError::Ref)?;
-        let changes = coords(range)?
-            .into_iter()
-            .map(|coord| {
+        if range.start_row > range.end_row
+            || range.start_col > range.end_col
+            || range.end_row >= sheet.max_rows
+            || range.end_col >= sheet.max_cols
+        {
+            return Err(CellError::Ref);
+        }
+
+        // Cut table rectangles out of the ordinary selection without visiting table rows.
+        let mut ordinary = vec![range];
+        let mut table_formats = Vec::new();
+        for (name, table) in &sheet.tables {
+            if !table.range.intersects(&range) {
+                continue;
+            }
+            let area = intersection(range, table.range);
+            let anchor = table.anchor;
+            let start_row = area.start_row - anchor.row;
+            table_formats.push((
+                name.clone(),
+                TableFormat {
+                    range: CellRange::new(
+                        start_row,
+                        area.start_col - anchor.col,
+                        area.end_row - anchor.row,
+                        area.end_col - anchor.col,
+                    ),
+                    // A point edit remains a point edit, even for a one-row result.
+                    through_end: start_row <= 1
+                        && area.end_row == table.range.end_row
+                        && area.start_row < area.end_row,
+                    change: change.clone(),
+                },
+            ));
+            ordinary = ordinary
+                .into_iter()
+                .flat_map(|block| without(block, area))
+                .collect();
+        }
+        let mut count: u64 = 0;
+        let mut changes = Vec::new();
+        for block in ordinary {
+            count = count.saturating_add(u64::from(block.width()) * u64::from(block.height()));
+            if count > 10_000 {
+                return Err(CellError::Value);
+            }
+            for coord in coords(block)? {
                 let mut data = sheet
                     .get_cell(&coord)
                     .cloned()
                     .unwrap_or_else(|| CellData::new(coord, String::new()));
-                data.style = style.clone();
-                data.number_format = style.number_format.clone();
-                (coord, Some(data))
-            })
-            .collect();
-        self.commit_cells(name, changes, true)
+                // Older workbooks can store the number format only in CellData.
+                data.style.number_format = data.style.number_format.or(data.number_format);
+                change.apply(&mut data.style);
+                data.number_format = data.style.number_format.clone();
+                changes.push((coord, Some(data)));
+            }
+        }
+
+        if changes.is_empty() {
+            self.record_cell_change(CellChange {
+                sheet: name.into(),
+                before: HashMap::new(),
+                after: HashMap::new(),
+                table_formats: Vec::new(),
+            });
+        } else {
+            // Validate and commit the whole ordinary portion before changing presentation.
+            self.commit_cells(name, changes, true)?;
+        }
+        let sheet = self.sheets.get_mut(name).unwrap();
+        for (table, format) in &table_formats {
+            sheet
+                .tables
+                .get_mut(table)
+                .unwrap()
+                .formats
+                .push(format.clone());
+        }
+        self.edit_history.undo.last_mut().unwrap().table_formats = table_formats;
+        Ok(())
     }
     pub fn capture_range(&self, name: &str, range: CellRange) -> Result<RangeCapture, CellError> {
         use sha2::{Digest, Sha256};
@@ -440,7 +547,7 @@ impl Workbook {
                 viewport
                     .cells
                     .get(&c.to_a1())
-                    .map(|c| (&c.raw_value, c.is_staged))
+                    .map(|c| (&c.raw_value, c.is_staged, &c.style, &c.number_format))
             })
             .collect();
         let bytes = serde_json::to_vec(&(name, range, &values, cells, observed))
@@ -511,15 +618,16 @@ impl Workbook {
                 }
                 let materialized = source_is_materialized(source, coord);
                 let data = if materialized {
-                    let value = viewport
-                        .cells
-                        .get(&coord.to_a1())
-                        .map(|c| c.raw_value.clone())
-                        .unwrap_or(Value::Blank);
+                    let rendered = viewport.cells.get(&coord.to_a1());
+                    let value = rendered.map(|c| c.raw_value.clone()).unwrap_or(Value::Blank);
                     let mut data = CellData::new(coord, value.to_string_repr());
                     data.formula = None;
                     data.evaluated_value = value;
                     data.is_dirty = false;
+                    if let Some(cell) = rendered.filter(|c| c.table_name.is_some()) {
+                        data.style = cell.style.clone();
+                        data.number_format = cell.number_format.clone();
+                    }
                     Some(data)
                 } else {
                     source.get_cell(&coord).cloned()
@@ -682,7 +790,7 @@ impl Workbook {
             .iter()
             .map(|(key, data)| Ok((CellCoord::from_a1(key)?, data.clone())))
             .collect::<Result<Vec<_>, CellError>>()?;
-        if let Err(e) = self.commit_cells(&change.sheet, edits, false) {
+        if let Err(e) = self.replay_cell_change(&change, edits, false) {
             self.edit_history.undo.push(change);
             return Err(e);
         }
@@ -696,11 +804,42 @@ impl Workbook {
             .iter()
             .map(|(key, data)| Ok((CellCoord::from_a1(key)?, data.clone())))
             .collect::<Result<Vec<_>, CellError>>()?;
-        if let Err(e) = self.commit_cells(&change.sheet, edits, false) {
+        if let Err(e) = self.replay_cell_change(&change, edits, true) {
             self.edit_history.redo.push(change);
             return Err(e);
         }
         self.edit_history.undo.push(change);
+        Ok(())
+    }
+
+    fn replay_cell_change(
+        &mut self,
+        change: &CellChange,
+        edits: Vec<(CellCoord, Option<CellData>)>,
+        redo: bool,
+    ) -> Result<(), CellError> {
+        let sheet = self.sheets.get(&change.sheet).ok_or(CellError::Ref)?;
+        for (name, _) in &change.table_formats {
+            if !sheet
+                .tables
+                .get(name)
+                .is_some_and(|table| redo || !table.formats.is_empty())
+            {
+                return Err(CellError::Ref);
+            }
+        }
+        if !edits.is_empty() {
+            self.commit_cells(&change.sheet, edits, false)?;
+        }
+        let sheet = self.sheets.get_mut(&change.sheet).unwrap();
+        for (name, format) in &change.table_formats {
+            let formats = &mut sheet.tables.get_mut(name).unwrap().formats;
+            if redo {
+                formats.push(format.clone());
+            } else {
+                formats.pop();
+            }
+        }
         Ok(())
     }
 }
