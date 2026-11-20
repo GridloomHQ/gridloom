@@ -5,7 +5,7 @@ import {SelectionSummary} from './components/SelectionSummary';
 import {isCellLoaded} from './utils/frozenViewport';
 import { FindPanel, FindMatch } from './components/FindPanel';
 import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
-import { normalizedRange, encodeTsv, decodeTsv, boundedRangeDimensions, GridRange } from './utils/selection';
+import { normalizedRange, encodeTsv, decodeTsv, boundedRangeDimensions, ordinaryFormatRangeIsBounded, GridRange } from './utils/selection';
 import { displayValue } from './utils/values';
 import { ExplainReviewPanel } from './components/ExplainReviewPanel';
 import { OpenQuestions } from './components/OpenQuestions';
@@ -95,7 +95,8 @@ export const App: React.FC = () => {
   const [widthDraft,setWidthDraft]=useState('110');
   const columnWidths=sheetWidths[sheetName]??{};
   useEffect(()=>setWidthDraft(String(columnWidths[selectedCol]??110)),[sheetName,selectedCol,sheetWidths]);
-  const [tables, setTables] = useState<WorksheetTable[]>([]);
+  const [tableMetadata, setTableMetadata] = useState<{sheet: string; tables: WorksheetTable[]} | null>(null);
+  const tables = tableMetadata?.sheet === sheetName ? tableMetadata.tables : [];
 
   // Visible bounds
   const [visibleBounds, setVisibleBounds] = useState({
@@ -139,7 +140,7 @@ export const App: React.FC = () => {
         setSheetShowFormulas(Object.fromEntries(wb.sheets.map(s=>[s.name,s.show_formulas??false])));
         setSheetFreeze(Object.fromEntries(wb.sheets.map(s=>[s.name,{rows:s.frozen_rows??Number(!!s.freeze_top_row),columns:s.frozen_columns??Number(!!s.freeze_first_column)}])));
         setSheetWidths(Object.fromEntries(wb.sheets.map(s=>[s.name,s.column_widths??{}])));
-        setTables(wb.sheets.find(s => s.name === wb.active_sheet)?.tables ?? []);
+        setTableMetadata({sheet: wb.active_sheet, tables: wb.sheets.find(s => s.name === wb.active_sheet)?.tables ?? []});
       }
       setStagedCount(staged.length);
       setReviewRevision(n => n + 1);
@@ -309,6 +310,14 @@ export const App: React.FC = () => {
       Array.from({length:dimensions.rows},()=>Array(dimensions.columns).fill(''))));
   };
   const handleApplyFormat = (format:string) => {
+    const tableRanges = tables.map(({range}) => ({
+      start: {row: range.start_row, col: range.start_col},
+      end: {row: range.end_row, col: range.end_col},
+    }));
+    if (!ordinaryFormatRangeIsBounded(selection, tableRanges)) {
+      boundedSelection();
+      return;
+    }
     const style=viewport?.cells[coordToA1(selectedRow,selectedCol)]?.style ?? {bold:false,italic:false,fill:null,number_format:null};
     let attribute: string, value: string;
     if(format==='Bold'){attribute='bold';value=String(!style.bold);}

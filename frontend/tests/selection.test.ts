@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizedRange, containsCell, encodeTsv, decodeTsv } from '../src/utils/selection.ts';
+import { normalizedRange, containsCell, ordinaryFormatRangeIsBounded, encodeTsv, decodeTsv } from '../src/utils/selection.ts';
 test('selection normalizes reversed dragging', () => {
  const range = normalizedRange({row: 4, col: 1}, {row: 1, col: 4});
  assert.deepEqual(range, {start:{row:1,col:1},end:{row:4,col:4}});
@@ -36,4 +36,15 @@ test('clipboard rejects excessive aggregate field count across individually smal
   const accepted=decodeTsv(('\t'.repeat(99)+'\n').repeat(100));
   assert.equal(accepted.length,100);assert.equal(accepted[0].length,100);
   assert.deepEqual(decodeTsv('one\ttwo'),[['one','two']]);
+});
+
+
+test('format budget counts only ordinary cells, without double-counting table overlap', () => {
+ const rect = (r0:number,c0:number,r1:number,c1:number) => ({start:{row:r0,col:c0},end:{row:r1,col:c1}});
+ const selection = rect(0,0,10000000,1);
+ assert.equal(ordinaryFormatRangeIsBounded(selection, []), false);
+ assert.equal(ordinaryFormatRangeIsBounded(selection, [selection]), true);
+ assert.equal(ordinaryFormatRangeIsBounded(selection, [rect(0,0,10000000,0),rect(0,1,9990000,1)]), true);
+ assert.equal(ordinaryFormatRangeIsBounded(selection, [rect(0,0,10000000,0),rect(0,0,10000000,0)]), false);
+ assert.equal(ordinaryFormatRangeIsBounded(rect(0,0,99,99), []), true);
 });

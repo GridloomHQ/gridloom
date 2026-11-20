@@ -14,6 +14,36 @@ export function boundedRangeDimensions(range: GridRange, limit = MAX_RANGE_CELLS
   if (rows > Math.floor(limit / columns)) throw new Error(`Select at most ${limit.toLocaleString('en-US')} cells for this operation`);
   return { rows, columns, count: rows * columns };
 }
+// Source-table formatting stores rectangular rules, but ordinary cells are materialized.
+export function ordinaryFormatRangeIsBounded(range: GridRange, tables: readonly GridRange[]): boolean {
+  let uncovered = [range];
+  for (const table of tables) {
+    uncovered = uncovered.flatMap(block => {
+      const top = Math.max(block.start.row, table.start.row);
+      const left = Math.max(block.start.col, table.start.col);
+      const bottom = Math.min(block.end.row, table.end.row);
+      const right = Math.min(block.end.col, table.end.col);
+      if (top > bottom || left > right) return [block];
+      const pieces: GridRange[] = [];
+      const add = (r0: number, c0: number, r1: number, c1: number) => {
+        if (r0 <= r1 && c0 <= c1) pieces.push({start:{row:r0,col:c0},end:{row:r1,col:c1}});
+      };
+      add(block.start.row, block.start.col, top - 1, block.end.col);
+      add(bottom + 1, block.start.col, block.end.row, block.end.col);
+      add(top, block.start.col, bottom, left - 1);
+      add(top, right + 1, bottom, block.end.col);
+      return pieces;
+    });
+  }
+  let remaining = MAX_RANGE_CELLS;
+  for (const block of uncovered) {
+    const rows = block.end.row - block.start.row + 1;
+    const columns = block.end.col - block.start.col + 1;
+    if (rows > Math.floor(remaining / columns)) return false;
+    remaining -= rows * columns;
+  }
+  return true;
+}
 export function normalizedRange(a: GridPoint, b: GridPoint): GridRange {
   return { start: { row: Math.min(a.row, b.row), col: Math.min(a.col, b.col) }, end: { row: Math.max(a.row, b.row), col: Math.max(a.col, b.col) } };
 }
