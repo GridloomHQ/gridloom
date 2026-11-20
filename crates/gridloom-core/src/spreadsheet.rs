@@ -184,11 +184,32 @@ impl Workbook {
         freeze_top_row: bool,
         freeze_first_column: bool,
     ) -> Result<(), CellError> {
+        self.set_frozen_counts(
+            name,
+            u32::from(freeze_top_row),
+            u32::from(freeze_first_column),
+        )
+    }
+
+    pub fn set_frozen_counts(
+        &mut self,
+        name: &str,
+        rows: u32,
+        columns: u32,
+    ) -> Result<(), CellError> {
         let sheet = self.sheets.get_mut(name).ok_or(CellError::Ref)?;
-        sheet.freeze_top_row = freeze_top_row;
-        sheet.freeze_first_column = freeze_first_column;
+        if rows >= sheet.max_rows || columns >= sheet.max_cols {
+            return Err(CellError::Ref);
+        }
+        // Keep compatibility with readers that only know how to pin the first cell.
+        sheet.freeze_top_row = rows > 0;
+        sheet.freeze_first_column = columns > 0;
+        // One and zero already have an equivalent legacy representation.
+        sheet.frozen_rows = (rows > 1).then_some(rows);
+        sheet.frozen_columns = (columns > 1).then_some(columns);
         Ok(())
     }
+
     /// Presentation-only formula visibility; leaves calculation and review state unchanged.
     pub fn set_show_formulas(&mut self, name: &str, show_formulas: bool) -> Result<(), CellError> {
         let sheet = self.sheets.get_mut(name).ok_or(CellError::Ref)?;

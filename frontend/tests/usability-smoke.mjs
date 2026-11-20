@@ -127,8 +127,25 @@ try {
  await freezeLeft.click();await idle();
  const rejectFreeze=route=>route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:'Synthetic freeze failure'})});await page.route('**/api/sheets/freeze',rejectFreeze);
  await freezeTop.click();await page.getByText(/Error:.*Synthetic freeze failure/).waitFor();await idle();assert.equal(await freezeTop.isChecked(),true);assert.equal(await freezeLeft.isChecked(),true);await page.unroute('**/api/sheets/freeze',rejectFreeze);
+ // Freeze above and left of D4 at once; later clear each axis independently.
+ await go('D4');
+ await page.getByRole('button',{name:'Freeze at selection',exact:true}).click();await idle();
+ await go('Z200');
+ await cell('Z200').filter({hasText:'horizontal navigation works'}).waitFor();
+ await cell('C3').waitFor();
+ assert.equal(await cell('C3').getAttribute('data-frozen-row'),'true');
+ assert.equal(await cell('C3').getAttribute('data-frozen-column'),'true');
+ const paneGrid=await grid().boundingBox(),thirdPinned=await cell('C3').boundingBox();assert(paneGrid&&thirdPinned);
+ assert.equal(thirdPinned.x,paneGrid.x+48+180+110);assert.equal(thirdPinned.y,paneGrid.y+26+2*26);
+ assert.equal(await cell('Z3').getAttribute('data-frozen-row'),'true');
+ assert.equal(await cell('C200').getAttribute('data-frozen-column'),'true');
+ await page.getByRole('button',{name:'Unfreeze 3 rows',exact:true}).click();await idle();
+ assert.equal(await cell('Z3').count(),0);assert.equal(await cell('C200').getAttribute('data-frozen-column'),'true');
+ await page.getByRole('button',{name:'Unfreeze 3 columns',exact:true}).click();await idle();
+ assert.equal(await cell('C200').count(),0);
  page.off('request',observeViewport);
- assert(viewportRequests.some(r=>r.start_row>100&&r.start_col>0&&r.freeze_top_row&&r.freeze_first_column));
+ assert(viewportRequests.some(r=>r.start_row>100&&r.start_col>0&&r.visible_frozen_rows===1&&r.visible_frozen_columns===1));
+ assert(viewportRequests.some(r=>r.start_row>100&&r.start_col>0&&r.visible_frozen_rows===3&&r.visible_frozen_columns===3));
  const composite=await page.request.post(`${base}/api/cells/viewport-panes`,{data:{sheet_name:'Sheet1',start_row:199,end_row:210,start_col:25,end_col:30,overscan:5,freeze_top_row:true,freeze_first_column:true}});assert(composite.ok());const panes=await composite.json();
  assert.equal(panes.loaded_ranges.length,4);assert(panes.loaded_ranges.some(r=>r.start_row===0&&r.end_row===0));assert(panes.loaded_ranges.some(r=>r.start_col===0&&r.end_col===0));
  for(const r of panes.loaded_ranges){assert(r.end_row-r.start_row<100);assert(r.end_col-r.start_col<100);}

@@ -86,3 +86,31 @@ async fn freeze_flags_are_validated_and_exposed_in_summary() {
     assert_eq!(response["sheets"][0]["freeze_top_row"], false);
     assert_eq!(response["sheets"][0]["freeze_first_column"], false);
 }
+
+#[tokio::test]
+async fn frozen_counts_are_exposed_and_can_clear_axes_independently() {
+    let app = create_router(AppState::new(Workbook::new()));
+    for (rows, columns, status) in [
+        (7, 3, StatusCode::OK),
+        (0, 3, StatusCode::OK),
+        (1000, 0, StatusCode::BAD_REQUEST),
+    ] {
+        assert_eq!(
+            call(
+                &app,
+                "POST",
+                "/api/sheets/freeze",
+                json!({"sheet_name":"Sheet1","frozen_rows":rows,"frozen_columns":columns}),
+            )
+            .await
+            .0,
+            status
+        );
+    }
+    let (_, body) = call(&app, "GET", "/api/workbook", json!(null)).await;
+    let response: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(response["sheets"][0]["frozen_rows"], 0);
+    assert_eq!(response["sheets"][0]["frozen_columns"], 3);
+    assert_eq!(response["sheets"][0]["freeze_top_row"], false);
+    assert_eq!(response["sheets"][0]["freeze_first_column"], true);
+}

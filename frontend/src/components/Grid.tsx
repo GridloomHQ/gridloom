@@ -19,7 +19,7 @@ interface GridProps {
   selection: GridRange; busy: boolean; traceHighlight?: DependencyHighlight | null;
   onSelectCell: (row: number, col: number, extend?: boolean) => void;
   onCommitCell: (row: number, col: number, value: string) => Promise<boolean>;
-  onViewportChange: (startRow: number, startCol: number, endRow: number, endCol: number) => void;
+  onViewportChange: (startRow: number, startCol: number, endRow: number, endCol: number, visibleFrozenRows: number, visibleFrozenColumns: number) => void;
   onCopy: (event: React.ClipboardEvent) => void;
   onPaste: (event: React.ClipboardEvent) => void;
   onUndo: () => void; onRedo: () => void; onFillDown: () => void;
@@ -29,10 +29,11 @@ interface GridProps {
   functionNames:string[];
   columnWidths: Record<number,number>;
   showFormulas:boolean;
-  freezeTopRow:boolean; freezeFirstColumn:boolean;
+  frozenRows:number; frozenColumns:number;
   onColumnResize?: (column:number,width:number) => void;
 }
 const H = 26, LEFT = 48;
+const scrollEdge = (size:number) => Math.max(0, size - 0.01);
 export const Grid: React.FC<GridProps> = (props) => {
   const { sheetName, viewport, selectedRow, selectedCol, selection, busy, onSelectCell, onCommitCell, onViewportChange } = props;
   const container = useRef<HTMLDivElement>(null);
@@ -85,16 +86,25 @@ export const Grid: React.FC<GridProps> = (props) => {
   const formulaRanges=useMemo(()=>draftReferences(edit??props.externalDraft??'',sheetName),[edit,props.externalDraft,sheetName]);
   const totalRows = viewport?.total_rows ?? 1000, totalCols = viewport?.total_cols ?? 100;
   const geometry = useMemo(()=>columnGeometry(totalCols,props.columnWidths),[totalCols,props.columnWidths]);
-  const frozenHeight=props.freezeTopRow?H:0, frozenWidth=props.freezeFirstColumn?geometry.width(0):0;
-  const cellLeft=(c:number)=>paneOffset(c,geometry.offset(c),scroll.left,props.freezeFirstColumn)+LEFT;
-  const cellTop=(r:number)=>paneOffset(r,r*H,scroll.top,props.freezeTopRow)+H;
+  const frozenRows = Math.min(props.frozenRows, totalRows - 1);
+  const frozenColumns = Math.min(props.frozenColumns, totalCols - 1);
+  const frozenHeight = frozenRows * H, frozenWidth = geometry.offset(frozenColumns);
+  // Only materialize the pinned prefix that fits on screen. A deep split
+  // must not request or render every row/column preceding the selected cell.
+  const bodyHeight = Math.max(0, size.height-H), bodyWidth = Math.max(0, size.width-LEFT);
+  const visibleFrozenRows = Math.min(frozenRows, Math.ceil(bodyHeight / H));
+  const visibleFrozenColumns = Math.min(frozenColumns, bodyWidth > 0 ? geometry.atPixel(scrollEdge(bodyWidth))+1 : 0);
+  const cellLeft=(c:number)=>paneOffset(c,geometry.offset(c),scroll.left,frozenColumns)+LEFT;
+  const cellTop=(r:number)=>paneOffset(r,r*H,scroll.top,frozenRows)+H;
   const selectedX=geometry.offset(selectedCol), selectedWidth=geometry.width(selectedCol);
   const traceFirst=highlight?.target.range?.start ?? highlight?.target.coord;
   const traceX=traceFirst?geometry.offset(traceFirst.col):null, traceWidth=traceFirst?geometry.width(traceFirst.col):null;
-  const startRow = Math.max(0, Math.floor(scroll.top / H) - 3), endRow = Math.min(totalRows - 1, startRow + Math.ceil(size.height / H) + 6);
-  const startCol = Math.max(0, geometry.atPixel(scroll.left) - 2), endCol = Math.min(totalCols - 1, geometry.atPixel(scroll.left + Math.max(0,size.width-LEFT)) + 2);
+  const startRow = frozenHeight >= bodyHeight && frozenRows > 0 ? 0 : Math.max(0, Math.floor((scroll.top + frozenHeight) / H) - 3);
+  const endRow = frozenHeight >= bodyHeight && frozenRows > 0 ? 0 : Math.min(totalRows - 1, Math.floor((scroll.top + bodyHeight) / H) + 3);
+  const startCol = frozenWidth >= bodyWidth && frozenColumns > 0 ? 0 : Math.max(0, geometry.atPixel(scroll.left + frozenWidth) - 2);
+  const endCol = frozenWidth >= bodyWidth && frozenColumns > 0 ? 0 : Math.min(totalCols - 1, geometry.atPixel(scroll.left + bodyWidth) + 2);
   useEffect(() => { const el=container.current; if (!el) return; const ro=new ResizeObserver(([entry])=>setSize({width:entry.contentRect.width,height:entry.contentRect.height}));ro.observe(el);return ()=>ro.disconnect(); }, []);
-  useEffect(() => { onViewportChange(startRow,startCol,endRow,endCol); }, [startRow,startCol,endRow,endCol,onViewportChange]);
+  useEffect(() => { onViewportChange(startRow,startCol,endRow,endCol,visibleFrozenRows,visibleFrozenColumns); }, [startRow,startCol,endRow,endCol,visibleFrozenRows,visibleFrozenColumns,onViewportChange]);
   useEffect(() => { const stop=()=>{dragging.current=false;}; window.addEventListener('mouseup',stop); return ()=>window.removeEventListener('mouseup',stop); }, []);
   useEffect(() => {
     const cancel=()=>{resize.current=null;setResizePreview(null);};
@@ -120,8 +130,8 @@ export const Grid: React.FC<GridProps> = (props) => {
   useEffect(() => {
     const el=container.current;if(!el)return;
     const x=selectedX,w=selectedWidth,y=selectedRow*H;
-    el.scrollLeft=revealAxis(x,w,el.scrollLeft,el.clientWidth-LEFT,frozenWidth,props.freezeFirstColumn&&selectedCol===0);
-    el.scrollTop=revealAxis(y,H,el.scrollTop,el.clientHeight-H,frozenHeight,props.freezeTopRow&&selectedRow===0);
+    el.scrollLeft=revealAxis(x,w,el.scrollLeft,el.clientWidth-LEFT,frozenWidth,selectedCol<frozenColumns);
+    el.scrollTop=revealAxis(y,H,el.scrollTop,el.clientHeight-H,frozenHeight,selectedRow<frozenRows);
   },[selectedRow,selectedCol,sheetName,selectedX,selectedWidth,frozenWidth,frozenHeight]);
   useEffect(() => {
     const el=container.current, target=highlight?.target;
@@ -129,13 +139,15 @@ export const Grid: React.FC<GridProps> = (props) => {
     if (!el || !first) return;
     // Reveal the first cell of an offscreen trace without moving the selection.
     const x=geometry.offset(first.col),w=geometry.width(first.col), y=first.row*H;
-    el.scrollLeft=revealAxis(x,w,el.scrollLeft,el.clientWidth-LEFT,frozenWidth,props.freezeFirstColumn&&first.col===0);
-    el.scrollTop=revealAxis(y,H,el.scrollTop,el.clientHeight-H,frozenHeight,props.freezeTopRow&&first.row===0);
+    el.scrollLeft=revealAxis(x,w,el.scrollLeft,el.clientWidth-LEFT,frozenWidth,first.col<frozenColumns);
+    el.scrollTop=revealAxis(y,H,el.scrollTop,el.clientHeight-H,frozenHeight,first.row<frozenRows);
   },[highlight,traceX,traceWidth,frozenWidth,frozenHeight]);
   const navigation = (event: NavigationKey) => gridNavigation(event,
     {row:selectedRow,col:selectedCol}, totalRows, totalCols, Math.floor((size.height-H-frozenHeight)/H));
   const begin = (initial?: string) => {
     if(busy || committing.current || resize.current)return;
+    if (selectedRow < frozenRows && selectedRow >= visibleFrozenRows
+      || selectedCol < frozenColumns && selectedCol >= visibleFrozenColumns) return;
     // Missing viewport data is not an empty cell: never initialize an edit from
     // stale/offscreen content while an address or sheet jump is still loading.
     if (!viewport || viewport.sheet_name !== sheetName || !isCellLoaded(viewport,selectedRow,selectedCol)) return;
@@ -195,8 +207,8 @@ export const Grid: React.FC<GridProps> = (props) => {
     setEdit(replacement);setCompletion(null);failedInput.current=null;
     const el=container.current;
     if(el){
-      el.scrollLeft=revealAxis(geometry.offset(point.col),geometry.width(point.col),el.scrollLeft,el.clientWidth-LEFT,frozenWidth,props.freezeFirstColumn&&point.col===0);
-      el.scrollTop=revealAxis(point.row*H,H,el.scrollTop,el.clientHeight-H,frozenHeight,props.freezeTopRow&&point.row===0);
+      el.scrollLeft=revealAxis(geometry.offset(point.col),geometry.width(point.col),el.scrollLeft,el.clientWidth-LEFT,frozenWidth,point.col<frozenColumns);
+      el.scrollTop=revealAxis(point.row*H,H,el.scrollTop,el.clientHeight-H,frozenHeight,point.row<frozenRows);
     }
     return true;
   };
@@ -248,7 +260,7 @@ export const Grid: React.FC<GridProps> = (props) => {
     else if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();props.onClear();}
     else if(e.key.length===1&&!e.altKey){e.preventDefault();begin(e.key);}
   };
-  const rows=paneIndices(startRow,endRow,props.freezeTopRow),cols=paneIndices(startCol,endCol,props.freezeFirstColumn);
+  const rows=paneIndices(startRow,endRow,frozenRows,visibleFrozenRows),cols=paneIndices(startCol,endCol,frozenColumns,visibleFrozenColumns);
 
   return <div ref={container} role="grid" data-show-formulas={props.showFormulas} aria-label={`${sheetName} worksheet`} aria-busy={busy} tabIndex={0}
     onScroll={e=>setScroll({top:e.currentTarget.scrollTop,left:e.currentTarget.scrollLeft})} onKeyDown={onKeyDown}
@@ -261,26 +273,26 @@ export const Grid: React.FC<GridProps> = (props) => {
         const presentation=cellPresentation(cell,props.showFormulas);
         const reference=formulaRanges.findIndex(range=>containsCell(range,r,c));
         const traced = traceRange && containsCell(traceRange, r, c) ? highlight?.direction : undefined;
-        return <div key={key} role="gridcell" aria-label={key} aria-selected={selected} data-dependency-highlight={traced} data-formula-reference={reference>=0?reference+1:undefined}
+        return <div key={key} role="gridcell" aria-label={key} aria-selected={selected} data-dependency-highlight={traced} data-frozen-row={r<frozenRows||undefined} data-frozen-column={c<frozenColumns||undefined} data-formula-reference={reference>=0?reference+1:undefined}
           onMouseDown={e=>{if(e.button!==0||busy||committing.current)return;e.preventDefault();if(editing.current){if(pickMode.current&&pointReference({row:r,col:c},e.shiftKey))return;void finish(true,{row:r,col:c,extend:e.shiftKey});return;}dragging.current=true;onSelectCell(r,c,e.shiftKey);container.current?.focus();}}
           onMouseEnter={()=>{if(dragging.current)onSelectCell(r,c,true);}}
           onDoubleClick={()=>{if(active)begin();}}
-          style={{position:'absolute',left:cellLeft(c),top:cellTop(r),zIndex:paneLayer(r,c,props.freezeTopRow,props.freezeFirstColumn),width:geometry.width(c),height:H,backgroundColor:traced==='upstream'?'#ccfbf1':traced==='downstream'?'#ede9fe':selected?'#eff6ff':style?.fill??(cell?.is_staged?'#fffbeb':cell?.is_table_header?'#f1f5f9':'#ffffff'),fontWeight:style?.bold?'bold':undefined,fontStyle:style?.italic?'italic':undefined,boxShadow:reference>=0?`inset 0 0 0 2px ${referenceColors[reference%referenceColors.length]}`:undefined}}
+          style={{position:'absolute',left:cellLeft(c),top:cellTop(r),zIndex:paneLayer(r,c,frozenRows,frozenColumns),width:geometry.width(c),height:H,backgroundColor:traced==='upstream'?'#ccfbf1':traced==='downstream'?'#ede9fe':selected?'#eff6ff':style?.fill??(cell?.is_staged?'#fffbeb':cell?.is_table_header?'#f1f5f9':'#ffffff'),fontWeight:style?.bold?'bold':undefined,fontStyle:style?.italic?'italic':undefined,borderBottomColor:r===frozenRows-1?'#94a3b8':undefined,borderRightColor:c===frozenColumns-1?'#94a3b8':undefined,boxShadow:reference>=0?`inset 0 0 0 2px ${referenceColors[reference%referenceColors.length]}`:undefined}}
           className={`border-r border-b border-slate-200 px-1.5 flex items-center text-xs overflow-hidden cursor-cell ${active?'ring-2 ring-inset ring-blue-500':''} ${cell?.is_error?'text-rose-700':''} ${cell?.is_table_header?'bg-slate-100':''}`}
           title={traced ? (traced === 'upstream' ? 'Upstream dependency' : 'Downstream dependent') + (presentation.title ? ': ' + presentation.title : '') : presentation.title}>{cell?.is_staged&&<span className="text-amber-600 mr-1">●</span>}<span className="truncate">{presentation.text}</span></div>;
       }))}
-      {cols.map(c=><div key={`c${c}`} role="columnheader" aria-label={colIndexToName(c)} style={{position:'absolute',top:scroll.top,left:cellLeft(c),width:geometry.width(c),height:H,zIndex:props.freezeFirstColumn&&c===0?35:30}} className="bg-slate-100 border-r border-b border-slate-300 text-center text-xs py-1">{colIndexToName(c)}
+      {cols.map(c=><div key={`c${c}`} role="columnheader" aria-label={colIndexToName(c)} style={{position:'absolute',top:scroll.top,left:cellLeft(c),width:geometry.width(c),height:H,zIndex:c<frozenColumns?35:30}} className="bg-slate-100 border-r border-b border-slate-300 text-center text-xs py-1">{colIndexToName(c)}
         {props.onColumnResize&&<button type="button" aria-label={`Resize column ${colIndexToName(c)}`} title="Drag to resize column (Escape cancels)" disabled={busy}
           onKeyDown={e=>e.stopPropagation()}
           onMouseDown={e=>{e.preventDefault();e.stopPropagation();if(e.button!==0||busy||committing.current||editing.current)return;dragging.current=false;
             const width=geometry.width(c);resize.current={column:c,startX:e.clientX,original:width,width,sheet:sheetName};setResizePreview({column:c,width});}}
           style={{position:'absolute',right:0,top:0,width:8,height:H,cursor:'col-resize'}}/>}
       </div>)}
-      {rows.map(r=><div key={`r${r}`} aria-hidden style={{position:'absolute',left:scroll.left,top:cellTop(r),width:LEFT,height:H,zIndex:props.freezeTopRow&&r===0?35:30}} className="bg-slate-100 border-r border-b border-slate-300 text-center text-xs py-1">{r+1}</div>)}
+      {rows.map(r=><div key={`r${r}`} aria-hidden style={{position:'absolute',left:scroll.left,top:cellTop(r),width:LEFT,height:H,zIndex:r<frozenRows?35:30}} className="bg-slate-100 border-r border-b border-slate-300 text-center text-xs py-1">{r+1}</div>)}
       <div aria-hidden style={{position:'absolute',top:scroll.top,left:scroll.left,width:LEFT,height:H,zIndex:40}} className="bg-slate-200 border-r border-b border-slate-300"/>
       {resizePreview&&<div aria-hidden style={{position:'absolute',pointerEvents:'none',left:cellLeft(resizePreview.column)+resizePreview.width,top:scroll.top,width:2,height:size.height,zIndex:45,background:'#2563eb'}}/>}
-      {edit!==null&&draftMatchesSelection&&<div className="absolute" style={{left:props.freezeFirstColumn&&selectedCol===0?cellLeft(selectedCol):Math.min(Math.max(cellLeft(selectedCol),scroll.left+LEFT+frozenWidth),scroll.left+Math.max(LEFT+frozenWidth,size.width-170)),
-        top:props.freezeTopRow&&selectedRow===0?cellTop(selectedRow):Math.max(scroll.top+H+frozenHeight,Math.min(cellTop(selectedRow),scroll.top+size.height-H)),
+      {edit!==null&&draftMatchesSelection&&<div className="absolute" style={{left:selectedCol<frozenColumns?cellLeft(selectedCol):Math.min(Math.max(cellLeft(selectedCol),scroll.left+LEFT+frozenWidth),scroll.left+Math.max(LEFT+frozenWidth,size.width-170)),
+        top:selectedRow<frozenRows?cellTop(selectedRow):Math.max(scroll.top+H+frozenHeight,Math.min(cellTop(selectedRow),scroll.top+size.height-H)),
         width:Math.max(geometry.width(selectedCol),160),height:H,zIndex:45}}>
         <input ref={editor} aria-label={`Edit ${coordToA1(selectedRow,selectedCol)}`} value={edit}
           aria-autocomplete="list" aria-controls={showSuggestions?'inline-function-suggestions':undefined}

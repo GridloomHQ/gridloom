@@ -60,7 +60,7 @@ export const api = {
   rangeView:(sheet_name:string,range:CellRange,options:RangeViewOptions,signal:AbortSignal)=>fetchJson<RangeView>('/api/ranges/sort-filter',{method:'POST',body:JSON.stringify({sheet_name,range:wireRange(range),...options}),signal}),
   functionCatalog:()=>fetchJson<{functions:string[]}>('/api/functions'),
   rangeSummary: (sheet_name:string,range:CellRange) => fetchJson<RangeSummary>('/api/ranges/summary',{method:'POST',body:JSON.stringify({sheet_name,...wireRange(range)})}),
-  setFreeze: (sheet_name:string,freeze_top_row:boolean,freeze_first_column:boolean) => fetchJson('/api/sheets/freeze',{method:'POST',body:JSON.stringify({sheet_name,freeze_top_row,freeze_first_column})}),
+  setFreeze: (sheet_name:string,frozen_rows:number,frozen_columns:number) => fetchJson('/api/sheets/freeze',{method:'POST',body:JSON.stringify({sheet_name,frozen_rows,frozen_columns})}),
   setColumnWidth: (sheet_name:string,column:number,width:number|null) => fetchJson('/api/sheets/column-width',{method:'POST',body:JSON.stringify({sheet_name,column,width})}),
   findCells: (request: FindRequest) => fetchJson<FindResponse>('/api/cells/find', {method: 'POST', body: JSON.stringify(request)}),
   addSheet: (name: string) => fetchJson<{status: string}>('/api/sheets', { method: 'POST', body: JSON.stringify({name}) }),
@@ -151,8 +151,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ sheet_name, row, col, raw_input }),
     }),
-  getViewportPanes: (sheet_name:string,start_row:number,start_col:number,end_row:number,end_col:number,freeze_top_row:boolean,freeze_first_column:boolean) =>
-    fetchJson<ViewportResponse>('/api/cells/viewport-panes',{method:'POST',body:JSON.stringify({sheet_name,start_row,start_col,end_row,end_col,overscan:5,freeze_top_row,freeze_first_column})}),
+  getViewportPanes: (sheet_name:string,start_row:number,start_col:number,end_row:number,end_col:number,visible_frozen_rows:number,visible_frozen_columns:number) =>
+    fetchJson<ViewportResponse>('/api/cells/viewport-panes',{method:'POST',body:JSON.stringify({sheet_name,start_row,start_col,end_row,end_col,overscan:5,visible_frozen_rows,visible_frozen_columns})}),
   getViewport: (sheet_name: string, start_row: number, start_col: number, end_row: number, end_col: number, overscan = 5) =>
     fetchJson<ViewportResponse>('/api/cells/viewport', {
       method: 'POST',

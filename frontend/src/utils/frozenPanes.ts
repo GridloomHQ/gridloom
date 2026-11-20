@@ -1,8 +1,11 @@
-/** Add a pinned origin without widening the requested/materialized main range. */
-export function paneIndices(start:number,end:number,pinFirst:boolean):number[] {
-  const indices=Array.from({length:Math.max(0,end-start+1)},(_,i)=>i+start);
-  if(pinFirst && start>0)indices.unshift(0);
-  return indices;
+/** Render just the visible pinned prefix and the scrolling region, without duplicates. */
+export function paneIndices(start:number,end:number,pinned:number,visiblePinned=pinned):number[] {
+  const pinnedEnd=Math.max(0,Math.min(visiblePinned,pinned));
+  const bodyStart=Math.max(start,pinned);
+  return [
+    ...Array.from({length:pinnedEnd},(_,i)=>i),
+    ...Array.from({length:Math.max(0,end-bodyStart+1)},(_,i)=>i+bodyStart),
+  ];
 }
 /** Logical cell offset excludes the fixed header. No useful scrolling is possible
  * when a frozen span occupies the entire viewport. Oversize cells align leading. */
@@ -13,9 +16,9 @@ export function revealAxis(offset:number,extent:number,scroll:number,available:n
   if(offset+extent>scroll+available)return Math.max(0,offset+extent-available);
   return scroll;
 }
-export function paneOffset(index:number,offset:number,scroll:number,pinFirst:boolean):number {
-  return pinFirst && index===0 ? scroll : offset;
+export function paneOffset(index:number,offset:number,scroll:number,pinned:number):number {
+  return index<pinned ? scroll+offset : offset;
 }
-export function paneLayer(row:number,col:number,top:boolean,left:boolean):number {
-  return (top&&row===0?10:0)+(left&&col===0?10:0);
+export function paneLayer(row:number,col:number,top:number,left:number):number {
+  return (row<top?10:0)+(col<left?10:0);
 }

@@ -86,10 +86,11 @@ export const App: React.FC = () => {
   const [sheetWidths,setSheetWidths]=useState<Record<string,Record<number,number>>>({});
   const [sheetShowFormulas,setSheetShowFormulas]=useState<Record<string,boolean>>({});
   const showFormulas=sheetShowFormulas[sheetName]??false;
-  const [sheetFreeze,setSheetFreeze]=useState<Record<string,{top:boolean;left:boolean}>>({});
-  const freezeTopRow=sheetFreeze[sheetName]?.top??false,freezeFirstColumn=sheetFreeze[sheetName]?.left??false;
+  const [sheetFreeze,setSheetFreeze]=useState<Record<string,{rows:number;columns:number}>>({});
+  const frozenRows=sheetFreeze[sheetName]?.rows??0,frozenColumns=sheetFreeze[sheetName]?.columns??0;
+  const visibleFrozen=useRef({rows:0,columns:0});
   const viewportConfigRef=useRef('');
-  viewportConfigRef.current=`${sheetName}:${freezeTopRow}:${freezeFirstColumn}`;
+  viewportConfigRef.current=`${sheetName}:${frozenRows}:${frozenColumns}`;
   const [widthDraft,setWidthDraft]=useState('110');
   const columnWidths=sheetWidths[sheetName]??{};
   useEffect(()=>setWidthDraft(String(columnWidths[selectedCol]??110)),[sheetName,selectedCol,sheetWidths]);
@@ -101,6 +102,8 @@ export const App: React.FC = () => {
     startCol: 0,
     endRow: 40,
     endCol: 20,
+    pinnedRows: 0,
+    pinnedColumns: 0,
   });
 
   // Modal open states
@@ -132,7 +135,7 @@ export const App: React.FC = () => {
         setSheetName(wb.active_sheet);
         setSheets(wb.sheets.map(s => s.name));
         setSheetShowFormulas(Object.fromEntries(wb.sheets.map(s=>[s.name,s.show_formulas??false])));
-        setSheetFreeze(Object.fromEntries(wb.sheets.map(s=>[s.name,{top:s.freeze_top_row??false,left:s.freeze_first_column??false}])));
+        setSheetFreeze(Object.fromEntries(wb.sheets.map(s=>[s.name,{rows:s.frozen_rows??Number(!!s.freeze_top_row),columns:s.frozen_columns??Number(!!s.freeze_first_column)}])));
         setSheetWidths(Object.fromEntries(wb.sheets.map(s=>[s.name,s.column_widths??{}])));
         setTables(wb.sheets.find(s => s.name === wb.active_sheet)?.tables ?? []);
       }
@@ -145,25 +148,27 @@ export const App: React.FC = () => {
 
   // Fetch viewport cells
   const fetchViewportData = useCallback(async (startR: number, startC: number, endR: number, endC: number) => {
-    const config=`${sheetName}:${freezeTopRow}:${freezeFirstColumn}`;
+    const config=`${sheetName}:${frozenRows}:${frozenColumns}`;
     if(config!==viewportConfigRef.current)return;
     try {
       const request = ++viewportSequence.current;
-      const data = await api.getViewportPanes(sheetName,startR,startC,endR,endC,freezeTopRow,freezeFirstColumn);
+      const data = await api.getViewportPanes(sheetName,startR,startC,endR,endC,Math.min(frozenRows,visibleFrozen.current.rows),Math.min(frozenColumns,visibleFrozen.current.columns));
       if (request === viewportSequence.current && data.sheet_name === activeSheetRef.current && config === viewportConfigRef.current) setViewport(data);
     } catch (err: any) {
       console.error('Failed to fetch viewport:', err);
     }
-  }, [sheetName,freezeTopRow,freezeFirstColumn]);
+  }, [sheetName,frozenRows,frozenColumns]);
 
   useEffect(() => { void refreshMetadata(); }, [refreshMetadata]);
   useEffect(() => {
     void fetchViewportData(visibleBounds.startRow, visibleBounds.startCol, visibleBounds.endRow, visibleBounds.endCol);
   }, [fetchViewportData, visibleBounds]);
 
-  const handleViewportChange = useCallback((startRow: number, startCol: number, endRow: number, endCol: number) => {
+  const handleViewportChange = useCallback((startRow: number, startCol: number, endRow: number, endCol: number, pinnedRows: number, pinnedColumns: number) => {
+    visibleFrozen.current = {rows:pinnedRows,columns:pinnedColumns};
     setVisibleBounds(prev => prev.startRow === startRow && prev.startCol === startCol && prev.endRow === endRow && prev.endCol === endCol
-      ? prev : { startRow, startCol, endRow, endCol });
+      && prev.pinnedRows === pinnedRows && prev.pinnedColumns === pinnedColumns
+      ? prev : { startRow, startCol, endRow, endCol, pinnedRows, pinnedColumns });
   }, []);
 
   const handleCommitCell = async (row: number, col: number, rawInput: string, asSqlNull=false): Promise<boolean> => {
@@ -429,6 +434,12 @@ export const App: React.FC = () => {
       await api.selectSheet(match.sheet_name);setSheetName(match.sheet_name);setViewport(null);apply();
     },true);
   };
+  const freezeDisabled = busy || apiPending>0 || gridDraft || formulaDraft;
+  const updateFreeze = (rows:number, columns:number) => {
+    if (freezeDisabled || mutationLock.current || getPendingMutations()>0) return;
+    void mutate('Updated frozen panes',()=>api.setFreeze(sheetName,rows,columns),true);
+  };
+
   return (
     <div onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&!e.altKey){e.preventDefault();if(!replacement)void handleSaveWorkbook(e.shiftKey);return;}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f' && (e.target as HTMLElement).closest('[role="grid"]')){e.preventDefault();setIsFindOpen(true);}}} className="flex flex-col h-screen w-screen bg-slate-100 overflow-hidden font-sans">
       {replacement&&<div className="fixed inset-0 z-[100] bg-black/30 flex items-center justify-center" role="dialog" aria-modal="true" aria-label="Replace current workbook?" onKeyDown={e=>{e.stopPropagation();if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s')e.preventDefault();if(e.key==='Escape'&&!busy)setReplacement(null);
@@ -494,8 +505,13 @@ export const App: React.FC = () => {
           <input type="checkbox" checked={showFormulas} disabled={busy||apiPending>0||gridDraft||formulaDraft}
             onChange={e=>{if(gridDraft||formulaDraft||mutationLock.current||getPendingMutations()>0)return;void mutate('Updated formula view',()=>api.setShowFormulas(sheetName,e.target.checked),true);}}/>Show formulas
         </label>
-        <label className="flex items-center gap-1"><input type="checkbox" checked={freezeTopRow} disabled={busy} onChange={e=>void mutate('Updated frozen panes',()=>api.setFreeze(sheetName,e.target.checked,freezeFirstColumn),true)}/>Freeze top row</label>
-        <label className="flex items-center gap-1"><input type="checkbox" checked={freezeFirstColumn} disabled={busy} onChange={e=>void mutate('Updated frozen panes',()=>api.setFreeze(sheetName,freezeTopRow,e.target.checked),true)}/>Freeze first column</label>
+        <label className="flex items-center gap-1"><input type="checkbox" checked={frozenRows===1} disabled={freezeDisabled} onChange={e=>updateFreeze(e.target.checked?1:0,frozenColumns)}/>Freeze top row</label>
+        <label className="flex items-center gap-1"><input type="checkbox" checked={frozenColumns===1} disabled={freezeDisabled} onChange={e=>updateFreeze(frozenRows,e.target.checked?1:0)}/>Freeze first column</label>
+        <button type="button" className="border rounded px-2 py-1" disabled={freezeDisabled||selectedRow===0} onClick={()=>updateFreeze(selectedRow,frozenColumns)}>Freeze rows above</button>
+        <button type="button" className="border rounded px-2 py-1" disabled={freezeDisabled||selectedCol===0} onClick={()=>updateFreeze(frozenRows,selectedCol)}>Freeze columns to the left</button>
+        <button type="button" className="border rounded px-2 py-1" disabled={freezeDisabled||(selectedRow===0&&selectedCol===0)} onClick={()=>updateFreeze(selectedRow,selectedCol)}>Freeze at selection</button>
+        {frozenRows>1&&<button type="button" className="border rounded px-2 py-1" disabled={freezeDisabled} onClick={()=>updateFreeze(0,frozenColumns)}>Unfreeze {frozenRows} rows</button>}
+        {frozenColumns>1&&<button type="button" className="border rounded px-2 py-1" disabled={freezeDisabled} onClick={()=>updateFreeze(frozenRows,0)}>Unfreeze {frozenColumns} columns</button>}
         </>}
         stagedCount={stagedCount}
       />
@@ -517,7 +533,7 @@ export const App: React.FC = () => {
       <Grid onDraftChange={setGridDraft} functionNames={functionNames} externalDraft={formulaDraftText} key={workbookEpoch}
         sheetName={sheetName}
         showFormulas={showFormulas}
-        freezeTopRow={freezeTopRow} freezeFirstColumn={freezeFirstColumn}
+        frozenRows={frozenRows} frozenColumns={frozenColumns}
         columnWidths={columnWidths} onColumnResize={resizeColumn}
         viewport={viewport}
         selectedRow={selectedRow}
