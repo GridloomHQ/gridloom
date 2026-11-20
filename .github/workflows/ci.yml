@@ -91,6 +91,10 @@ jobs:
         working-directory: ./frontend
         run: npm run test:ledger
 
+      - name: Real browser on-demand ten-million-row sample
+        working-directory: ./frontend
+        run: node tests/sample-demo-smoke.mjs
+
       - name: Real browser worksheet usability
         working-directory: ./frontend
         run: npm run test:usability
