@@ -294,7 +294,6 @@ export const App: React.FC = () => {
       Array.from({length:dimensions.rows},()=>Array(dimensions.columns).fill(''))));
   };
   const handleApplyFormat = (format:string) => {
-    if(!boundedSelection())return;
     const style=viewport?.cells[coordToA1(selectedRow,selectedCol)]?.style ?? {bold:false,italic:false,fill:null,number_format:null};
     let attribute: string, value: string;
     if(format==='Bold'){attribute='bold';value=String(!style.bold);}
