@@ -327,7 +327,7 @@ impl Workbook {
             .iter()
             .filter(|(sheet, _)| sheet.as_str() != name)
             .flat_map(|(sheet, data)| {
-                data.cells.values().filter_map(|cell| {
+                data.cells.values().filter_map(move |cell| {
                     let formula = cell.formula.as_deref()?;
                     crate::parser::parse_formula(formula)
                         .ok()
