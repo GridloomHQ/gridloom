@@ -50,6 +50,9 @@ export function PasteControls({open, onOpen, onClose, onPaste, busy, copySource}
         <dt>Cycle formula reference locks</dt><dd>F4 in editor</dd>
         <dt>Extend selection</dt><dd>Shift+arrow</dd>
         <dt>First cell</dt><dd>Ctrl+Home</dd>
+        <dt>Jump to data edge</dt><dd>Ctrl+Arrow (Shift extends selection)</dd>
+        <dt>Select column</dt><dd>Ctrl+Space</dd>
+        <dt>Select row</dt><dd>Shift+Space</dd>
       </dl>
       <p className="mt-2 text-slate-600">Alt is Option on Mac.</p>
       <button type="button" className="mt-2 border rounded px-2 py-1" onClick={() => setHelp(false)}>Close shortcuts</button>

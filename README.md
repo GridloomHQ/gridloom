@@ -15,6 +15,7 @@ It is aimed at accounting and financial models where understanding **where a num
 
 - Use multiple sheets, cross-sheet formulas, named table references and dynamic array spills.
 - Select, copy and paste ranges; fill formulas; format numbers and cells; undo and redo supported cell operations.
+- Use Ctrl+Arrow to jump to the end of a populated run, across a gap to the next populated cell, or to the worksheet edge if there is no more data. Hold Shift to extend the selection. Ctrl+Space selects the current column; Shift+Space selects the current row.
 - Use **Paste Special** on a worksheet selection copied in Gridloom: paste typed values without formulas, or paste formulas with adjusted relative references. Both keep destination formatting; formulas-only paste skips source constants and blanks. See **Keyboard shortcuts** above the grid.
 - Find cached values or formula inputs, jump to a cell, resize columns, freeze the rows above or columns to the left of the current cell from **View**, and show formulas directly in the grid.
 - Get selection totals, browse functions with **fx**, and complete function names in either editor. In an F2 edit, use arrows where a formula expects a reference and hold Shift to extend the range. Referenced cells are outlined while you edit. F4 cycles relative and absolute references.

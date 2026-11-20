@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo, useLayoutEffect } from 'react';
 import { ViewportResponse, DependencyHighlight } from '../types';
+import {api} from '../api';
 import { editableCellInput } from '../utils/cellInput';
 import { colIndexToName, coordToA1 } from '../utils/coords';
 import { containsCell, GridRange } from '../utils/selection';
-import { gridNavigation, NavigationKey } from '../utils/gridNavigation';
+import { gridBoundaryShortcut, gridNavigation, NavigationKey, type SelectionAxis } from '../utils/gridNavigation';
 import { gridShortcut } from '../utils/gridShortcuts';
 import { columnGeometry, clampColumnWidth } from '../utils/columnGeometry';
 import { paneIndices, paneOffset, paneLayer, revealAxis } from '../utils/frozenPanes';
@@ -18,6 +19,8 @@ interface GridProps {
   sheetName: string; viewport: ViewportResponse | null; selectedRow: number; selectedCol: number;
   selection: GridRange; busy: boolean; traceHighlight?: DependencyHighlight | null;
   onSelectCell: (row: number, col: number, extend?: boolean) => void;
+  onSelectAxis: (axis: SelectionAxis) => void;
+  onNavigationError: () => void;
   onCommitCell: (row: number, col: number, value: string) => Promise<boolean>;
   onViewportChange: (startRow: number, startCol: number, endRow: number, endCol: number, visibleFrozenRows: number, visibleFrozenColumns: number) => void;
   onCopy: (event: React.ClipboardEvent) => void;
@@ -37,6 +40,12 @@ const scrollEdge = (size:number) => Math.max(0, size - 0.01);
 export const Grid: React.FC<GridProps> = (props) => {
   const { sheetName, viewport, selectedRow, selectedCol, selection, busy, onSelectCell, onCommitCell, onViewportChange } = props;
   const container = useRef<HTMLDivElement>(null);
+  const pendingJump = useRef<AbortController|null>(null);
+  const cancelJump = () => {
+    pendingJump.current?.abort();
+    pendingJump.current = null;
+  };
+  useLayoutEffect(() => cancelJump, [sheetName, selectedRow, selectedCol, busy, viewport?.generation]);
   const [scroll, setScroll] = useState({top:0,left:0});
   const [size, setSize] = useState({width:1000,height:600});
   const [edit, setEdit] = useState<string | null>(null);
@@ -214,7 +223,10 @@ export const Grid: React.FC<GridProps> = (props) => {
   };
   const onKeyDown = (e: React.KeyboardEvent) => {
     // Composition Enter confirms the IME candidate, not the spreadsheet edit.
-    if (e.nativeEvent.isComposing) return;
+    if (e.defaultPrevented || e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) {
+      cancelJump();
+      return;
+    }
     if (editing.current) {
       const plain=!e.ctrlKey&&!e.metaKey&&!e.altKey;
       if(plain&&!e.shiftKey&&e.key==='F2'){
@@ -245,6 +257,33 @@ export const Grid: React.FC<GridProps> = (props) => {
       return;
     }
     if(busy || committing.current || resize.current)return;
+    const boundary = gridBoundaryShortcut(e);
+    if (boundary) {
+      e.preventDefault();
+      if (!viewport || viewport.sheet_name !== sheetName) return;
+      if ('axis' in boundary) {
+        cancelJump();
+        props.onSelectAxis(boundary.axis);
+      } else {
+        // Ignore auto-repeat while a lookup is in flight rather than flooding
+        // the local server. A new intentional press supersedes the old one.
+        if (e.repeat && pendingJump.current) return;
+        cancelJump();
+        const request = new AbortController();
+        pendingJump.current = request;
+        void api.jumpCell(sheetName, selectedRow, selectedCol, boundary.direction, request.signal)
+          .then(({row,col}) => {
+            if (pendingJump.current === request && document.activeElement === container.current)
+              onSelectCell(row, col, boundary.extend);
+          }, () => {
+            if (pendingJump.current === request) props.onNavigationError();
+          }).finally(() => {
+            if (pendingJump.current === request) pendingJump.current = null;
+          });
+      }
+      return;
+    }
+    if (!['Control','Meta','Shift','Alt'].includes(e.key)) cancelJump();
     const move = navigation(e);
     if (move) { e.preventDefault();onSelectCell(move.row,move.col,move.extend);return; }
     if(e.ctrlKey||e.metaKey){
@@ -263,7 +302,7 @@ export const Grid: React.FC<GridProps> = (props) => {
   const rows=paneIndices(startRow,endRow,frozenRows,visibleFrozenRows),cols=paneIndices(startCol,endCol,frozenColumns,visibleFrozenColumns);
 
   return <div ref={container} role="grid" data-show-formulas={props.showFormulas} aria-label={`${sheetName} worksheet`} aria-busy={busy} tabIndex={0}
-    onScroll={e=>setScroll({top:e.currentTarget.scrollTop,left:e.currentTarget.scrollLeft})} onKeyDown={onKeyDown}
+    onScroll={e=>setScroll({top:e.currentTarget.scrollTop,left:e.currentTarget.scrollLeft})} onKeyDown={onKeyDown} onPointerDownCapture={cancelJump} onBlur={cancelJump}
     onCopy={e=>{if(!editing.current)props.onCopy(e);}} onPaste={e=>{if(!editing.current&&!busy)props.onPaste(e);}}
     className="relative flex-1 overflow-auto outline-none bg-white select-none">
     <div style={{width:geometry.totalWidth+LEFT,height:totalRows*H+H,position:'relative'}}>

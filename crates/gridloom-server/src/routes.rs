@@ -89,6 +89,7 @@ pub fn create_router(state: AppState) -> Router {
         // Cells & Virtual Viewport
         .route("/api/cells/set", post(set_cell))
         .route("/api/cells/viewport", post(get_viewport))
+        .route("/api/cells/jump", get(jump_cell))
         .route("/api/cells/viewport-panes", post(get_viewport_panes))
         .route("/api/cells/find", post(find_cells))
         .route("/api/cells/explain", post(explain_cell))
@@ -428,6 +429,32 @@ async fn set_cell(
     )
     .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     Ok(Json(serde_json::json!({ "status": "ok" })))
+}
+
+#[derive(Deserialize)]
+struct JumpRequest {
+    sheet_name: String,
+    row: u32,
+    col: u32,
+    direction: gridloom_core::worksheet_navigation::JumpDirection,
+}
+
+async fn jump_cell(
+    State(state): State<AppState>,
+    Query(req): Query<JumpRequest>,
+) -> Result<Json<CellCoord>, (StatusCode, String)> {
+    let wb = state.workbook.read().await;
+    let sheet = wb
+        .sheets
+        .get(&req.sheet_name)
+        .ok_or_else(|| bad_request("Unknown sheet"))?;
+    let target = gridloom_core::worksheet_navigation::jump(
+        sheet,
+        CellCoord::new(req.row, req.col),
+        req.direction,
+    )
+    .ok_or_else(|| bad_request("Navigation starts outside the sheet"))?;
+    Ok(Json(target))
 }
 
 async fn get_viewport(

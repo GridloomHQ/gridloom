@@ -21,6 +21,7 @@ pub mod table;
 pub mod value;
 pub mod virtual_view;
 pub mod workbook;
+pub mod worksheet_navigation;
 pub mod writeback;
 
 pub use error::CellError;
