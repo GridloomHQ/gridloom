@@ -45,7 +45,7 @@ let pendingMutations=0;
 const mutationListeners=new Set<()=>void>();
 export const getPendingMutations=()=>pendingMutations;
 export const subscribeMutations=(listener:()=>void)=>{mutationListeners.add(listener);return()=>{mutationListeners.delete(listener);};};
-const readPostPaths=new Set(['/api/ranges/sort-filter','/api/ledger/page','/api/sample','/api/sample/ledger','/api/sample/query','/api/pivots/refresh','/api/ranges/summary','/api/ranges/capture','/api/ranges/read','/api/cells/find','/api/cells/explain','/api/cells/dependencies','/api/cells/viewport','/api/cells/viewport-panes','/api/query/analyze','/api/writeback/review','/api/benchmark/run']);
+const readPostPaths=new Set(['/api/ranges/sort-filter','/api/ledger/page','/api/sample','/api/sample/invoices','/api/sample/ledger','/api/sample/query','/api/pivots/refresh','/api/ranges/summary','/api/ranges/capture','/api/ranges/read','/api/cells/find','/api/cells/explain','/api/cells/dependencies','/api/cells/viewport','/api/cells/viewport-panes','/api/query/analyze','/api/writeback/review','/api/benchmark/run']);
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const changing=!!options?.method && options.method!=='GET' && !readPostPaths.has(url);
   if(changing){pendingMutations++;mutationListeners.forEach(listener=>listener());}
@@ -113,6 +113,9 @@ export const api = {
 
   getLedgerTrace: (target: LedgerTarget, signal?: AbortSignal) => fetchJson<LedgerTrace>("/api/ledger/trace?" + new URLSearchParams({sheet_name:target.sheet_name,row:String(target.row),col:String(target.col)}),{signal}),
   setLedgerTrace: (target: LedgerTarget, session: string|null, signal?: AbortSignal) => fetchJson<LedgerTrace>("/api/ledger/trace",{method:"POST",body:JSON.stringify({target,session}),signal}),
+  invoiceSampleStatus: (signal?:AbortSignal) => fetchJson<InvoiceSampleStatus>('/api/sample/invoices',{signal}),
+  startInvoiceSample: (signal?:AbortSignal) => fetchJson<InvoiceSampleStatus>('/api/sample/invoices',{method:'POST',signal}),
+  cancelInvoiceSample: (signal?:AbortSignal) => fetchJson<InvoiceSampleStatus>('/api/sample/invoices',{method:'DELETE',signal}),
   sampleStatus: (signal?:AbortSignal) => fetchJson<SampleStatus>('/api/sample',{signal}),
   startSample: (signal?:AbortSignal) => fetchJson<SampleStatus>('/api/sample',{method:'POST', signal}),
   cancelSample: (signal?:AbortSignal) => fetchJson<SampleStatus>('/api/sample',{method:'DELETE', signal}),
@@ -225,3 +228,10 @@ export type SampleStats = {
   totals_ms:number;total_cents:string;filtered_rows:number;
   filtered_cents:string;filter_ms:number;seek_ms:number;
 };
+
+
+export type InvoiceSampleStatus =
+  | {state:'idle'|'cancelling'|'cancelled'}
+  | {state:'generating'; rows_written?:number; target_rows?:number; phase?:string}
+  | {state:'ready'; rows:number; added:number}
+  | {state:'failed'; message:string};

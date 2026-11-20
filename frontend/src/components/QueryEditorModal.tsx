@@ -133,7 +133,7 @@ export const QueryEditorModal: React.FC<QueryEditorModalProps> = ({
               <span className="text-[11px] font-semibold">Presets:</span>
               <button
                 onClick={() => {
-                  setSql('SELECT id, customer_name, amount, status, issued_date FROM invoices');
+                  setSql('SELECT id, customer_name, amount, status, issued_on FROM invoices ORDER BY id LIMIT 100');
                   setSourceName('Invoices');
                 }}
                 className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-[11px] text-slate-700 font-mono"
