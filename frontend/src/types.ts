@@ -88,6 +88,7 @@ export interface WorksheetTable {
   name: string;
   source_name: string;
   anchor: CellCoord;
+  range: { start_row: number; start_col: number; end_row: number; end_col: number };
   columns: string[];
 }
 
