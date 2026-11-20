@@ -18,9 +18,6 @@ struct Args {
 
     #[arg(long, default_value_t = false)]
     server: bool,
-
-    #[arg(long, default_value_t = false)]
-    no_samples: bool,
 }
 
 #[allow(unreachable_code)]
@@ -79,7 +76,7 @@ fn main() -> anyhow::Result<()> {
 
     let rt = tokio::runtime::Runtime::new()?;
     let (actual_port, server_handle) =
-        rt.block_on(async { start_server(args.port, !args.no_samples).await })?;
+        rt.block_on(async { start_server(args.port).await })?;
 
     println!(
         "Gridloom Core Engine active at http://127.0.0.1:{}",

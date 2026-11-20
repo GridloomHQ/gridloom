@@ -10,7 +10,7 @@ import { chromium } from 'playwright';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const recovery = mkdtempSync(path.join(tmpdir(), 'gridloom-paste-smoke-'));
 const server = spawn(process.env.GRIDLOOM_SERVER || path.join(root, 'target/debug/gridloom-server'),
-  ['--port', '0', '--no-samples'], {cwd:root, env:{...process.env, GRIDLOOM_RECOVERY_DIR:recovery}});
+  ['--port', '0'], {cwd:root, env:{...process.env, GRIDLOOM_RECOVERY_DIR:recovery}});
 let log = '', browser;
 server.stdout.on('data', d => log += d);
 server.stderr.on('data', d => log += d);

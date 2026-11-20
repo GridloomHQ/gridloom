@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const fixture = mkdtempSync(path.join(os.tmpdir(), 'gridloom-query-preview-'));
 const server = spawn(process.env.GRIDLOOM_SERVER || path.join(root, 'target/debug/gridloom-server'),
-  ['--port', '0', '--no-samples'], {
+  ['--port', '0'], {
     cwd: root, env: { ...process.env, XDG_DATA_HOME: fixture,
       GRIDLOOM_FRONTEND_DIR: path.join(root, 'frontend/dist') },
     stdio: ['ignore', 'pipe', 'pipe'],

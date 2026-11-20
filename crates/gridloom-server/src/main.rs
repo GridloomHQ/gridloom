@@ -11,9 +11,6 @@ struct Args {
 
     #[arg(long, default_value_t = false)]
     bench: bool,
-
-    #[arg(long, default_value_t = false)]
-    no_samples: bool,
 }
 
 #[tokio::main]
@@ -70,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
         return report.ensure_passed();
     }
 
-    let (port, handle) = start_server(args.port, !args.no_samples).await?;
+    let (port, handle) = start_server(args.port).await?;
     println!("Gridloom Server running at http://127.0.0.1:{}", port);
     println!("Press Ctrl+C to terminate.");
     handle.await?;

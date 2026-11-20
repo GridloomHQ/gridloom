@@ -15,7 +15,7 @@ const sql = statement => execFileSync('python3', ['-c',
 ]);
 sql("CREATE TABLE entries(id INTEGER PRIMARY KEY, account TEXT, month TEXT, cents INTEGER, prior INTEGER); INSERT INTO entries VALUES(1,'A','Jan',10,3),(2,'B','Feb',-5,2),(3,'C','Mar',0,0);");
 const binary = process.env.GRIDLOOM_SERVER ?? path.join(root, 'target/debug/gridloom-server');
-const server = spawn(binary, ['--port', '0', '--no-samples'], {
+const server = spawn(binary, ['--port', '0'], {
   cwd: root, env: {...process.env, GRIDLOOM_RECOVERY_DIR: path.join(temp, 'recovery')},
 });
 let log = '', browser;

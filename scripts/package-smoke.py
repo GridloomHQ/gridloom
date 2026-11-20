@@ -359,7 +359,7 @@ def launch_smoke(root, info, native_window=False, timeout=45):
         raise SmokeError("--native-window requires a desktop package")
     environment = isolated_environment()
     verify_dependencies(root, info, environment)
-    command = [str(root.resolve() / "gridloom"), "--no-samples", "--port", "0"]
+    command = [str(root.resolve() / "gridloom"), "--port", "0"]
     if native_window:
         command = ["dbus-run-session", "--", "xvfb-run", "-a", "env", "GDK_BACKEND=x11", "LIBGL_ALWAYS_SOFTWARE=1", "WEBKIT_DISABLE_COMPOSITING_MODE=1"] + command
     elif info["mode"] == "desktop":

@@ -18,7 +18,7 @@ from urllib.request import Request, urlopen
 def server(binary, workspace, recovery):
     log_path = workspace / "server.log"
     with log_path.open("wb") as log, subprocess.Popen(
-        [str(binary), "--port", "0", "--no-samples"],
+        [str(binary), "--port", "0"],
         cwd=workspace,
         env={**os.environ, "GRIDLOOM_RECOVERY_DIR": str(recovery)},
         stdout=log,
@@ -57,6 +57,17 @@ def read_cell(base):
     })
 
 
+def assert_blank(base):
+    workbook = api(base, "workbook")
+    assert workbook["file_path"] is None
+    assert [sheet["name"] for sheet in workbook["sheets"]] == ["Sheet1"]
+    assert workbook["sheets"][0]["tables"] == []
+    assert workbook["connections"] == []
+    assert workbook["sources"] == []
+    assert workbook["staged_patches_count"] == 0
+    assert read_cell(base) == [[""]]
+
+
 def write_cell(base, text):
     api(base, "ranges/edit", {"sheet_name": "Sheet1", "row": 0, "col": 0, "values": [[text]]})
 
@@ -84,6 +95,8 @@ def smoke(binary, folder):
         )
         original_database = database.read_bytes()
         with server(binary, folder, recovery) as (process, base):
+            assert_blank(base)
+            assert not (folder / "fixtures").exists(), "Default launch created demo files"
             api(base, "connections", {"name": "Ledger", "kind": "sqlite", "path": str(database)})
             write_cell(base, "explicitly saved")
             api(base, "workbook/save", {"path": str(named)})
@@ -109,7 +122,7 @@ def smoke(binary, folder):
             assert process.wait(timeout=5) != 0
 
         with server(binary, folder, recovery) as (_, base):
-            assert api(base, "workbook")["file_path"] is None
+            assert_blank(base)
             assert any(item["id"] == checkpoint_id for item in api(base, "workbook/recovery"))
             api(base, "workbook/recovery/" + checkpoint_id, {})
             assert read_cell(base) == [["recovered after crash"]]
@@ -123,6 +136,10 @@ def smoke(binary, folder):
             api(base, "workbook/open", {"path": str(named)})
             assert read_cell(base) == [["explicitly saved"]]
             assert not api(base, "staged")
+            assert api(base, "workbook")["connections"] == ["Ledger"]
+            api(base, "workbook/new", {})
+            assert_blank(base)
+            assert any(item["id"] == checkpoint_id for item in api(base, "workbook/recovery"))
             assert named.read_bytes() == original_workbook
             assert database.read_bytes() == original_database
             assert db.execute("SELECT amount FROM entries WHERE id=1").fetchone() == (11,)
@@ -134,4 +151,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="gridloom-recovery-smoke-") as root:
         smoke(args.server_binary.resolve(strict=True), Path(root))
-    print("PASS: forced termination, private recovery, Save As, reopening, and unchanged SQLite source")
+    print("PASS: blank launch and File/New, forced termination, private recovery, Save As, reopening, and unchanged SQLite source")

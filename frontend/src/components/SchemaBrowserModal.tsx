@@ -96,22 +96,6 @@ export const SchemaBrowserModal: React.FC<SchemaBrowserModalProps> = ({
     }
   };
 
-  const handleConnectSample = async (kind: 'sqlite' | 'duckdb') => {
-    setLoading(true);
-    setError(null);
-    try {
-      const name = kind === 'sqlite' ? 'SampleSales' : 'SampleAnalytics';
-      const path = kind === 'sqlite' ? 'fixtures/sample_sales.sqlite' : 'fixtures/sample_analytics.duckdb';
-      await api.connectDb(name, kind, path);
-      await loadConnections();
-      setSelectedConn(name);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   if (!isOpen) return null;
 
   return (
@@ -156,24 +140,6 @@ export const SchemaBrowserModal: React.FC<SchemaBrowserModalProps> = ({
                 >
                   <Plus className="w-3 h-3" />
                   <span>Connect</span>
-                </button>
-              </div>
-
-              {/* Sample Buttons */}
-              <div className="flex gap-1.5 mb-2">
-                <button
-                  onClick={() => handleConnectSample('sqlite')}
-                  disabled={loading}
-                  className="flex-1 py-1 px-1.5 bg-white border border-slate-300 rounded text-[10px] font-medium text-slate-700 hover:bg-slate-100 shadow-sm"
-                >
-                  + Sample SQLite
-                </button>
-                <button
-                  onClick={() => handleConnectSample('duckdb')}
-                  disabled={loading}
-                  className="flex-1 py-1 px-1.5 bg-white border border-slate-300 rounded text-[10px] font-medium text-slate-700 hover:bg-slate-100 shadow-sm"
-                >
-                  + Sample DuckDB
                 </button>
               </div>
 

@@ -72,20 +72,6 @@ pub fn create_router(state: AppState) -> Router {
         // Query Execution & Lineage
         .route("/api/query/execute", post(execute_query))
         .route("/api/query/preview", post(preview_query))
-        .route(
-            "/api/sample",
-            get(crate::ledger_demo::status)
-                .post(crate::ledger_demo::start)
-                .delete(crate::ledger_demo::cancel),
-        )
-        .route(
-            "/api/sample/invoices",
-            get(crate::invoice_sample::status)
-                .post(crate::invoice_sample::start)
-                .delete(crate::invoice_sample::cancel),
-        )
-        .route("/api/sample/query", post(crate::ledger_demo::query))
-        .route("/api/sample/ledger", post(crate::ledger::browse_sample))
         .route("/api/ledger/page", post(crate::ledger::browse))
         .route("/api/ledger/trace", get(crate::ledger::get_trace).post(crate::ledger::update_trace))
         .route("/api/query/analyze", post(analyze_query))

@@ -1,3 +1,7 @@
+# Unreleased
+
+- Start with one blank worksheet. Gridloom no longer creates or offers built-in demonstration data. Existing workbook and database files are unchanged.
+
 # 0.11.0
 
 - Refresh the existing demo Invoices table in place after generating ten million rows, without loading all rows into the worksheet.

@@ -7,10 +7,19 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
-const temp=mkdtempSync(path.join(process.env.GRIDLOOM_TEST_TMPDIR??tmpdir(),'gridloom-demo-invoices-'));
+const temp=mkdtempSync(path.join(process.env.GRIDLOOM_TEST_TMPDIR??tmpdir(),'gridloom-live-invoices-'));
 const binary=process.env.GRIDLOOM_SERVER??path.join(root,'target/debug/gridloom-server');
 const args=['--port','0'];
 const options={cwd:temp,env:{...process.env,GRIDLOOM_RECOVERY_DIR:path.join(temp,'recovery'),GRIDLOOM_FRONTEND_DIR:path.join(root,'frontend/dist')},stdio:['ignore','pipe','pipe']};
+const dbPath=path.join(temp,'invoices.sqlite');
+const workbookPath=path.join(temp,'saved.gridloom');
+function fixture(action){
+  const started=performance.now();
+  const result=spawnSync('python3',[path.join(root,'frontend/tests/fixtures/invoices.py'),action,dbPath],{encoding:'utf8',timeout:180_000});
+  assert.ifError(result.error);
+  assert.equal(result.status,0,result.stderr);
+  return Math.round(performance.now()-started);
+}
 let server,browser;
 async function start(){
   server=spawn(binary,args,options);
@@ -33,31 +42,28 @@ try{
   browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH||(existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined),args:['--no-sandbox']});
   const page=await browser.newPage({locale:'en-US'});
   async function query(sql){
-    const response=await page.request.post(base+'/api/query/execute',{data:{connection_name:'SalesDB',sql}});
+    const response=await page.request.post(base+'/api/query/execute',{data:{connection_name:'Invoice fixture',sql}});
     assert(response.ok(),await response.text());
     return (await response.json()).rows;
   }
+  async function mutate(route,data){
+    const response=await page.request.post(base+route,{data});
+    assert(response.ok(),await response.text());
+    return response.json();
+  }
+  fixture('init');
+  await mutate('/api/connections',{name:'Invoice fixture',kind:'sqlite',path:dbPath});
+  await mutate('/api/tables/insert-live',{sheet_name:'Sheet1',table_name:'Invoices',connection_name:'Invoice fixture',sql:'SELECT * FROM invoices',row:1,col:1});
   const original=await query('SELECT * FROM invoices ORDER BY id LIMIT 10');
   assert.equal(original.length,10);
-  await page.goto(base);
-  await page.getByRole('tab',{name:'Help',exact:true}).click();
-  await page.getByRole('button',{name:'About',exact:true}).click();
-  const about=page.getByRole('dialog',{name:'About Gridloom'});
-  const generate=about.getByRole('button',{name:'Generate demo invoices'});
-  const generationStart=performance.now();
-  await generate.click();
-  await about.getByText('10,000,000 invoices',{exact:true}).waitFor({timeout:240_000});
-  console.log(`Generate 10M invoices: ${Math.round(performance.now()-generationStart)} ms including UI`);
-  assert.match(await about.innerText(),/9,999,990 added/);
+  console.log(`Generate 10M synthetic invoices in the test fixture: ${fixture('expand')} ms`);
   assert.deepEqual(await query('SELECT * FROM invoices ORDER BY id LIMIT 10'),original);
   const count=await query('SELECT count(*), max(id) FROM invoices');
   assert.deepEqual(count[0].map(cell=>Number(cell.value)),[10_000_000,10_000_000]);
-  await generate.click();
-  await about.getByText(/database\. 0 added\./).waitFor({timeout:20_000});
   const summary=await (await page.request.get(base+'/api/workbook')).json();
-  assert.equal(summary.sheets.length,1,'generation should not add a workbook sheet');
-  assert.equal(summary.sheets[0].tables.find(t=>t.name==='Invoices').range.end_row,11);
-  await about.getByRole('button',{name:'Close',exact:true}).click();
+  assert.equal(summary.sheets.length,1);
+  assert.equal(summary.sheets[0].tables.find(t=>t.name==='Invoices').range.end_row,11,'external change needs a refresh');
+  await page.goto(base);
   await page.getByRole('tab',{name:'Data',exact:true}).click();
   const refresh=page.getByRole('button',{name:'Refresh',exact:true});
   const refreshStart=performance.now();
@@ -103,7 +109,6 @@ try{
   assert(customerBefore,'the final invoice customer must already be rendered');
   const newCustomer='Fixture customer after refresh';
   assert.notEqual(customerBefore,newCustomer);
-  const dbPath=path.join(temp,'fixtures','sample_sales.sqlite');
   assert(existsSync(dbPath),'the fixture must have been created under the test directory');
   const edit=spawnSync('python3',['-c',`
 import sqlite3
@@ -142,7 +147,7 @@ finally:
   await finalCustomer.getByText(newCustomer,{exact:true}).waitFor();
   await page.getByRole('button',{name:'SQL Query',exact:true}).click();
   const editor=page.getByRole('dialog',{name:'SQL Query Editor & Source Builder'});
-  await editor.getByRole('combobox',{name:'Target Database:'}).selectOption('SalesDB');
+  await editor.getByRole('combobox',{name:'Target Database:'}).selectOption('Invoice fixture');
   const sqlInput=editor.getByRole('textbox',{name:'SQL query'});
   const run=editor.getByRole('button',{name:'Run Query',exact:true});
   const paging=editor.getByRole('group',{name:'Query result pages'});
@@ -158,7 +163,7 @@ finally:
       page.waitForResponse(r=>new URL(r.url()).pathname==='/api/query/preview'), action.click(),
     ]);
     assert(response.ok(),await response.text());
-    assert.deepEqual(response.request().postDataJSON(),{connection_name:'SalesDB',sql,offset,limit:100});
+    assert.deepEqual(response.request().postDataJSON(),{connection_name:'Invoice fixture',sql,offset,limit:100});
     const payload=await response.json();
     assert.equal(payload.offset,offset);
     assert.equal(payload.rows.length,length);
@@ -185,12 +190,18 @@ finally:
   assert.equal(legacy.length,0,'SQL editor preview must not use the eager query endpoint');
   page.off('request',observe);
   await editor.getByRole('button',{name:'Close query editor'}).click();
+  await mutate('/api/workbook/save',{path:workbookPath});
   await stop();
   base=await start();
+  const atLaunch=await (await page.request.get(base+'/api/workbook')).json();
+  assert.deepEqual(atLaunch.sheets.map(s=>s.name),['Sheet1']);
+  assert.deepEqual(atLaunch.sheets[0].tables,[]);
+  assert.deepEqual(atLaunch.connections,[]);
+  await mutate('/api/workbook/open',{path:workbookPath});
   const reopened=await (await page.request.get(base+'/api/workbook')).json();
-  assert.equal(reopened.sheets[0].tables.find(t=>t.name==='Invoices').range.end_row,10_000_001,'restart reattaches the live source without importing rows');
+  assert.equal(reopened.sheets[0].tables.find(t=>t.name==='Invoices').range.end_row,10_000_001,'opening a saved workbook reattaches the live source without importing rows');
   assert.equal(Number((await query('SELECT count(*) FROM invoices'))[0][0].value),10_000_000);
-  console.log('PASS: the sample button adds and preserves 10,000,000 invoices in SalesDB, refreshes the original live table, and jumps directly to the rendered final row, and reloads a changed value even at the same row count; SQL preview remains bounded.');
+  console.log('PASS: the generic SQL live table refreshes from 10 to 10,000,000 synthetic invoices, jumps directly to the rendered final row, shows a changed value at the same row count, and reopens after restart; SQL preview remains bounded.');
 }finally{
   await browser?.close();
   await stop();
