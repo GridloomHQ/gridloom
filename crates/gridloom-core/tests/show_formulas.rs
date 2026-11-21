@@ -17,6 +17,7 @@ fn show_formulas_are_independent_per_sheet_and_legacy_defaults_roundtrip() {
     wb.save_to_file(&file).unwrap();
     let loaded = Workbook::open_from_file(&file).unwrap();
     assert_eq!(serde_json::to_value(&loaded.sheets).unwrap(), before);
+    wb.save_recovery_copy(&file).unwrap();
     let mut json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
     for sheet in json["sheets"].as_object_mut().unwrap().values_mut() {

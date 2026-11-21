@@ -17,7 +17,7 @@ use crate::writeback::StagedRepository;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufReader, BufWriter, Write};
+use std::io::{BufReader, BufWriter, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 /// Owns only the unique temporary path created by this save attempt.
@@ -127,8 +127,13 @@ pub struct LedgerLink {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sheet {
+    /// Stable identity for workbook-local SQL storage; display names can change.
+    #[serde(default = "uuid::Uuid::new_v4")]
+    pub storage_id: uuid::Uuid,
     pub name: String,
+    #[serde(default)]
     pub cells: HashMap<String, CellData>,
+    #[serde(default)]
     pub tables: HashMap<String, WorksheetTable>,
     pub spills: SpillManager,
     pub max_rows: u32,
@@ -154,6 +159,7 @@ pub struct Sheet {
 impl Sheet {
     pub fn new(name: String) -> Self {
         Self {
+            storage_id: uuid::Uuid::new_v4(),
             name,
             cells: HashMap::new(),
             tables: HashMap::new(),
@@ -1228,6 +1234,20 @@ impl Workbook {
             .unwrap_or_else(|| Path::new("."));
         p.file_name()
             .ok_or_else(|| CellError::Sql("Save path must name a file".into()))?;
+        if set_path {
+            // An explicit Save never replaces an attached database, including
+            // one referenced under a different spelling or via a symlink.
+            let canonical = p.canonicalize().ok();
+            if self.connection_configs.values().any(|config| {
+                config.path != ":memory:" && (Path::new(&config.path) == p
+                    || canonical.as_ref().is_some_and(|path| {
+                        Path::new(&config.path).canonicalize().ok().as_ref() == Some(path)
+                    }))
+            }) {
+                return Err(CellError::Sql("Choose a workbook path, not an attached database.".into()));
+            }
+            crate::workbook_store::protect_existing(&p)?;
+        }
         // Bounded name length also permits destinations near a filesystem's filename limit.
         let tmp_path = parent.join(format!(".gridloom-save-{}.tmp", uuid::Uuid::new_v4()));
 
@@ -1237,7 +1257,7 @@ impl Workbook {
             close_periods: &'a Vec<crate::close::ClosePeriod>,
             stale_sources: &'a BTreeSet<String>,
             stale_calculation_sheets: &'a BTreeSet<String>,
-            sheets: &'a HashMap<String, Sheet>,
+            sheets: SnapshotSheets<'a>,
             active_sheet: &'a String,
             connection_configs: &'a HashMap<String, ConnectionConfig>,
             named_sources: &'a HashMap<String, NamedSource>,
@@ -1250,7 +1270,10 @@ impl Workbook {
             close_periods: &self.close_periods,
             stale_sources: &self.stale_sources,
             stale_calculation_sheets: &self.stale_calculation_sheets,
-            sheets: &self.sheets,
+            sheets: SnapshotSheets {
+                sheets: &self.sheets,
+                metadata_only: set_path,
+            },
             active_sheet: &self.active_sheet,
             connection_configs: &self.connection_configs,
             named_sources: &self.named_sources,
@@ -1275,39 +1298,43 @@ impl Workbook {
             committed: false,
         };
         #[cfg(unix)]
-        {
-            // Preserve existing regular-file permission bits; new workbooks remain private.
-            // Do not follow a destination symlink or copy its target's permissions.
-            match fs::symlink_metadata(&p) {
-                Ok(metadata) if metadata.is_file() => {
-                    file.set_permissions(metadata.permissions()).map_err(|e| {
-                        CellError::Sql(format!("Failed to preserve workbook permissions: {}", e))
-                    })?
-                }
-                Ok(_) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => {
-                    return Err(CellError::Sql(format!(
-                        "Failed to inspect workbook permissions: {}",
-                        error
-                    )))
-                }
+        // Capture the existing mode before replacement, but apply it after
+        // writing so an existing read-only mode cannot prevent staging.
+        let permissions = match fs::symlink_metadata(&p) {
+            Ok(metadata) if metadata.is_file() => Some(metadata.permissions()),
+            Ok(_) => None,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(CellError::Sql(format!("Failed to inspect workbook permissions: {error}"))),
+        };
+        if set_path {
+            // Close and sync SQLite before the existing atomic replacement.
+            crate::workbook_store::write(&tmp_path, &serialized, &self.sheets)?;
+            #[cfg(unix)]
+            if let Some(permissions) = permissions {
+                file.set_permissions(permissions).map_err(|e| {
+                    CellError::Sql(format!("Failed to preserve workbook permissions: {e}"))
+                })?;
             }
+            file.sync_all().map_err(|e| {
+                CellError::Sql(format!("Failed to sync workbook database: {e}"))
+            })?;
+            drop(file);
+        } else {
+            // Recovery stays independent of the saved database.
+            let mut writer = BufWriter::new(file);
+            serde_json::to_writer_pretty(&mut writer, &serialized)
+                .map_err(|e| CellError::Sql(format!("Failed to serialize workbook: {e}")))?;
+            writer.flush().map_err(|e| CellError::Sql(format!("Failed to flush workbook: {e}")))?;
+            #[cfg(unix)]
+            if let Some(permissions) = permissions {
+                writer.get_ref().set_permissions(permissions).map_err(|e| {
+                    CellError::Sql(format!("Failed to preserve recovery permissions: {e}"))
+                })?;
+            }
+            writer.get_ref().sync_all().map_err(|e| {
+                CellError::Sql(format!("Failed to sync recovery snapshot: {e}"))
+            })?;
         }
-        let mut writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(&mut writer, &serialized)
-            .map_err(|e| CellError::Sql(format!("Failed to serialize workbook: {}", e)))?;
-
-        writer
-            .flush()
-            .map_err(|e| CellError::Sql(format!("Failed to flush workbook: {}", e)))?;
-        writer.get_ref().sync_all().map_err(|e| {
-            CellError::Sql(format!(
-                "Failed to sync save file before replacement: {}",
-                e
-            ))
-        })?;
-        drop(writer);
         // Same-directory rename is the commit point. Failures before this preserve the target.
         fs::rename(&tmp_path, &p)
             .map_err(|e| CellError::Sql(format!("Failed to commit atomic save: {}", e)))?;
@@ -1328,11 +1355,17 @@ impl Workbook {
     /// Open and deserialize workbook
     pub fn open_from_file<P: AsRef<Path>>(path: P) -> Result<Self, CellError> {
         let p = path.as_ref().to_path_buf();
-        let file = File::open(&p)
-            .map_err(|e| CellError::Sql(format!("Failed to open workbook file: {}", e)))?;
-        let reader = BufReader::new(file);
-        let serialized: SerializedWorkbook = serde_json::from_reader(reader)
-            .map_err(|e| CellError::Sql(format!("Corrupt workbook format: {}", e)))?;
+        let mut file = File::open(&p)
+            .map_err(|e| CellError::Sql(format!("Failed to open workbook file: {e}")))?;
+        let mut header = [0; 16];
+        let sqlite = file.read_exact(&mut header).is_ok() && &header == b"SQLite format 3\0";
+        let serialized: SerializedWorkbook = if sqlite {
+            crate::workbook_store::read(&p)?
+        } else {
+            file.rewind().map_err(|e| CellError::Sql(format!("Failed to read workbook: {e}")))?;
+            serde_json::from_reader(BufReader::new(file))
+                .map_err(|e| CellError::Sql(format!("Corrupt workbook format: {e}")))?
+        };
 
         let mut wb = Workbook {
             sheets: serialized.sheets,
@@ -1379,6 +1412,53 @@ impl Workbook {
         }
         wb.invalidate_changed_reviews();
         Ok(wb)
+    }
+}
+
+struct SnapshotSheets<'a> {
+    sheets: &'a HashMap<String, Sheet>,
+    metadata_only: bool,
+}
+
+impl Serialize for SnapshotSheets<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        if !self.metadata_only {
+            return self.sheets.serialize(serializer);
+        }
+        #[derive(Serialize)]
+        struct Layout<'a> {
+            storage_id: uuid::Uuid,
+            name: &'a str,
+            spills: &'a SpillManager,
+            max_rows: u32,
+            max_cols: u32,
+            column_widths: &'a HashMap<u32, u16>,
+            freeze_top_row: bool,
+            freeze_first_column: bool,
+            frozen_rows: Option<u32>,
+            frozen_columns: Option<u32>,
+            show_formulas: bool,
+            ledger_links: &'a HashMap<String, LedgerLink>,
+        }
+        let mut map = serializer.serialize_map(Some(self.sheets.len()))?;
+        for (key, sheet) in self.sheets {
+            map.serialize_entry(key, &Layout {
+                storage_id: sheet.storage_id,
+                name: &sheet.name,
+                spills: &sheet.spills,
+                max_rows: sheet.max_rows,
+                max_cols: sheet.max_cols,
+                column_widths: &sheet.column_widths,
+                freeze_top_row: sheet.freeze_top_row,
+                freeze_first_column: sheet.freeze_first_column,
+                frozen_rows: sheet.frozen_rows,
+                frozen_columns: sheet.frozen_columns,
+                show_formulas: sheet.show_formulas,
+                ledger_links: &sheet.ledger_links,
+            })?;
+        }
+        map.end()
     }
 }
 

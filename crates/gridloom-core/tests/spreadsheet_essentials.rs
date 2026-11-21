@@ -165,6 +165,7 @@ fn styles_and_cross_sheet_formulas_persist_with_old_file_compatibility() {
     let loaded = Workbook::open_from_file(file.path()).unwrap();
     assert_eq!(value(&loaded, "Sheet1", "A1"), "0.25");
     assert_eq!(loaded.sheets["Sheet1"].cells["A1"].style, style);
+    w.save_recovery_copy(file.path()).unwrap();
     let mut json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(file.path()).unwrap()).unwrap();
     json["sheets"]["Sheet1"]["cells"]["A1"]

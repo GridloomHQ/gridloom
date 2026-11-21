@@ -22,7 +22,7 @@ It is aimed at accounting and financial models where understanding **where a num
 - Get selection totals, browse functions by category, syntax, arguments and return values with **fx**, and complete function names in either editor. In an F2 edit, use arrows where a formula expects a reference and hold Shift to extend the range. Referenced cells are outlined while you edit. F4 cycles relative and absolute references.
 - Select a worksheet range and open **Sort & filter** for a read-only view. You can use the first row as headers, sort and filter on different columns, and jump back to a result’s original row. Formulas, database links and staging are unchanged. Each view supports up to 1,000 rows, 50 columns and 5,000 cells.
 - Build pivots and charts by dragging fields into the layout wells, or use the field pickers by keyboard. Choose signed bar and column charts, lines, pies or scatterplots. Reopen a saved pivot and choose **Refresh from source** to rerun its read query without changing its layout, the workbook snapshot, or any staged database edits.
-- Save and reopen `.gridloom` workbooks, including layouts, calculations and pending source edits.
+- Save and reopen `.gridloom` workbooks, including layouts, calculations and pending source edits. A saved workbook is one local SQLite file. Ordinary sheets need no database connection or setup.
 
 The formula engine includes arithmetic, statistics, logic, text, date, lookup and financial functions, plus `SQLVALUE` and `SQLTABLE`. Examples include `SUMIFS`, `SUMPRODUCT`, `XLOOKUP`, `FILTER`, `PMT` and `NPV`. The formula bar's suggestions and the local `/api/functions` endpoint expose the engine's supported function names and aliases.
 
@@ -33,7 +33,7 @@ Connect an existing **SQLite** or **DuckDB** file, run a read-only query, and in
 ```excel
 =SUM(Invoices[Amount])
 =AVERAGEIFS(Invoices[Amount], Invoices[Status], "Paid")
-=SQLVALUE("SalesDB", "SELECT SUM(amount) FROM invoices WHERE customer_name = ?", A2)
+=SQLVALUE("CustomerDatabase", "SELECT SUM(amount) FROM invoices WHERE customer_name = ?", A2)
 ```
 
 Apply worksheet presentation formatting to source-backed cells without staging data edits. The database stays in its original format. Eligible single-table projections with direct column mappings and declared primary keys can support staged edits. Joined, aggregated or ambiguous results remain read-only.
@@ -148,7 +148,7 @@ For frontend development, run the server in one terminal and `cd frontend && npm
 
 ### Try a first workbook
 
-Enter a few values and a formula, select its result, and open **Explain & Review**. To use your own data, connect an existing SQLite or DuckDB file, or enable the **Monthly close** add-on to import a trial balance. Save the workbook before closing the application. Use **Save As** to keep a separate copy.
+Enter a few values and a formula, select its result, and open **Explain & Review**. To use your own data, connect an existing SQLite or DuckDB file, or enable the **Monthly close** add-on to import a trial balance. Save the workbook before closing the application. Use **Save As** to keep a separate copy. Older JSON workbooks still open without changing the original file. An explicit save uses the new SQLite container; use **Save As** if you want to retain the older JSON file for use with older releases.
 
 ### Recover unsaved edits
 

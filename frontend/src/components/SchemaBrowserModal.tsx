@@ -167,7 +167,7 @@ export const SchemaBrowserModal: React.FC<SchemaBrowserModalProps> = ({
                     type="text"
                     value={connName}
                     onChange={(e) => setConnName(e.target.value)}
-                    placeholder="e.g. SalesDB"
+                    placeholder="e.g. CustomerDatabase"
                     required
                     className="w-full px-2 py-1 border border-slate-300 rounded text-xs bg-white"
                   />

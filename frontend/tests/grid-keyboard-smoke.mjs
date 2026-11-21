@@ -1,8 +1,8 @@
 // Use the real server and Chromium with a synthetic workbook.
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -70,10 +70,13 @@ try {
     assert(response.ok(),await response.text());
   };
   await post('/api/workbook/save',{path:file});
-  const saved=JSON.parse(readFileSync(file,'utf8'));
-  saved.sheets.Sheet1.max_rows=10_000_001;
-  saved.sheets.Sheet1.frozen_rows=2;
-  writeFileSync(file,JSON.stringify(saved));
+  execFileSync('python3', ['-c', [
+    'import json, sqlite3, sys',
+    'with sqlite3.connect(sys.argv[1]) as db:',
+    '    saved = json.loads(db.execute("SELECT json FROM workbook WHERE singleton = 1").fetchone()[0])',
+    '    saved["sheets"]["Sheet1"].update(max_rows=10_000_001, frozen_rows=2)',
+    '    db.execute("UPDATE workbook SET json = ? WHERE singleton = 1", (json.dumps(saved),))',
+  ].join('\n'), file]);
   await post('/api/workbook/open',{path:file});
   await post('/api/cells/set',{sheet_name:'Sheet1',row:10_000_000,col:0,raw_input:'=A1+41'});
   await page.reload();
