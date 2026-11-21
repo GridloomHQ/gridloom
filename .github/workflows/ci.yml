@@ -133,6 +133,9 @@ jobs:
       - name: Real browser worksheet keyboard navigation
         working-directory: frontend
         run: node tests/grid-keyboard-smoke.mjs
+      - name: Workbook-local table lifecycle (Chromium)
+        working-directory: frontend
+        run: node tests/local-table-smoke.mjs
 
       - name: Real browser function browser
         working-directory: frontend

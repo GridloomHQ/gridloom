@@ -26,6 +26,12 @@ It is aimed at accounting and financial models where understanding **where a num
 
 The formula engine includes arithmetic, statistics, logic, text, date, lookup and financial functions, plus `SQLVALUE` and `SQLTABLE`. Examples include `SUMIFS`, `SUMPRODUCT`, `XLOOKUP`, `FILTER`, `PMT` and `NPV`. The formula bar's suggestions and the local `/api/functions` endpoint expose the engine's supported function names and aliases.
 
+### Create a local worksheet table
+
+Select a header row and at least one data row, then choose **Insert → Create local table**. Give the table a name and set each column to Any, Text, Integer, Decimal, Boolean or Date. Existing headings are kept. Any columns can contain worksheet formulas; the other types validate literal entries, preserving leading zeroes in Text, exact Decimal values, and ISO dates. In a Text column, type two double quotes for an explicit empty string; **Data → Set SQL NULL** stores NULL, and clearing the cell leaves a blank.
+
+Local table edits are workbook edits, not staged external database writes. The table and its rows live inside the same saved workbook file. Use regular cell/range references or structured references such as `=SUM(Transactions[Amount])`. No separate database connection is required.
+
 ### Bring SQL data into the worksheet
 
 Connect an existing **SQLite** or **DuckDB** file, run a read-only query, and insert its result as a named table. Keep ordinary cells and formulas alongside it:

@@ -19,6 +19,7 @@ import { KeyboardShortcutsDialog, PasteSpecialDialog, type PasteMode } from './c
 import { SchemaBrowserModal } from './components/SchemaBrowserModal';
 import { QueryEditorModal } from './components/QueryEditorModal';
 import { InsertTableModal } from './components/InsertTableModal';
+import { LocalTableDialog } from './components/LocalTableDialog';
 import { StagedReviewModal } from './components/StagedReviewModal';
 import { PivotBuilderModal } from './components/PivotBuilderModal';
 import { ChartModal } from './components/ChartModal';
@@ -123,6 +124,7 @@ export const App: React.FC = () => {
   const [queryInitialConn, setQueryInitialConn] = useState('');
   const [queryInitialSql, setQueryInitialSql] = useState('');
   const [isInsertTableOpen, setIsInsertTableOpen] = useState(false);
+  const [localTableSelection, setLocalTableSelection] = useState<{sheet: string; range: GridRange} | null>(null);
   const [isStagedReviewOpen, setIsStagedReviewOpen] = useState(false);
   const [isPivotsOpen, setIsPivotsOpen] = useState(false);
   const [isChartsOpen, setIsChartsOpen] = useState(false);
@@ -284,7 +286,7 @@ export const App: React.FC = () => {
       }
 
       // Check if this cell belongs to an editable table
-      if (existing?.table_name && !existing.is_table_header) {
+      if (existing?.table_name && !existing.is_table_header && !tables.some(t=>t.name===existing.table_name&&t.local)) {
         // Find table and its source
         const tbl = tables.find((t) => t.name === existing.table_name);
         if (tbl) {
@@ -336,10 +338,11 @@ export const App: React.FC = () => {
         throw new Error('This table column is read-only');
       }
       if (existing?.is_table_header) throw new Error('Table headers are read-only');
-      if(asSqlNull)throw new Error('Select a SQL source data cell to set NULL.');
+      if(asSqlNull&&!tables.some(t=>t.name===existing?.table_name&&t.local))
+        throw new Error('Select a table data cell to set NULL.');
 
-      // Normal spreadsheet cell edit
-      await api.setCell(sheetName, row, col, rawInput);
+      // Normal spreadsheet edit, including workbook-local tables.
+      await api.setCell(sheetName, row, col, rawInput, asSqlNull);
       setStatusMsg(`Updated ${coordToA1(row, col)}`);
       await refreshMetadata();
       await fetchViewportData();
@@ -651,13 +654,17 @@ export const App: React.FC = () => {
           onClick={()=>setShortcutsOpen(true)}>Keyboard shortcuts</button>
         </>}
         insertExtras={<>
+        <button type="button" className={worksheetCommandClass}
+          disabled={busy||apiPending>0||gridDraft||formulaDraft||selectionAxis!==null}
+          aria-haspopup="dialog" onClick={()=>setLocalTableSelection({sheet:sheetName,range:selection})}
+          title="Create a workbook-owned table from the selected header and data rows">Create local table</button>
 <button disabled={busy||apiPending>0||gridDraft||formulaDraft||!selectedCellLoaded} onClick={insertSelectedRows} className={worksheetCommandClass} title="Insert one blank row per selected row. Clears Undo/Redo.">Insert rows above</button>
         </>}
         dataExtras={<>
 <button disabled={busy||apiPending>0||gridDraft||formulaDraft} onMouseDown={e=>{if(gridDraft||formulaDraft)e.preventDefault();}} onClick={()=>setSortFilterRange(selection)} className={worksheetCommandClass}>Sort &amp; filter</button>
         <button disabled={busy} onClick={()=>{setLedgerTarget(undefined);setIsLedgerOpen(true);}} className={worksheetCommandClass}>SQLite ledger</button>
         <button disabled={busy||!selectedCellLoaded||gridDraft||formulaDraft} onClick={()=>{setLedgerTarget({sheet_name:sheetName,row:selectedRow,col:selectedCol});setIsLedgerOpen(true);}} className={worksheetCommandClass}>Trace balance</button>
-        {activeCellData?.table_name&&!activeCellData.is_table_header&&<button disabled={busy||gridDraft||formulaDraft} onClick={()=>void handleCommitCell(selectedRow,selectedCol,'',true)} className={worksheetCommandClass} title="Stage SQL NULL; use a normal edit to enter empty or literal text">Set SQL NULL</button>}
+        {activeCellData?.table_name&&!activeCellData.is_table_header&&<button disabled={busy||gridDraft||formulaDraft} onClick={()=>void handleCommitCell(selectedRow,selectedCol,'',true)} className={worksheetCommandClass} title="Set local NULL or stage NULL for an attached source">Set SQL NULL</button>}
         </>}
         viewExtras={<>
         <form className="flex items-center gap-1" onSubmit={e=>{e.preventDefault();resizeColumn(selectedCol,Number(widthDraft));}}>
@@ -796,6 +803,13 @@ export const App: React.FC = () => {
         }}
       />
 
+      {localTableSelection && <LocalTableDialog sheet={localTableSelection.sheet} range={localTableSelection.range}
+        onClose={()=>setLocalTableSelection(null)} onCreated={async name=>{
+          setLocalTableSelection(null);clipboard.current=null;
+          setStatusMsg('Created local table '+name);
+          await refreshMetadata();
+          await fetchViewportData();
+        }}/>}
       <InsertTableModal
         isOpen={isInsertTableOpen}
         onClose={() => setIsInsertTableOpen(false)}

@@ -99,12 +99,16 @@ export interface NamedSource {
   lineage?: LineageReport;
 }
 
+export type LocalColumnType = 'Any' | 'Text' | 'Integer' | 'Decimal' | 'Boolean' | 'Date';
+export interface LocalColumn {name: string; kind: LocalColumnType}
+
 export interface WorksheetTable {
   name: string;
   source_name: string;
   anchor: CellCoord;
   range: { start_row: number; start_col: number; end_row: number; end_col: number };
   columns: string[];
+  local?: { id: string; column_types: LocalColumnType[] };
   live?: { connection_name: string; sql: string; base_table: string; primary_key: string };
 }
 
