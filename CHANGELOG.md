@@ -1,6 +1,8 @@
-# Unreleased
+# 0.12.0
 
 - Start with one blank worksheet. Gridloom no longer creates or offers built-in demonstration data. Existing workbook and database files are unchanged.
+- Create an editable table directly on a worksheet with **Insert → Create local table**. Choose column types, keep leading zeroes in text and calculate with exact decimals. No external database connection is needed.
+- Save the worksheet and its local tables together in one SQLite-based `.gridloom` file. Older Gridloom workbooks still open; they switch formats only when saved. Use **Save As** to keep the original available for older Gridloom versions. Autosave recovery remains separate.
 
 # 0.11.0
 
