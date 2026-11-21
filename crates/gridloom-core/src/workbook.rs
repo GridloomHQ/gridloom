@@ -10,7 +10,7 @@ use crate::parser::parse_formula;
 use crate::pivot::{compute_pivot, PivotDefinition, PivotResult};
 use crate::review::ReviewRecord;
 use crate::spill::SpillManager;
-use crate::table::{NamedSource, WorksheetTable};
+use crate::table::{LocalColumn, LocalTable, NamedSource, WorksheetTable};
 use crate::value::{CellCoord, CellRange, Value};
 use crate::virtual_view::{CellRenderData, ViewportRequest, ViewportResponse};
 use crate::writeback::StagedRepository;
@@ -298,6 +298,7 @@ impl Workbook {
         name: &str,
         path: P,
     ) -> Result<(), CellError> {
+        crate::workbook_store::reject_as_linked_source(path.as_ref())?;
         self.check_live_connection_rebind(name, EngineKind::Sqlite, path.as_ref())?;
         let p_str = path.as_ref().to_string_lossy().to_string();
         let conn = DbConnection::open_sqlite(&path)?;
@@ -333,6 +334,7 @@ impl Workbook {
         name: &str,
         path: P,
     ) -> Result<(), CellError> {
+        crate::workbook_store::reject_as_linked_source(path.as_ref())?;
         self.check_live_connection_rebind(name, EngineKind::DuckDb, path.as_ref())?;
         let p_str = path.as_ref().to_string_lossy().to_string();
         let conn = DbConnection::open_duckdb(&path)?;
@@ -424,7 +426,7 @@ impl Workbook {
         let columns: Vec<_> = result.columns.iter().map(|c| c.name.clone()).collect();
         let mut sheets = self.sheets.clone();
         for sheet in sheets.values_mut() {
-            for table in sheet.tables.values_mut().filter(|t| t.live.is_none() && t.source_name == name) {
+            for table in sheet.tables.values_mut().filter(|t| t.live.is_none() && t.local.is_none() && t.source_name == name) {
                 let resized = WorksheetTable::new(
                     table.name.clone(),
                     name.to_string(),
@@ -435,7 +437,7 @@ impl Workbook {
                 table.columns = resized.columns;
                 table.range = resized.range;
             }
-            for table in sheet.tables.values().filter(|t| t.live.is_none() && t.source_name == name) {
+            for table in sheet.tables.values().filter(|t| t.live.is_none() && t.local.is_none() && t.source_name == name) {
                 if sheet
                     .tables
                     .values()
@@ -464,6 +466,94 @@ impl Workbook {
             self.recalculate(&sheet_name)?;
         }
         Ok(())
+    }
+
+    /// Turn a bounded worksheet selection into an editable workbook-owned table.
+    /// The first row is the header; existing nonempty headers must match the schema.
+    pub fn create_local_table(
+        &mut self,
+        sheet_name: &str,
+        name: &str,
+        range: CellRange,
+        columns: Vec<LocalColumn>,
+    ) -> Result<WorksheetTable, CellError> {
+        let sheet = self.sheets.get(sheet_name).ok_or(CellError::Ref)?;
+        if name.is_empty() || name.len() > 128
+            || !name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+            || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return Err(CellError::Sql("Choose a name starting with a letter or underscore, using only letters, numbers and underscores.".into()));
+        }
+        if range.start_row >= range.end_row || range.start_col > range.end_col
+            || range.end_row >= sheet.max_rows || range.end_col >= sheet.max_cols
+            || u64::from(range.end_row - range.start_row + 1) * u64::from(range.end_col - range.start_col + 1) > 10_000
+            || columns.len() != (range.end_col - range.start_col + 1) as usize
+        {
+            return Err(CellError::Sql("Select a header and at least one data row, up to 10,000 cells.".into()));
+        }
+        if self.sheets.values().any(|other| other.tables.keys().any(|existing| existing.eq_ignore_ascii_case(name))) {
+            return Err(CellError::Sql("That worksheet table name is already in use.".into()));
+        }
+        if sheet.tables.values().any(|t| range.intersects(&t.range))
+            || sheet.spills.active_spills.values().any(|s| range.intersects(&s.range))
+        {
+            return Err(CellError::Sql("The selection overlaps another table or a spilled formula.".into()));
+        }
+        let mut names = BTreeSet::new();
+        for column in &columns {
+            if column.name.is_empty() || column.name.trim() != column.name || column.name.len() > 128
+                || column.name.contains(['[', ']', '\n', '\r'])
+                || !names.insert(column.name.to_lowercase())
+            {
+                return Err(CellError::Sql("Table headings must be nonempty, unique, and contain no brackets or line breaks.".into()));
+            }
+        }
+        let anchor = CellCoord::new(range.start_row, range.start_col);
+        let mut table = WorksheetTable::new(
+            name.into(), String::new(), anchor, columns.iter().map(|c| c.name.clone()).collect(),
+            range.end_row - range.start_row,
+        );
+        table.local = Some(LocalTable {
+            id: uuid::Uuid::new_v4(),
+            column_types: columns.iter().map(|c| c.kind).collect(),
+        });
+        for (index, column) in columns.iter().enumerate() {
+            let coord = CellCoord::new(range.start_row, range.start_col + index as u32);
+            if let Some(cell) = sheet.get_cell(&coord) {
+                if cell.formula.is_some() || (!cell.raw_input.is_empty() && cell.raw_input != column.name) {
+                    return Err(CellError::Sql(format!(
+                        "Heading {} would hide existing data. Use its exact text or select a blank header row.",
+                        coord.to_a1()
+                    )));
+                }
+            }
+        }
+        let mut updated = sheet.clone();
+        for row in range.start_row + 1..=range.end_row {
+            for (index, column) in columns.iter().enumerate() {
+                let coord = CellCoord::new(row, range.start_col + index as u32);
+                if let Some(cell) = updated.get_cell_mut(&coord) {
+                    if cell.formula.is_some() && column.kind != crate::table::LocalColumnType::Any {
+                        return Err(CellError::Sql(format!(
+                            "{} contains a formula; choose Any to keep it.", coord.to_a1()
+                        )));
+                    }
+                    column.kind.enforce(cell, &column.name)?;
+                }
+            }
+        }
+        updated.tables.insert(name.into(), table.clone());
+        let original_sheets = self.sheets.clone();
+        let original_graph = self.dep_graph.clone();
+        self.sheets.insert(sheet_name.into(), updated);
+        if let Err(error) = self.recalculate(sheet_name) {
+            self.sheets = original_sheets;
+            self.dep_graph = original_graph;
+            return Err(error);
+        }
+        self.clear_edit_history();
+        self.invalidate_changed_reviews();
+        Ok(table)
     }
 
     pub fn insert_table(
@@ -866,6 +956,25 @@ impl Workbook {
                                 live_edit: None,
                             },
                         );
+                        continue;
+                    } else if table.local.is_some() {
+                        let data = sheet.get_cell(&coord);
+                        let raw_value = data.map(|c| c.evaluated_value.clone()).unwrap_or(Value::Blank);
+                        let is_error = raw_value.is_error();
+                        cells_data.insert(a1, CellRenderData {
+                            raw_input: data.map(|c| c.raw_input.clone()),
+                            style, coord,
+                            display_text: crate::spreadsheet::format_value(&raw_value, number_format.as_deref()),
+                            raw_value,
+                            formula: data.and_then(|c| c.formula.clone()),
+                            number_format,
+                            is_staged: false,
+                            is_spill: false,
+                            is_error,
+                            table_name: Some(table.name.clone()),
+                            is_table_header: false,
+                            live_edit: None,
+                        });
                         continue;
                     } else if let Some(live)=&table.live {
                         let key_index=table.columns.iter().position(|c|c==&live.primary_key);
@@ -1498,7 +1607,7 @@ impl<'a> EvaluationContext for WorkbookEvalContext<'a> {
                     let col_offset = (coord.col - table.anchor.col) as usize;
                     let name = table.columns.get(col_offset).cloned().unwrap_or_default();
                     return Ok(Value::Text(name));
-                } else {
+                } else if table.local.is_none() {
                     let row_offset = (coord.row - table.anchor.row - 1) as usize;
                     let col_offset = (coord.col - table.anchor.col) as usize;
                     if let Some(source) = self.workbook.named_sources.get(&table.source_name) {

@@ -11,7 +11,7 @@ use std::path::Path;
 
 // SQLite application_id, ASCII GLWB.
 const APP_ID: i64 = 0x474c5742;
-const FORMAT_VERSION: i64 = 1;
+const FORMAT_VERSION: i64 = 2;
 
 fn storage(error: impl std::fmt::Display) -> CellError {
     CellError::Sql(format!("Workbook database: {error}"))
@@ -48,8 +48,12 @@ pub(crate) fn write(
            PRIMARY KEY (sheet_id, coordinate)
          ) STRICT, WITHOUT ROWID;
          CREATE TABLE worksheet_table (
-           sheet_id TEXT NOT NULL REFERENCES worksheet(id), name TEXT NOT NULL, json TEXT NOT NULL,
+           sheet_id TEXT NOT NULL REFERENCES worksheet(id), name TEXT NOT NULL, local_id TEXT UNIQUE, json TEXT NOT NULL,
            PRIMARY KEY (sheet_id, name)
+         ) STRICT, WITHOUT ROWID;
+         CREATE TABLE worksheet_table_cell (
+           table_id TEXT NOT NULL REFERENCES worksheet_table(local_id), coordinate TEXT NOT NULL, json TEXT NOT NULL,
+           PRIMARY KEY (table_id, coordinate)
          ) STRICT, WITHOUT ROWID;",
     ).map_err(storage)?;
     tx.execute("INSERT INTO workbook VALUES (1, ?1)", [encode(metadata)?])
@@ -61,20 +65,69 @@ pub(crate) fn write(
         let mut cell_stmt = tx
             .prepare_cached("INSERT INTO worksheet_cell VALUES (?1, ?2, ?3)")
             .map_err(storage)?;
-        let mut table_stmt = tx.prepare_cached("INSERT INTO worksheet_table VALUES (?1, ?2, ?3)").map_err(storage)?;
+        let mut table_stmt = tx
+            .prepare_cached("INSERT INTO worksheet_table VALUES (?1, ?2, ?3, ?4)")
+            .map_err(storage)?;
+        let mut table_cell_stmt = tx
+            .prepare_cached("INSERT INTO worksheet_table_cell VALUES (?1, ?2, ?3)")
+            .map_err(storage)?;
         for (name, sheet) in sheets {
             let key = sheet.storage_id.to_string();
             sheet_stmt.execute(params![key, name]).map_err(storage)?;
+            let local_tables: Vec<_> = sheet
+                .tables
+                .values()
+                .filter_map(|table| {
+                    table
+                        .local
+                        .as_ref()
+                        .map(|local| (table.range, local.id.to_string()))
+                })
+                .collect();
             for (name, table) in &sheet.tables {
-                table_stmt.execute(params![key, name, encode(table)?]).map_err(storage)?;
+                let local_id = table.local.as_ref().map(|local| local.id.to_string());
+                table_stmt
+                    .execute(params![key, name, local_id, encode(table)?])
+                    .map_err(storage)?;
             }
             for (coordinate, cell) in &sheet.cells {
-                cell_stmt.execute(params![key, coordinate, encode(cell)?]).map_err(storage)?;
+                if let Some((_, table_id)) = local_tables.iter().find(|(range, _)| {
+                    range.contains(cell.coord) && cell.coord.row > range.start_row
+                }) {
+                    table_cell_stmt
+                        .execute(params![table_id, coordinate, encode(cell)?])
+                        .map_err(storage)?;
+                } else {
+                    cell_stmt
+                        .execute(params![key, coordinate, encode(cell)?])
+                        .map_err(storage)?;
+                }
             }
         }
     }
     tx.commit().map_err(storage)?;
     db.close().map_err(|(_, error)| storage(error))
+}
+
+/// Prevent the workbook storage schema from being treated as a linked source,
+/// including when opened from another workbook or through a path alias.
+pub(crate) fn reject_as_linked_source(path: &Path) -> Result<(), CellError> {
+    if !fs::metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+        return Ok(());
+    }
+    let mut header = [0; 72];
+    let Ok(mut file) = File::open(path) else {
+        return Ok(()); // The database engine reports its normal access errors.
+    };
+    if file.read_exact(&mut header).is_ok()
+        && &header[..16] == b"SQLite format 3\0"
+        && header[68..72] == (APP_ID as u32).to_be_bytes()
+    {
+        return Err(storage(
+            "Open this file as a Gridloom workbook, not as a linked source",
+        ));
+    }
+    Ok(())
 }
 
 /// Reject other databases before staging a manual save.
@@ -106,7 +159,7 @@ pub(crate) fn protect_existing(path: &Path) -> Result<(), CellError> {
         let version: i64 = db
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .map_err(storage)?;
-        if id != APP_ID || version != FORMAT_VERSION {
+        if id != APP_ID || !(1..=FORMAT_VERSION).contains(&version) {
             return Err(storage(
                 "save destination is not a supported Gridloom workbook",
             ));
@@ -129,7 +182,7 @@ pub(crate) fn read(path: &Path) -> Result<SerializedWorkbook, CellError> {
     let version: i64 = db
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .map_err(storage)?;
-    if version != FORMAT_VERSION {
+    if !(1..=FORMAT_VERSION).contains(&version) {
         return Err(storage(format!("unsupported format version {version}")));
     }
     let payload: String = db
@@ -139,6 +192,14 @@ pub(crate) fn read(path: &Path) -> Result<SerializedWorkbook, CellError> {
         .map_err(storage)?;
     let mut snapshot: SerializedWorkbook = decode(&payload)?;
     let mut seen = HashSet::with_capacity(snapshot.sheets.len());
+    let mut local_registrations = if version >= 2 {
+        Some(
+            db.prepare_cached("SELECT name, local_id FROM worksheet_table WHERE sheet_id = ?1")
+                .map_err(storage)?,
+        )
+    } else {
+        None
+    };
     let mut registry = db
         .prepare("SELECT id, name FROM worksheet")
         .map_err(storage)?;
@@ -169,6 +230,51 @@ pub(crate) fn read(path: &Path) -> Result<SerializedWorkbook, CellError> {
             &id,
             &mut sheet.tables,
         )?;
+        let Some(local_registrations) = &mut local_registrations else {
+            continue;
+        };
+        let mut local_ids = local_registrations.query([&id]).map_err(storage)?;
+        while let Some(record) = local_ids.next().map_err(storage)? {
+            let name: String = record.get(0).map_err(storage)?;
+            let stored: Option<String> = record.get(1).map_err(storage)?;
+            let table = sheet
+                .tables
+                .get(&name)
+                .ok_or_else(|| storage("unknown table record"))?;
+            let expected = table.local.as_ref().map(|local| local.id.to_string());
+            if expected != stored {
+                return Err(storage("invalid workbook-local table registration"));
+            }
+            if let Some(local_id) = stored {
+                let Some(local) = &table.local else {
+                    unreachable!()
+                };
+                if local.column_types.len() != table.columns.len()
+                    || table.live.is_some()
+                    || !table.source_name.is_empty()
+                {
+                    return Err(storage("inconsistent workbook-local table schema"));
+                }
+                let mut cells: HashMap<String, crate::workbook::CellData> = HashMap::new();
+                read_rows(
+                    &db,
+                    "SELECT coordinate, json FROM worksheet_table_cell WHERE table_id = ?1",
+                    &local_id,
+                    &mut cells,
+                )?;
+                for (coordinate, mut cell) in cells {
+                    let (column, kind) = table
+                        .local_column(cell.coord)
+                        .ok_or_else(|| storage("cell outside its local table"))?;
+                    kind.enforce(&mut cell, column)?;
+                    if cell.coord.to_a1() != coordinate
+                        || sheet.cells.insert(coordinate, cell).is_some()
+                    {
+                        return Err(storage("invalid workbook-local table cell"));
+                    }
+                }
+            }
+        }
     }
     if seen.len() != snapshot.sheets.len() || !snapshot.sheets.contains_key(&snapshot.active_sheet)
     {

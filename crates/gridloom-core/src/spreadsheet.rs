@@ -135,7 +135,7 @@ fn coords(range: CellRange) -> Result<Vec<CellCoord>, CellError> {
 fn validate(sheet: &Sheet, coord: CellCoord) -> Result<(), CellError> {
     if coord.row >= sheet.max_rows
         || coord.col >= sheet.max_cols
-        || sheet.tables.values().any(|t| t.range.contains(coord))
+        || sheet.tables.values().any(|t| t.blocks_cell_edits(coord))
     {
         return Err(CellError::Ref);
     }
@@ -149,7 +149,7 @@ fn validate(sheet: &Sheet, coord: CellCoord) -> Result<(), CellError> {
     Ok(())
 }
 fn source_is_materialized(sheet: &Sheet, coord: CellCoord) -> bool {
-    sheet.tables.values().any(|t| t.range.contains(coord))
+    sheet.tables.values().any(|t| t.blocks_cell_edits(coord))
         || sheet
             .spills
             .get_spill_at(&coord)
@@ -365,10 +365,26 @@ impl Workbook {
         self.clear_edit_history();
         Ok(())
     }
+    /// Explicit NULL for an editable local-table column. Ordinary clearing
+    /// remains Blank; literal "NULL" in a Text column stays literal.
+    pub fn set_local_table_null(&mut self, name: &str, coord: CellCoord) -> Result<(), CellError> {
+        let sheet = self.sheets.get(name).ok_or(CellError::Ref)?;
+        if !sheet.tables.values().any(|table| table.local_column(coord).is_some()) {
+            return Err(CellError::Sql("Select a local table data cell to set NULL.".into()));
+        }
+        let mut data = CellData::new(coord, String::new());
+        if let Some(old) = sheet.get_cell(&coord) {
+            data.style = old.style.clone();
+            data.number_format = old.number_format.clone();
+        }
+        data.evaluated_value = Value::Null;
+        self.commit_cells(name, vec![(coord, Some(data))], true)
+    }
+
     fn commit_cells(
         &mut self,
         name: &str,
-        changes: Vec<(CellCoord, Option<CellData>)>,
+        mut changes: Vec<(CellCoord, Option<CellData>)>,
         history: bool,
     ) -> Result<(), CellError> {
         if changes.is_empty() || changes.len() > 10_000 {
@@ -383,6 +399,13 @@ impl Workbook {
                             changes.iter().any(|(c, _)| *c == spill.anchor)
                         }) => {}
                 result => result?,
+            }
+        }
+        for (coord, data) in &mut changes {
+            if let Some(data) = data {
+                if let Some((column, kind)) = sheet.tables.values().find_map(|t| t.local_column(*coord)) {
+                    kind.enforce(data, column)?;
+                }
             }
         }
         let original = self.sheets.clone();

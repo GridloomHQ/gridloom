@@ -80,6 +80,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/sources/{name}/refresh", post(refresh_source))
         // Worksheet Tables
         .route("/api/tables/insert", post(insert_table))
+        .route("/api/tables/local", post(create_local_table))
         .route("/api/tables/insert-live", post(insert_live_table))
         .route("/api/tables/refresh-live", post(refresh_live_table))
         // Cells & Virtual Viewport
@@ -409,6 +410,24 @@ async fn refresh_source(
 }
 
 #[derive(Deserialize)]
+struct CreateLocalTableRequest {
+    sheet_name: String,
+    name: String,
+    range: CellRange,
+    columns: Vec<gridloom_core::table::LocalColumn>,
+}
+
+async fn create_local_table(
+    State(state): State<AppState>,
+    Json(req): Json<CreateLocalTableRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let mut wb = state.workbook.write().await;
+    let table = wb.create_local_table(&req.sheet_name, &req.name, req.range, req.columns)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.message().to_owned()))?;
+    Ok(Json(table))
+}
+
+#[derive(Deserialize)]
 struct InsertTableRequest {
     sheet_name: String,
     table_name: String,
@@ -439,6 +458,8 @@ struct SetCellRequest {
     row: u32,
     col: u32,
     raw_input: String,
+    #[serde(default)]
+    local_null: bool,
 }
 
 async fn set_cell(
@@ -446,12 +467,16 @@ async fn set_cell(
     Json(req): Json<SetCellRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let mut wb = state.workbook.write().await;
-    wb.set_cell(
-        &req.sheet_name,
-        CellCoord::new(req.row, req.col),
-        req.raw_input,
-    )
-    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    let coord = CellCoord::new(req.row, req.col);
+    if req.local_null {
+        if !req.raw_input.is_empty() {
+            return Err(bad_request("Explicit NULL cannot also have text input"));
+        }
+        wb.set_local_table_null(&req.sheet_name, coord)
+    } else {
+        wb.set_cell(&req.sheet_name, coord, req.raw_input)
+    }
+    .map_err(|e| (StatusCode::BAD_REQUEST, e.message().to_owned()))?;
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }
 

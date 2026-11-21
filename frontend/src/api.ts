@@ -152,6 +152,11 @@ export const api = {
   refreshSource: (name: string) =>
     fetchJson<any>(`/api/sources/${encodeURIComponent(name)}/refresh`, { method: 'POST' }),
 
+  createLocalTable: (sheet_name: string, name: string, range: CellRange, columns: import('./types').LocalColumn[]) =>
+    fetchJson<WorksheetTable>('/api/tables/local', {
+      method: 'POST',
+      body: JSON.stringify({ sheet_name, name, range: wireRange(range), columns }),
+    }),
   insertTable: (sheet_name: string, table_name: string, source_name: string, row: number, col: number) =>
     fetchJson<WorksheetTable>('/api/tables/insert', {
       method: 'POST',
@@ -170,10 +175,10 @@ export const api = {
       body: JSON.stringify({ sheet_name, table_name }),
     }),
 
-  setCell: (sheet_name: string, row: number, col: number, raw_input: string) =>
+  setCell: (sheet_name: string, row: number, col: number, raw_input: string, local_null = false) =>
     fetchJson<{ status: string }>('/api/cells/set', {
       method: 'POST',
-      body: JSON.stringify({ sheet_name, row, col, raw_input }),
+      body: JSON.stringify({ sheet_name, row, col, raw_input, ...(local_null ? {local_null} : {}) }),
     }),
   getViewportPanes: (sheet_name:string,start_row:number,start_col:number,end_row:number,end_col:number,visible_frozen_rows:number,visible_frozen_columns:number,overscan=5,signal?:AbortSignal) =>
     fetchJson<ViewportResponse>('/api/cells/viewport-panes',{method:'POST',body:JSON.stringify({sheet_name,start_row,start_col,end_row,end_col,overscan,visible_frozen_rows,visible_frozen_columns}),signal}),

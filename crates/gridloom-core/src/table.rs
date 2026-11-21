@@ -53,6 +53,68 @@ impl FormatChange {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LocalColumnType {
+    Any,
+    Text,
+    Integer,
+    Decimal,
+    Boolean,
+    Date,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalColumn {
+    pub name: String,
+    pub kind: LocalColumnType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalTable {
+    pub id: uuid::Uuid,
+    pub column_types: Vec<LocalColumnType>,
+}
+
+impl LocalColumnType {
+    pub(crate) fn enforce(self, data: &mut crate::workbook::CellData, column: &str) -> Result<(), CellError> {
+        use LocalColumnType::*;
+        if self == Any {
+            return Ok(());
+        }
+        let fail = || CellError::Sql(format!("{column}: enter a {:?} literal, or leave the cell blank.", self));
+        let raw = &data.raw_input;
+        if raw.is_empty() {
+            // Explicit local NULL is stored as a typed value with empty raw
+            // input. An ordinary existing or newly cleared cell is Blank.
+            if !matches!(data.evaluated_value, Value::Null) {
+                data.evaluated_value = Value::Blank;
+            }
+            return Ok(());
+        }
+        if data.formula.is_some() && self != Text {
+            return Err(fail());
+        }
+        let input = raw.trim();
+        data.evaluated_value = match self {
+            Text => {
+                data.formula = None;
+                if raw == "\"\"" {
+                    Value::EmptyText
+                } else {
+                    Value::Text(raw.clone())
+                }
+            }
+            Integer => Value::Integer(input.parse().map_err(|_| fail())?),
+            Decimal => Value::Decimal(rust_decimal::Decimal::from_str_exact(input).map_err(|_| fail())?),
+            Boolean if input.eq_ignore_ascii_case("true") => Value::Boolean(true),
+            Boolean if input.eq_ignore_ascii_case("false") => Value::Boolean(false),
+            Date if input.len() == 10 => Value::Date(chrono::NaiveDate::parse_from_str(input, "%Y-%m-%d").map_err(|_| fail())?),
+            _ => return Err(fail()),
+        };
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorksheetTable {
     pub name: String,
@@ -64,6 +126,8 @@ pub struct WorksheetTable {
     pub has_totals: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live: Option<crate::live_table::LiveTable>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local: Option<LocalTable>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) formats: Vec<TableFormat>,
 }
@@ -94,8 +158,22 @@ impl WorksheetTable {
             has_headers: true,
             has_totals: false,
             live: None,
+            local: None,
             formats: Vec::new(),
         }
+    }
+
+    pub(crate) fn blocks_cell_edits(&self, coord: CellCoord) -> bool {
+        self.range.contains(coord) && (self.local.is_none() || self.anchor.row == coord.row)
+    }
+
+    pub(crate) fn local_column(&self, coord: CellCoord) -> Option<(&str, LocalColumnType)> {
+        let local = self.local.as_ref()?;
+        if !self.range.contains(coord) || coord.row == self.anchor.row {
+            return None;
+        }
+        let col = (coord.col - self.anchor.col) as usize;
+        Some((self.columns.get(col)?, *local.column_types.get(col)?))
     }
 
     pub(crate) fn cell_style(&self, coord: CellCoord) -> CellStyle {
