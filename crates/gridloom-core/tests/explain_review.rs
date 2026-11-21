@@ -122,6 +122,7 @@ fn save_open_preserves_evidence_history_and_loads_legacy_without_reviews() {
         "board-pack.pdf, page 4"
     );
     assert!(!loaded.review_history()[0].invalidated);
+    wb.save_recovery_copy(&path).unwrap();
     let mut legacy: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     legacy.as_object_mut().unwrap().remove("reviews");

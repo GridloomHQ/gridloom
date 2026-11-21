@@ -36,6 +36,7 @@ fn saved_widths_roundtrip_and_legacy_files_use_defaults() {
         Workbook::open_from_file(&file).unwrap().sheets["Sheet1"].column_widths[&4],
         321
     );
+    wb.save_recovery_copy(&file).unwrap();
     let mut json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
     json["sheets"]["Sheet1"]

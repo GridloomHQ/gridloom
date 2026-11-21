@@ -196,7 +196,7 @@ async fn open_workbook(
     Json(payload): Json<PathPayload>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let loaded = gridloom_core::Workbook::open_from_file(&payload.path)
-        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.message().to_owned()))?;
     let mut wb = state.workbook.write().await;
     *wb = loaded;
     Ok(Json(
@@ -210,7 +210,7 @@ async fn save_workbook(
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let mut wb = state.workbook.write().await;
     wb.save_to_file(&payload.path)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.message().to_owned()))?;
     Ok(Json(
         serde_json::json!({ "status": "saved", "path": payload.path }),
     ))
