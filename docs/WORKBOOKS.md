@@ -51,6 +51,14 @@ In **Data → SQL Query**, choose **Live table**, select a worksheet, and enter 
 
 Live tables support `SELECT *` from one SQLite table with a single integer primary key, optional simple `WHERE` comparisons, and `ORDER BY` columns. SQL sorting and filtering apply to all matching rows. You can stage supported edits by the source row's primary key and apply them separately. Use a materialized snapshot for joins, computed projections, or worksheet formulas and review tools that need values from a table range.
 
+### Live table performance and limits
+
+The [10-million-row browser test](../frontend/tests/live-table-10m-smoke.mjs) generates a synthetic SQLite invoice table, opens it as a live worksheet table, refreshes its bounds, and presses Ctrl+Down from the first invoice. It waits for the last invoice to be selected, rendered and visible, and checks that the browser requests a small window near the destination without fetching the intervening rows. It also tests same-size data changes and reopen after restart. The test runs in [CI](../.github/workflows/ci.yml).
+
+The project screenshot uses Gridloom 0.13.1 with the test dataset and normal worksheet formatting and frozen headers. On one local Linux/Chromium run with an Intel Core i7-8700K and 32 GB RAM, refresh took **322 ms** to the visible first invoice and the Ctrl+Down jump took **141 ms** to the visible final invoice. These times include rendering, not database creation. Query shape, indexes, hardware and starting position affect timing. This is a navigation measurement, not a head-to-head speed comparison with Excel.
+
+Live tables are not subject to Excel's fixed grid size; they use SQLite query results and Gridloom's finite row coordinates and bounded viewport requests. This does not mean unlimited data in memory. Ordinary cells, worksheet-owned tables and materialized query results are stored as workbook data, while clipboard, worksheet sort/filter and other bulk operations have separate bounds. For millions of rows, keep the source in SQLite and use a live table instead of pasting or importing the full result into ordinary worksheet cells.
+
 ### Insert worksheet rows
 
 Select a row or a range and choose **Insert rows above**. Gridloom adds one blank row per selected row, moves the existing rows and follows direct A1 references across the workbook, including absolute references. Ranges that cross the insertion point expand. A whole table can move, but an insertion cannot split a table.

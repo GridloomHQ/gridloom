@@ -1,35 +1,33 @@
 # Gridloom
 
-[![CI](https://github.com/lhemerly/gridloom/actions/workflows/ci.yml/badge.svg)](https://github.com/lhemerly/gridloom/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+**Work with millions of rows. Show where the numbers come from.**
 
-**A spreadsheet for building and reviewing models. Trace a number back to the inputs that drive it.**
+Gridloom is a local-first spreadsheet for financial models and accounting work. Browse a live database table without importing every row. Then audit a calculation in the same workbook, from the result back to its inputs.
 
-Gridloom combines a familiar worksheet with SQL-backed tables and a built-in review workflow. Build financial models, follow the formulas behind a number, and keep questions, review notes, and supporting evidence in the workbook. Gridloom runs locally.
+[**Download Gridloom for Windows or Linux**](https://github.com/lhemerly/gridloom/releases/latest) · [Quick start](https://github.com/lhemerly/gridloom/blob/main/docs/INSTALL.md)
 
-## Download
+## 10 million rows. No million-row wall.
 
-[**Get Gridloom for Windows or Linux**](https://github.com/lhemerly/gridloom/releases/latest)
+Gridloom's live SQLite tables don't stop at [Excel's 1,048,576-row worksheet limit](https://support.microsoft.com/en-us/excel/excel-specifications-and-limits). Gridloom fetches the rows around your view instead of loading the full table. Filter and sort in SQL, then jump to the rows you need.
 
-- **Windows x64:** Extract the entire ZIP and open `gridloom.exe`. The desktop app uses [Microsoft Edge WebView2 Evergreen](https://developer.microsoft.com/microsoft-edge/webview2/#download-section), included with Windows 11.
-- **Linux x64:** Extract the archive and run `./gridloom` from the extracted folder. The desktop build needs GTK3 and WebKitGTK 4.1; for the server build, open the local address printed in the terminal.
+**First invoice to invoice 10,000,000 in 141 ms**, including rendering, in one local test on a synthetic SQLite dataset. [See how it was measured.](https://github.com/lhemerly/gridloom/blob/main/docs/WORKBOOKS.md#live-table-performance-and-limits)
 
-[Installation and checksum instructions](https://github.com/lhemerly/gridloom/blob/main/docs/INSTALL.md)
+![Gridloom showing a live SQLite invoice register with invoice 10,000,000 selected and the column headings frozen at the top.](https://raw.githubusercontent.com/lhemerly/gridloom/main/docs/images/live-sql-10m.webp)
 
-## Try it
+## Audit the number, not just the formula
 
-1. Enter `100.25` in **A1**, `40.10` in **B1**, and `=A1-B1` in **C1**. The result is `60.15`.
-2. Select **C1** and open **Review → Explain & Review** to inspect the formula and follow its inputs. Record a review with a note on what you checked, or circle up a question if something doesn't add up.
-3. Change an input and return to a recorded review to see it marked stale. Save the workbook as a `.gridloom` file to keep the calculation and review history together.
+Pick a result and open **Review → Explain & Review**. Follow its inputs or see which formulas use it. Record what you checked, attach supporting evidence, or raise a question without losing the calculation it came from. If the calculation or a traced input changes, Gridloom marks the review stale, even if the displayed total stays the same.
 
-## Work with your data
+![Gridloom's Explain and Review panel traces gross profit of 51,200 to June sales and direct costs, with the sales input highlighted in the worksheet.](https://raw.githubusercontent.com/lhemerly/gridloom/main/docs/images/explain-and-review.webp)
 
-Create a typed table in the worksheet or connect a SQLite or DuckDB file and use query results in formulas, pivots, and charts. Supported source edits are staged for review before you apply them to the database. The [workbook guide](https://github.com/lhemerly/gridloom/blob/main/docs/WORKBOOKS.md) covers tables, live data, review, and the Monthly close add-on.
+These are workbook review records, not authenticated sign-offs or audit assurance.
 
-## Let an agent check its own work
+## Give your agent a way to check its own work
 
-The Windows and Linux downloads bundle a headless MCP server. An agent can write a formula, compare the exact result to an independently calculated expectation, trace a mismatch, fix it, and record the check in the same workbook you open. These are local AI-assisted review records, not human sign-off or audit assurance.
+The bundled headless MCP server lets an agent write a formula, compare the exact result with an independent calculation, trace and fix a mismatch, and record an AI-assisted review you can open in Gridloom. [Try the agent self-review walkthrough.](https://github.com/lhemerly/gridloom/blob/main/docs/MCP.md)
 
-[Connect an agent and try the self-review walkthrough](https://github.com/lhemerly/gridloom/blob/main/docs/MCP.md)
+## Start with a number
 
-[Build from source and run tests](https://github.com/lhemerly/gridloom/blob/main/docs/DEVELOPMENT.md) · [License](LICENSE)
+Enter `100.25` in **A1**, `40.10` in **B1**, and `=A1-B1` in **C1**. Select the **60.15** result, open **Explain & Review**, and record a check. Change **A1** and see that review go stale. Save the calculation and review history together in one `.gridloom` file.
+
+[Workbook guide](https://github.com/lhemerly/gridloom/blob/main/docs/WORKBOOKS.md) · [Build from source](https://github.com/lhemerly/gridloom/blob/main/docs/DEVELOPMENT.md) · [License](LICENSE)

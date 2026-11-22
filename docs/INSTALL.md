@@ -33,6 +33,6 @@ Packages include frontend assets and DuckDB, but not every system library. They 
 
 ## Next steps
 
-- [Build your first model](../README.md#try-it)
+- [Build your first model](../README.md#start-with-a-number)
 - [Connect an agent over MCP](MCP.md)
 - [Build from source](DEVELOPMENT.md)
