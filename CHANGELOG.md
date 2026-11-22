@@ -1,3 +1,8 @@
+# 0.13.1
+
+- Add a portable Windows x64 desktop ZIP with the bundled headless MCP and the same workbook and Review tools as Linux.
+- Launch the native Windows window without Linux display environment variables and preserve guarded workbook saves and workbook-folder restrictions on Windows.
+
 # 0.13.0
 
 - Bundle a local headless MCP server in Linux desktop and server packages. Agents can build, inspect, edit, validate, and explicitly save native standalone workbooks.

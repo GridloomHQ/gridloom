@@ -86,6 +86,21 @@ Enable **Monthly close** in **Add-ons** for a focused trial-balance workflow. It
 
 ## Get started
 
+### Use a Windows package
+
+Download the Windows x64 desktop ZIP and SHA256SUMS from
+[GitHub Releases](https://github.com/lhemerly/gridloom/releases). Extract the entire
+ZIP into a writable folder, then open **gridloom.exe**. Keep the executables,
+`duckdb.dll` and `frontend` directory together.
+
+The desktop uses the [Microsoft Edge WebView2 Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/#download-section),
+included with Windows 11. If your system is missing it, install it separately
+from Microsoft. If Windows reports missing MSVC runtime DLLs, install the
+[official Visual C++ x64 Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist).
+The ZIP is portable and unsigned; it does not install or update either Microsoft runtime.
+The bundled headless `gridloom-mcp.exe` does not need WebView2.
+Windows ARM64 is not included. Use an NTFS-backed workbook folder for guarded saves.
+
 ### Use a Linux package
 
 Download a Linux x86-64 tarball and its matching SHA-256 file from [GitHub Releases](https://github.com/lhemerly/gridloom/releases). For unreleased builds, successful main-branch [CI runs](https://github.com/lhemerly/gridloom/actions/workflows/ci.yml) also publish packages as temporary artifacts.
@@ -164,7 +179,7 @@ Set `GRIDLOOM_RECOVERY_DIR` to choose a private recovery directory. By default i
 
 ## Operate worksheets from an agent
 
-The Linux packages include a headless `gridloom-mcp` command. A local agent can
+The Linux and Windows packages include a headless MCP command. A local agent can
 build a standalone workbook, re-read the exact result, trace its inputs, raise a
 question, and record a snapshot-bound review without opening the UI. The app
 shows the same review history. A later edit to the calculation or its inputs

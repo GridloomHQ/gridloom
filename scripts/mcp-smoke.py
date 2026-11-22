@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exercise real Gridloom MCP processes with no GUI, HTTP, or model API."""
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -97,7 +98,7 @@ def cell(name, kind, value=None):
 
 
 def database_metadata(path, change):
-    with sqlite3.connect(path) as db:
+    with closing(sqlite3.connect(path)) as db, db:
         payload = json.loads(db.execute("SELECT json FROM workbook").fetchone()[0])
         change(payload)
         db.execute("UPDATE workbook SET json=?", (json.dumps(payload),))
@@ -224,7 +225,7 @@ def run(executable):
             one.call("close_workbook", revision=r, discard_changes=True)
 
         outside_sql = area / "external.sqlite"
-        with sqlite3.connect(outside_sql) as db:
+        with closing(sqlite3.connect(outside_sql)) as db, db:
             db.execute("CREATE TABLE fixture (hidden TEXT)")
             db.execute("INSERT INTO fixture VALUES ('private must not load')")
         linked = root / "linked.gridloom"
@@ -234,13 +235,20 @@ def run(executable):
         }))
         outside_book = area / "outside.gridloom"
         shutil.copyfile(book, outside_book)
-        (root / "symlink.gridloom").symlink_to(outside_book)
+        symlink = root / "symlink.gridloom"
+        try:
+            symlink.symlink_to(outside_book)
+        except OSError as error:
+            if os.name != "nt" or error.winerror != 1314:
+                raise
+            print("Windows runner lacks SeCreateSymbolicLinkPrivilege; hard-link containment still tested.")
         os.link(outside_book, root / "hardlink.gridloom")
         with Client(executable, root) as c:
             assert c.call("list_workbooks")["files"] == [
                 "appeared.gridloom", "copy.gridloom", "forecast.gridloom", "linked.gridloom",
             ]
-            c.call("open_workbook", file="symlink.gridloom", error="not a link")
+            if symlink.is_symlink():
+                c.call("open_workbook", file="symlink.gridloom", error="not a link")
             c.call("open_workbook", file="hardlink.gridloom", error="hard-linked")
             c.call("open_workbook", file="linked.gridloom", error="linked database workbooks")
             c.call("open_workbook", file="appeared.gridloom", error="corrupt workbook")

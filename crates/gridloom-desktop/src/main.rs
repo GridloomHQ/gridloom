@@ -1,6 +1,7 @@
 use clap::Parser;
 use gridloom_server::benchmark::run_performance_benchmarks;
 use gridloom_server::start_server;
+#[cfg(target_os = "linux")]
 use std::env;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -83,8 +84,11 @@ fn main() -> anyhow::Result<()> {
         actual_port
     );
 
-    // If headless server mode requested or DISPLAY is unset
-    let has_display = env::var("DISPLAY").is_ok() || env::var("WAYLAND_DISPLAY").is_ok();
+    // Linux can run without a display server; Windows/macOS don't use these variables.
+    #[cfg(target_os = "linux")]
+    let has_display = env::var_os("DISPLAY").is_some() || env::var_os("WAYLAND_DISPLAY").is_some();
+    #[cfg(not(target_os = "linux"))]
+    let has_display = true;
     if args.server || !has_display {
         println!(
             "Running in server mode. Open http://127.0.0.1:{} in your browser.",

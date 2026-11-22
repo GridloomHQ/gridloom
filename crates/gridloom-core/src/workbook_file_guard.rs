@@ -32,6 +32,46 @@ pub(crate) fn detail(message: impl Into<String>) -> CellError {
     CellError::Sql(message.into())
 }
 
+/// Refuse workbook links before opening/importing a workbook by path.
+pub fn check_workbook_file(_path: &Path, metadata: &fs::Metadata) -> Result<(), CellError> {
+    if !metadata.is_file() {
+        return Err(detail("Expected a regular workbook file, not a link."));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::{fs::MetadataExt, io::AsRawHandle};
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT,
+        };
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(detail(
+                "Expected a regular workbook file, not a reparse point.",
+            ));
+        }
+        let file =
+            File::open(_path).map_err(|e| detail(format!("Can't inspect workbook links: {e}")))?;
+        let mut info = BY_HANDLE_FILE_INFORMATION::default();
+        // The handle is borrowed from the live file, and info is a writable struct.
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+            return Err(detail(format!(
+                "Can't inspect workbook links: {}",
+                io::Error::last_os_error()
+            )));
+        }
+        if info.nNumberOfLinks != 1 {
+            return Err(detail("Do not use a hard-linked workbook."));
+        }
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.nlink() != 1 {
+            return Err(detail("Do not use a hard-linked workbook."));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn fingerprint(
     path: &Path,
     limit: Option<u64>,
@@ -41,16 +81,7 @@ pub(crate) fn fingerprint(
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(detail(format!("Can't inspect workbook: {e}"))),
     };
-    if !metadata.is_file() {
-        return Err(detail("Expected a regular workbook file, not a link."));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        if metadata.nlink() != 1 {
-            return Err(detail("Do not use a hard-linked workbook."));
-        }
-    }
+    check_workbook_file(path, &metadata)?;
     if limit.is_some_and(|n| metadata.len() > n) {
         return Err(detail("Workbook exceeds the headless 64 MiB limit."));
     }

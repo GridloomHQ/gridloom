@@ -1,6 +1,6 @@
 [package]
 name = "gridloom-core"
-version = "0.13.0"
+version = "0.13.1"
 edition = "2021"
 description = "Core calculation, database connection, lineage, writeback, and formula engine for Gridloom"
 license = "MIT OR Apache-2.0"
@@ -22,3 +22,6 @@ sha2 = "0.10.9"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }

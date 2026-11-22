@@ -1,6 +1,6 @@
 # Use Gridloom with an agent
 
-Use the bundled **`gridloom-mcp`** command from either Linux package.
+Use **`gridloom-mcp`** from either Linux package, or **`gridloom-mcp.exe`** from the Windows ZIP.
 It runs the same workbook, formula and review engine as the app, without
 starting a browser, window, HTTP server, or network listener.
 
@@ -10,6 +10,13 @@ Choose a dedicated directory for workbooks the agent may use:
 mkdir -p "$HOME/Gridloom Agent Workbooks"
 codex mcp add gridloom -- "/absolute/path/to/gridloom-mcp" \
   --workbook-root "$HOME/Gridloom Agent Workbooks"
+```
+
+Or use PowerShell on Windows. Keep the executable next to its bundled `duckdb.dll`:
+
+```powershell
+New-Item -ItemType Directory -Force "$HOME\Gridloom Agent Workbooks"
+codex mcp add gridloom -- "C:\Apps\Gridloom\gridloom-mcp.exe" --workbook-root "$HOME\Gridloom Agent Workbooks"
 ```
 
 Keep the quotes around paths with spaces. The `--` ends Codex's options, so
@@ -30,8 +37,7 @@ client if it was already open. For clients that use an `mcpServers` setting:
 Use `--read-only` to inspect workbooks without any edit, review, or save tools.
 Remove it only when the client should be allowed to change the workbooks in
 that directory. If building from source, run `cargo build --locked -p gridloom-mcp`
-with Gridloom's usual DuckDB native-library setup. Packaged users should use
-the launcher next to the bundled `lib` directory, not `gridloom-mcp-bin`.
+with Gridloom's usual DuckDB native-library setup. On Linux use the launcher next to the bundled `lib` directory, not `gridloom-mcp-bin`.
 
 ## Try an agent self-review in Codex
 

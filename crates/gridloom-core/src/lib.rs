@@ -36,3 +36,5 @@ pub mod live_table;
 
 mod workbook_store;
 mod workbook_file_guard;
+#[doc(hidden)]
+pub use workbook_file_guard::check_workbook_file;
