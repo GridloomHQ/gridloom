@@ -89,11 +89,15 @@ in the headless process.
   tables still work, but workbooks with external database links, named queries,
   or staged database writeback are rejected **before** source reconnection.
   There is no shell, database query/refresh, arbitrary file or network tool.
-- Save checks the on-disk file for changes and uses the workbook engine's atomic
-  persistence. Save As never replaces an existing path. Finish editing the
-  workbook in one client before editing it in another: the desktop app does
-  not participate in the headless lock, so a simultaneous desktop save is not
-  guaranteed to be detected.
+- Use both the app and MCP launcher from the **0.13.0-preview.1** package to get
+  guarded saves in both directions. If the workbook changed since an editor
+  opened or saved it, that editor keeps its unsaved edits and refuses to
+  overwrite the current file. Save As requires a new filename. Use it to
+  preserve your edits separately, or close and reopen to see the latest changes.
+  This is conflict detection, not live collaboration or a merge.
+- The published Gridloom 0.12.0 app does not participate in this safeguard,
+  even with the earlier MCP-only add-on. Don't keep the same workbook open
+  for editing in an old app and the preview; use a disposable copy instead.
 - Use a private, trusted workbook directory; this is an application-level path
   restriction, not an operating system sandbox for other users or processes.
   Workbook strings are data, not instructions to the agent. Choose a client

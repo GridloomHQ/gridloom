@@ -6,9 +6,8 @@ use rust_decimal::Decimal;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value as Json};
-use sha2::{Digest, Sha256};
-use std::fs::{self, File};
-use std::io::{self, Read};
+use std::fs;
+use std::io;
 use std::path::{Component, Path, PathBuf};
 
 const MAX_FILE: u64 = 64 * 1024 * 1024;
@@ -17,7 +16,6 @@ const MAX_RANGE: u32 = 256;
 const MAX_ITEMS: usize = 256;
 const MAX_CELL_TEXT: usize = 4096;
 type Reply = Result<Json, String>;
-type Fingerprint = [u8; 32];
 
 pub struct Session {
     root: PathBuf,
@@ -29,7 +27,6 @@ pub struct Session {
 struct Opened {
     name: String,
     workbook: Workbook,
-    fingerprint: Option<Fingerprint>,
     dirty: bool,
     revision: u64,
 }
@@ -174,50 +171,6 @@ fn checked_metadata(path: &Path) -> Result<Option<fs::Metadata>, String> {
     Ok(Some(metadata))
 }
 
-fn fingerprint(path: &Path) -> Result<Option<Fingerprint>, String> {
-    if checked_metadata(path)?.is_none() {
-        return Ok(None);
-    }
-    let mut file = File::open(path).map_err(with_context)?;
-    // Workbook packages normally use rollback journal mode with no sidecars.
-    // Do not read a hot journal or open a database using WAL.
-    for suffix in ["-wal", "-shm", "-journal"] {
-        let mut sidecar = path.as_os_str().to_os_string();
-        sidecar.push(suffix);
-        match fs::symlink_metadata(sidecar) {
-            Ok(_) => {
-                return Err(
-                    "Workbook has a SQLite sidecar. Close other editors and try again.".into(),
-                )
-            }
-            Err(e) if e.kind() == io::ErrorKind::NotFound => (),
-            Err(e) => return Err(with_context(e)),
-        }
-    }
-    let mut hash = Sha256::new();
-    let mut buf = [0; 32 * 1024];
-    let mut total = 0;
-    loop {
-        let bytes = file.read(&mut buf).map_err(with_context)?;
-        if bytes == 0 {
-            break;
-        }
-        if total == 0
-            && bytes >= 20
-            && &buf[..16] == b"SQLite format 3\0"
-            && (buf[18] != 1 || buf[19] != 1)
-        {
-            return Err("Unsupported journal mode in the workbook file.".into());
-        }
-        total += bytes as u64;
-        if total > MAX_FILE {
-            return Err("Workbook exceeds the headless 64 MiB limit.".into());
-        }
-        hash.update(&buf[..bytes]);
-    }
-    Ok(Some(hash.finalize().into()))
-}
-
 impl Session {
     pub fn new(root: &Path, read_only: bool) -> Result<Self, String> {
         let root = root
@@ -276,20 +229,14 @@ impl Session {
         active.dirty = dirty;
     }
 
-    fn switch(
-        &mut self,
-        name: String,
-        workbook: Workbook,
-        fingerprint: Option<Fingerprint>,
-    ) -> Reply {
+    fn switch(&mut self, name: String, workbook: Workbook, dirty: bool) -> Reply {
         self.active = Some(Opened {
             name,
             workbook,
-            fingerprint,
-            dirty: false,
+            dirty,
             revision: 0,
         });
-        self.update_revision(fingerprint.is_none());
+        self.update_revision(dirty);
         self.info()
     }
 
@@ -355,13 +302,9 @@ impl Session {
                 self.require_no_dirty()?;
                 let Open { file } = parse(args)?;
                 let path = self.filename(&file)?;
-                let before =
-                    fingerprint(&path)?.ok_or_else(|| "Workbook not found.".to_string())?;
-                let workbook = Workbook::open_standalone_file(&path).map_err(core_error)?;
-                if fingerprint(&path)? != Some(before) {
-                    return Err("Workbook changed while opening. Try again.".into());
-                }
-                self.switch(file, workbook, Some(before))
+                let workbook =
+                    Workbook::open_standalone_file(&path, MAX_FILE).map_err(core_error)?;
+                self.switch(file, workbook, false)
             }
             "create_workbook" => {
                 self.require_no_dirty()?;
@@ -369,7 +312,7 @@ impl Session {
                 if checked_metadata(&self.filename(&file)?)?.is_some() {
                     return Err("File exists; open it or choose a new filename.".into());
                 }
-                self.switch(file, Workbook::new(), None)
+                self.switch(file, Workbook::new(), true)
             }
             "workbook_info" => {
                 parse::<Empty>(args)?;
@@ -540,69 +483,17 @@ impl Session {
     fn save(&mut self, Save { revision, save_as }: Save) -> Reply {
         self.require_revision(revision)?;
         let state = self.state()?;
-        let expected = if save_as.is_some() {
-            None
-        } else {
-            state.fingerprint
-        };
+        let create_only = save_as.is_some();
         let name = save_as.unwrap_or_else(|| state.name.clone());
         let path = self.filename(&name)?;
-        #[cfg(unix)]
-        let _lock = {
-            // Cooperating headless writers share a stable lock on the directory
-            // inode, without creating a lock file that could be replaced.
-            let directory = File::open(&self.root).map_err(with_context)?;
-            directory.try_lock().map_err(|_| "Another headless session is saving in this folder. Retry after inspecting the file.".to_string())?;
-            directory
-        };
-        let verify = || -> Result<(), CellError> {
-            let actual = fingerprint(&path).map_err(CellError::Sql)?;
-            if expected != actual {
-                let error = if expected.is_some() {
-                    "Workbook changed on disk. Save As to a new filename or discard and reopen; no file was overwritten."
-                } else {
-                    "Save destination already exists. Choose a new filename."
-                };
-                return Err(CellError::Sql(error.into()));
-            }
-            Ok(())
-        };
-        verify().map_err(core_error)?;
-        if !state.dirty && state.name == name {
-            return self.info();
-        }
         let active = self.active.as_mut().unwrap();
-        // Atomic file commit first. Never report a committed Save as failed
-        // solely because it could not be fingerprinted again.
-        let mut written = None;
         active
             .workbook
-            .save_detached(&path, expected.is_none(), |staged| {
-                if fs::metadata(staged)
-                    .map_err(|e| CellError::Sql(e.to_string()))?
-                    .len()
-                    > MAX_FILE
-                {
-                    return Err(CellError::Sql(
-                        "Resulting workbook exceeds the 64 MiB headless save limit.".into(),
-                    ));
-                }
-                written = fingerprint(staged).map_err(CellError::Sql)?;
-                verify()
-            })
+            .save_bounded_workbook(&path, create_only, MAX_FILE)
             .map_err(core_error)?;
-        let (baseline, warning) = match fingerprint(&path) {
-            Ok(Some(value)) if written == Some(value) => (Some(value), None),
-            _ => (None, Some("Save committed, but the new baseline could not be read. Reopen before saving again.")),
-        };
-        active.fingerprint = baseline;
         active.name = name;
         self.update_revision(false);
-        let mut out = self.info()?;
-        if let Some(warning) = warning {
-            out["warning"] = json!(warning);
-        }
-        Ok(out)
+        self.info()
     }
 }
 

@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import time
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 
 @contextmanager
@@ -128,6 +129,14 @@ def smoke(binary, folder):
             assert read_cell(base) == [["recovered after crash"]]
             assert api(base, "workbook")["file_path"] is None
             assert [patch["id"] for patch in api(base, "staged")] == [patch_id]
+            try:
+                api(base, "workbook/save", {"path": str(named)})
+                raise AssertionError("Restored recovery unexpectedly replaced the named workbook")
+            except HTTPError as error:
+                assert error.code == 409, error
+                assert "already exists" in error.read().decode(), error
+            assert named.read_bytes() == original_workbook
+            assert read_cell(base) == [["recovered after crash"]]
             api(base, "workbook/save", {"path": str(exported)})
             assert api(base, "workbook")["file_path"] == str(exported)
             api(base, "workbook/open", {"path": str(exported)})

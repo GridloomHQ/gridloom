@@ -421,6 +421,14 @@ def main(argv=None):
                 test = subprocess.run(command, env=isolated_environment(), timeout=30)
                 if test.returncode:
                     raise SmokeError("Relocated package MCP smoke failed")
+            if info.get("guarded_save") is True:
+                command = [sys.executable, str(Path(__file__).with_name("mixed-save-smoke.py")),
+                    str(root / "gridloom"), str(root / "gridloom-mcp")]
+                if info["mode"] == "desktop":
+                    command.append("--desktop")
+                test = subprocess.run(command, env=isolated_environment(), timeout=45)
+                if test.returncode:
+                    raise SmokeError("Relocated package mixed-editor save smoke failed")
     except (SmokeError, OSError, ValueError, subprocess.TimeoutExpired) as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1

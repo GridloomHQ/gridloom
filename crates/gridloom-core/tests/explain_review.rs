@@ -122,12 +122,13 @@ fn save_open_preserves_evidence_history_and_loads_legacy_without_reviews() {
         "board-pack.pdf, page 4"
     );
     assert!(!loaded.review_history()[0].invalidated);
-    wb.save_recovery_copy(&path).unwrap();
+    let legacy_file = path.with_extension("json");
+    wb.save_recovery_copy(&legacy_file).unwrap();
     let mut legacy: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        serde_json::from_slice(&std::fs::read(&legacy_file).unwrap()).unwrap();
     legacy.as_object_mut().unwrap().remove("reviews");
-    std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
-    assert!(Workbook::open_from_file(path).unwrap().reviews.is_empty());
+    std::fs::write(&legacy_file, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    assert!(Workbook::open_from_file(legacy_file).unwrap().reviews.is_empty());
 }
 
 #[test]
@@ -559,9 +560,10 @@ fn cross_sheet_review_captures_correct_inputs_and_stays_bound_after_save() {
         .nodes
         .iter()
         .any(|n| n.id == "cell:Prior Month!A1" && n.sheet_name.as_deref() == Some("Prior Month")));
-    let path = tempfile::NamedTempFile::new().unwrap();
-    wb.save_to_file(path.path()).unwrap();
-    let mut wb = Workbook::open_from_file(path.path()).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("review.gridloom");
+    wb.save_to_file(&path).unwrap();
+    let mut wb = Workbook::open_from_file(&path).unwrap();
     assert_eq!(wb.reviews[0].attachments[0].bytes, b"checked");
     wb.set_cell("Prior Month", coord("A1"), "120".into())
         .unwrap();

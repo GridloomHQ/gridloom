@@ -86,6 +86,9 @@ jobs:
       - name: Headless MCP workbook round trip
         run: python3 scripts/mcp-smoke.py target/debug/gridloom-mcp
 
+      - name: Mixed desktop and MCP saves
+        run: python3 scripts/mixed-save-smoke.py target/debug/gridloom-desktop target/debug/gridloom-mcp --desktop
+
       - name: Real browser monthly-close acceptance
         working-directory: ./frontend
         run: npm run test:browser

@@ -25,7 +25,7 @@ import { PivotBuilderModal } from './components/PivotBuilderModal';
 import { ChartModal } from './components/ChartModal';
 import { AuditLogModal } from './components/AuditLogModal';
 import { BenchmarkModal } from './components/BenchmarkModal';
-import { api,getPendingMutations,subscribeMutations } from './api';
+import { api,getPendingMutations,subscribeMutations,GridloomApiError } from './api';
 import type {LedgerTarget} from './api';
 import {saveBlocker} from './utils/saveGuard';
 import { ViewportResponse, WorksheetTable, ReviewDraft, DependencyHighlight } from './types';
@@ -134,6 +134,7 @@ export const App: React.FC = () => {
 
   // Status message
   const [statusMsg, setStatusMsg] = useState('Ready');
+  const [saveConflict, setSaveConflict] = useState<string|null>(null);
 
   // Load workbook tables & staged patches count
   const refreshMetadata = useCallback(async () => {
@@ -537,8 +538,14 @@ export const App: React.FC = () => {
     if(!path?.trim())return false;
     if(!readyForFileAction())return false;
     mutationLock.current=true;setBusy(true);
-    try {await api.saveWorkbook(path);metadataSequence.current++;setFilePath(path);setStatusMsg(`Saved workbook to ${path}`);return true;}
-    catch(err:any){setStatusMsg(`Failed to save: ${err.message}`);return false;}
+    try {
+      await api.saveWorkbook(path,saveAs);
+      metadataSequence.current++;setFilePath(path);setSaveConflict(null);
+      setStatusMsg(`Saved workbook to ${path}`);return true;
+    } catch(err:any) {
+      if(err instanceof GridloomApiError && err.status===409) setSaveConflict(err.message);
+      setStatusMsg(`Failed to save: ${err.message}`);return false;
+    }
     finally{mutationLock.current=false;setBusy(false);}
   };
   const requestReplacement=(kind:'new'|'open')=>{if(readyForFileAction())setReplacement(kind);};
@@ -553,6 +560,7 @@ export const App: React.FC = () => {
     setReplacement(null);
     await mutate(kind==='new'?'Created new workbook':kind==='recover'?'Recovered workbook. Use Save As to keep a named copy.':`Opened workbook from ${path}`,async()=>{
       if(kind==='new')await api.newWorkbook();else if(kind==='recover')await api.restoreRecovery(recoveryId);else await api.openWorkbook(path!);
+      setSaveConflict(null);
       invalidateViewport();setViewport(null);selectCell(0,0);
       setWorkbookEpoch(e=>e+1);reviewDrafts.current.clear();clearDependencyTrace();
     });
@@ -610,6 +618,7 @@ export const App: React.FC = () => {
         <div className="bg-white rounded shadow-xl p-5 max-w-lg space-y-3">
           <h2 className="font-semibold">Replace current workbook?</h2>
           <p>This always asks before replacing the workbook. Choose whether to save its current committed content first. Unsubmitted cell, review and dialog drafts are not saved. Saving does not apply staged database edits.</p>
+          {saveConflict && <p role="alert" className="rounded border border-amber-300 bg-amber-50 p-2 text-amber-950">{saveConflict} Cancel to save a copy first.</p>}
           {replacement==='recover'&&<label className="block">Recovery copy <select value={recoveryId} onChange={e=>setRecoveryId(e.target.value)}>{recoveryCopies.map(copy=><option key={copy.id} value={copy.id}>{new Date(copy.modified).toLocaleString()} ({copy.id.slice(0,8)})</option>)}</select></label>}
           <div className="flex gap-2"><button disabled={busy||apiPending>0} onClick={()=>void continueReplacement(true)}>Save and continue</button><button disabled={busy||apiPending>0} onClick={()=>void continueReplacement(false)}>Discard and continue</button><button autoFocus disabled={busy} onClick={()=>setReplacement(null)}>Cancel</button></div>
         </div>
@@ -742,6 +751,11 @@ export const App: React.FC = () => {
       />}
       </div>
 
+      {saveConflict && !replacement && <div className="border-t border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 flex flex-wrap gap-x-3 gap-y-1 items-center">
+        <p role="alert" className="min-w-0">{saveConflict}</p>
+        <button type="button" className="font-semibold underline" disabled={busy || !!replacement} onClick={()=>void handleSaveWorkbook(true)}>Save a copy…</button>
+        <button type="button" className="underline" onClick={()=>setSaveConflict(null)}>Dismiss</button>
+      </div>}
       <SelectionSummary key={workbookEpoch} sheetName={sheetName} range={selection} revision={`${workbookEpoch}:${reviewRevision}`} busy={busy}/>
       {/* Bottom Sheet Tabs & Status Bar */}
       <div className="flex items-center justify-between border-t border-slate-300 bg-white px-3 py-1 text-xs select-none shadow-inner">

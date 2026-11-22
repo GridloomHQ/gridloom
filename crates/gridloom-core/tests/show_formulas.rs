@@ -17,14 +17,15 @@ fn show_formulas_are_independent_per_sheet_and_legacy_defaults_roundtrip() {
     wb.save_to_file(&file).unwrap();
     let loaded = Workbook::open_from_file(&file).unwrap();
     assert_eq!(serde_json::to_value(&loaded.sheets).unwrap(), before);
-    wb.save_recovery_copy(&file).unwrap();
+    let legacy_file = file.with_extension("json");
+    wb.save_recovery_copy(&legacy_file).unwrap();
     let mut json: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        serde_json::from_slice(&std::fs::read(&legacy_file).unwrap()).unwrap();
     for sheet in json["sheets"].as_object_mut().unwrap().values_mut() {
         sheet.as_object_mut().unwrap().remove("show_formulas");
     }
-    std::fs::write(&file, serde_json::to_vec(&json).unwrap()).unwrap();
-    let legacy = Workbook::open_from_file(&file).unwrap();
+    std::fs::write(&legacy_file, serde_json::to_vec(&json).unwrap()).unwrap();
+    let legacy = Workbook::open_from_file(&legacy_file).unwrap();
     assert!(legacy.sheets.values().all(|s| !s.show_formulas));
     wb.set_show_formulas("Sheet1", false).unwrap();
     assert!(!wb.sheets["Sheet1"].show_formulas);

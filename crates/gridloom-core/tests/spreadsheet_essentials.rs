@@ -160,20 +160,22 @@ fn styles_and_cross_sheet_formulas_persist_with_old_file_compatibility() {
     };
     w.format_range("Sheet1", range("A1"), style.clone())
         .unwrap();
-    let file = tempfile::NamedTempFile::new().unwrap();
-    w.save_to_file(file.path()).unwrap();
-    let loaded = Workbook::open_from_file(file.path()).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("styles.gridloom");
+    w.save_to_file(&file).unwrap();
+    let loaded = Workbook::open_from_file(&file).unwrap();
     assert_eq!(value(&loaded, "Sheet1", "A1"), "0.25");
     assert_eq!(loaded.sheets["Sheet1"].cells["A1"].style, style);
-    w.save_recovery_copy(file.path()).unwrap();
+    let recovery = directory.path().join("recovery.json");
+    w.save_recovery_copy(&recovery).unwrap();
     let mut json: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(file.path()).unwrap()).unwrap();
+        serde_json::from_slice(&std::fs::read(&recovery).unwrap()).unwrap();
     json["sheets"]["Sheet1"]["cells"]["A1"]
         .as_object_mut()
         .unwrap()
         .remove("style");
-    std::fs::write(file.path(), serde_json::to_vec(&json).unwrap()).unwrap();
-    assert!(Workbook::open_from_file(file.path()).is_ok());
+    std::fs::write(&recovery, serde_json::to_vec(&json).unwrap()).unwrap();
+    assert!(Workbook::open_from_file(&recovery).is_ok());
 }
 #[test]
 fn plain_edit_undo_redo_and_redo_branch() {

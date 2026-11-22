@@ -95,7 +95,7 @@ status = command("git", "status", "--porcelain", "--untracked-files=normal", req
 if commit != sys.argv[5] or tree != sys.argv[6]:
     raise SystemExit("Source commit/tree changed during build; no package will be labeled with a different revision.")
 info = {
-    "format": "gridloom-linux-package", "format_version": 1, "mcp_stdio": True,
+    "format": "gridloom-linux-package", "format_version": 1, "mcp_stdio": True, "guarded_save": True,
     "version": sys.argv[3], "mode": sys.argv[2], "build_profile": "release",
     "duckdb_version": sys.argv[8],
     "source_commit": commit, "source_tree": tree,
