@@ -1397,7 +1397,7 @@ dependencies = [
 
 [[package]]
 name = "gridloom-core"
-version = "0.13.0-preview.1"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1417,7 +1417,7 @@ dependencies = [
 
 [[package]]
 name = "gridloom-desktop"
-version = "0.13.0-preview.1"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1432,17 +1432,18 @@ dependencies = [
 
 [[package]]
 name = "gridloom-mcp"
-version = "0.13.0-preview.1"
+version = "0.13.0"
 dependencies = [
  "gridloom-core",
  "rust_decimal",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
 name = "gridloom-server"
-version = "0.13.0-preview.1"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "axum",

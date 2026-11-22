@@ -1,3 +1,10 @@
+# 0.13.0
+
+- Bundle a local headless MCP server in Linux desktop and server packages. Agents can build, inspect, edit, validate, and explicitly save native standalone workbooks.
+- Give agents the same snapshot-bound Review workflow as the app: trace transitive inputs, record a labeled AI-assisted review or open question, resolve and reopen questions, inspect notes and retained evidence metadata, and compare changes.
+- Follow workbook-owned table cells and their formulas in review traces. Relevant input changes invalidate reviews even when the number stays the same.
+- Share a guarded save between app and MCP. A stale save is rejected without losing edits; Save As writes a separate new file, and recovered copies cannot overwrite a named workbook.
+
 # 0.12.0
 
 - Start with one blank worksheet. Gridloom no longer creates or offers built-in demonstration data. Existing workbook and database files are unchanged.

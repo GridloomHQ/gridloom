@@ -218,6 +218,24 @@ impl Workbook {
         sheet_name: &str,
         coord: CellCoord,
     ) -> Result<CellExplanation, CellError> {
+        self.build_explanation(sheet_name, coord, true)
+    }
+
+    /// Native review snapshot without cloning files from the latest review.
+    pub fn explain_review_snapshot(
+        &self,
+        sheet_name: &str,
+        coord: CellCoord,
+    ) -> Result<CellExplanation, CellError> {
+        self.build_explanation(sheet_name, coord, false)
+    }
+
+    fn build_explanation(
+        &self,
+        sheet_name: &str,
+        coord: CellCoord,
+        include_latest_review: bool,
+    ) -> Result<CellExplanation, CellError> {
         let sheet = self.sheets.get(sheet_name).ok_or(CellError::Ref)?;
         if coord.row >= sheet.max_rows || coord.col >= sheet.max_cols {
             return Err(CellError::Ref);
@@ -354,7 +372,7 @@ impl Workbook {
             warnings: warnings.clone(),
             can_review: trace.can_review,
         };
-        let review = self.reviews.iter().rev().find(|r| r.sheet_name == sheet_name && r.coord == coord).cloned().map(|mut r| {
+        let review = include_latest_review.then(|| self.reviews.iter().rev().find(|r| r.sheet_name == sheet_name && r.coord == coord)).flatten().cloned().map(|mut r| {
             if r.snapshot != snapshot || (r.decision == ReviewDecision::Reviewed && !trace.can_review) {
                 r.invalidated = true;
                 r.invalidation_reason.get_or_insert_with(|| "The calculation, dependencies, or reviewable state changed. Review again.".into());
@@ -401,7 +419,7 @@ impl Workbook {
         }
         let coord = CellCoord::new(request.row, request.col);
         let explanation = self
-            .explain_cell(&request.sheet_name, coord)
+            .explain_review_snapshot(&request.sheet_name, coord)
             .map_err(|e| e.message().to_string())?;
         if explanation.snapshot != request.expected_snapshot {
             return Err("This calculation changed while you were reviewing it. Reload its explanation and review again.".into());
@@ -485,7 +503,7 @@ impl Workbook {
             return Err("Question is already in the requested state.".into());
         }
         let current = self
-            .explain_cell(&question.sheet_name, question.coord)
+            .explain_review_snapshot(&question.sheet_name, question.coord)
             .map_err(|e| e.to_string())?;
         if current.snapshot != request.expected_snapshot {
             return Err("Calculation changed. Reload before updating the question.".into());
@@ -516,15 +534,17 @@ impl Workbook {
             .iter()
             .enumerate()
             .filter(|(_, r)| !r.invalidated)
-            .filter_map(|(i, r)| match self.explain_cell(&r.sheet_name, r.coord) {
-                Ok(explanation)
-                    if (r.decision == ReviewDecision::Question || explanation.can_review)
-                        && explanation.snapshot == r.snapshot =>
-                {
-                    None
-                }
-                _ => Some(i),
-            })
+            .filter_map(
+                |(i, r)| match self.explain_review_snapshot(&r.sheet_name, r.coord) {
+                    Ok(explanation)
+                        if (r.decision == ReviewDecision::Question || explanation.can_review)
+                            && explanation.snapshot == r.snapshot =>
+                    {
+                        None
+                    }
+                    _ => Some(i),
+                },
+            )
             .collect();
         for i in changed {
             self.reviews[i].invalidated = true;
@@ -536,7 +556,7 @@ impl Workbook {
 
     pub fn review_history(&self) -> Vec<ReviewRecord> {
         self.reviews.iter().rev().cloned().map(|mut record| {
-            if !record.invalidated && !matches!(self.explain_cell(&record.sheet_name, record.coord), Ok(e) if (record.decision == ReviewDecision::Question || e.can_review) && e.snapshot == record.snapshot) {
+            if !record.invalidated && !matches!(self.explain_review_snapshot(&record.sheet_name, record.coord), Ok(e) if (record.decision == ReviewDecision::Question || e.can_review) && e.snapshot == record.snapshot) {
                 record.invalidated = true;
                 record.invalidation_reason = Some("The calculation, dependencies, or reviewable state changed. Review again.".into());
             }
@@ -651,28 +671,36 @@ impl TraceBuilder<'_> {
             },
         );
         self.visiting.insert(id.clone());
-        if let Some(table) = sheet.tables.values().find(|t| t.range.contains(coord)) {
-            let name = table.name.clone();
-            let table_id = self.table(&name, depth + 1)?;
-            self.edge(&id, table_id);
-        } else if let Some(spill) = sheet
-            .spills
-            .get_spill_at(&coord)
-            .filter(|s| s.anchor != coord)
-        {
-            let anchor = spill.anchor;
-            let anchor_id = self.cell(anchor, depth + 1)?;
-            self.edge(&id, anchor_id);
-            self.nodes.get_mut(&id).unwrap().detail =
-                Some(format!("Spill result from {}", anchor.to_a1()));
-        } else if let Some(formula) = formula {
-            match parse_formula(&formula) {
-                Ok(ast) => self.expr(&id, &ast, coord, depth + 1)?,
-                Err(_) => {
-                    self.can_review = false;
-                    self.warnings.insert(
-                        "A formula could not be parsed; its dependencies are incomplete.".into(),
-                    );
+        let follows_formula =
+            if let Some(table) = sheet.tables.values().find(|t| t.range.contains(coord)) {
+                let local_body = table.local.is_some() && coord.row != table.anchor.row;
+                let table_id = self.table(&table.name, depth + 1)?;
+                self.edge(&id, table_id);
+                local_body
+            } else {
+                true
+            };
+        if follows_formula {
+            if let Some(spill) = sheet
+                .spills
+                .get_spill_at(&coord)
+                .filter(|s| s.anchor != coord)
+            {
+                let anchor = spill.anchor;
+                let anchor_id = self.cell(anchor, depth + 1)?;
+                self.edge(&id, anchor_id);
+                self.nodes.get_mut(&id).unwrap().detail =
+                    Some(format!("Spill result from {}", anchor.to_a1()));
+            } else if let Some(formula) = formula {
+                match parse_formula(&formula) {
+                    Ok(ast) => self.expr(&id, &ast, coord, depth + 1)?,
+                    Err(_) => {
+                        self.can_review = false;
+                        self.warnings.insert(
+                            "A formula could not be parsed; its dependencies are incomplete."
+                                .into(),
+                        );
+                    }
                 }
             }
         }
@@ -695,10 +723,15 @@ impl TraceBuilder<'_> {
         if self.nodes.contains_key(&id) || self.limit(depth) {
             return Ok(id);
         }
-        self.parts.insert(
-            id.clone(),
-            serde_json::to_value(table).map_err(|_| CellError::Value)?,
-        );
+        let metadata = if let Some(local) = &table.local {
+            // Retain schema, not formatting. Resolved cell values are traced separately.
+            serde_json::json!({"name":table.name,"anchor":table.anchor,"range":table.range,
+                "columns":table.columns,"has_headers":table.has_headers,
+                "has_totals":table.has_totals,"local":local})
+        } else {
+            serde_json::to_value(table).map_err(|_| CellError::Value)?
+        };
+        self.parts.insert(id.clone(), metadata);
         self.nodes.insert(
             id.clone(),
             ExplanationNode {
@@ -708,19 +741,20 @@ impl TraceBuilder<'_> {
                 formula: None,
                 value: None,
                 depends_on: vec![],
-                detail: Some(format!(
-                    "Worksheet table at {}; cached data source {}",
-                    table.anchor.to_a1(),
-                    table.source_name
-                )),
+                detail: Some(if table.local.is_some() {
+                    format!("Workbook-owned table at {}. Resolved cells are recorded in the calculation trace.", table.anchor.to_a1())
+                } else {
+                    format!("Worksheet table at {}; cached data source {}", table.anchor.to_a1(), table.source_name)
+                }),
                 coord: None,
                 sheet_name: Some(self.sheet_name.clone()),
                 source_name: None,
             },
         );
-        let source_name = table.source_name.clone();
-        let source_id = self.source(&source_name, depth + 1)?;
-        self.edge(&id, source_id);
+        if table.local.is_none() {
+            let source_id = self.source(&table.source_name, depth + 1)?;
+            self.edge(&id, source_id);
+        }
         Ok(id)
     }
 
@@ -825,14 +859,34 @@ impl TraceBuilder<'_> {
             Expr::StructuredRef(sref) => {
                 let child = self.table(&sref.table_name, depth)?;
                 self.edge(parent, child);
-                // Resolve to verify the exact column/row scope; retain it in the snapshot.
-                let ctx = WorkbookEvalContext {
-                    workbook: self.workbook,
-                    sheet_name: &self.sheet_name,
-                    current_coord: current,
-                };
-                if ctx.get_table_column(sref).is_err() {
-                    self.can_review = false;
+                let table = self.workbook.sheets[&self.sheet_name]
+                    .tables
+                    .values()
+                    .find(|t| t.name.eq_ignore_ascii_case(&sref.table_name))
+                    .ok_or(CellError::Ref)?;
+                if table.local.is_some() {
+                    if let Ok(range) = table.resolve_structured_ref(sref, Some(current)) {
+                        'rows: for row in range.start_row..=range.end_row {
+                            for col in range.start_col..=range.end_col {
+                                if self.limit(depth) {
+                                    break 'rows;
+                                }
+                                let child = self.cell(CellCoord::new(row, col), depth)?;
+                                self.edge(parent, child);
+                            }
+                        }
+                    } else {
+                        self.can_review = false;
+                    }
+                } else {
+                    let ctx = WorkbookEvalContext {
+                        workbook: self.workbook,
+                        sheet_name: &self.sheet_name,
+                        current_coord: current,
+                    };
+                    if ctx.get_table_column(sref).is_err() {
+                        self.can_review = false;
+                    }
                 }
             }
             Expr::Unary { expr, .. } => self.expr(parent, expr, current, depth + 1)?,
@@ -971,6 +1025,22 @@ impl Workbook {
     }
 
     pub fn compare_review(&self, review_id: Uuid) -> Result<ReviewComparison, String> {
+        self.compare_to_current(review_id, true)
+    }
+
+    /// Comparison summaries without cloning retained attachment payloads.
+    pub fn compare_review_summary(
+        &self,
+        before_id: Uuid,
+        after_id: Option<Uuid>,
+    ) -> Result<ReviewComparison, String> {
+        match after_id {
+            Some(after) => self.compare_versions(before_id, after, false),
+            None => self.compare_to_current(before_id, false),
+        }
+    }
+
+    fn compare_to_current(&self, review_id: Uuid, raw: bool) -> Result<ReviewComparison, String> {
         let before = self
             .reviews
             .iter()
@@ -978,7 +1048,7 @@ impl Workbook {
             .ok_or("Review not found")?;
         let retained = before.input_snapshot.as_ref().ok_or("This legacy review retained only a digest, not its inputs. Exact comparison is unavailable.")?;
         let current = self
-            .explain_cell(&before.sheet_name, before.coord)
+            .explain_review_snapshot(&before.sheet_name, before.coord)
             .map_err(|e| e.message().to_string())?;
         let (summaries, affected_cells) = self.summarize_changes(retained, &current.input_snapshot);
         Ok(ReviewComparison {
@@ -988,7 +1058,11 @@ impl Workbook {
             after_review_id: None,
             before_snapshot: before.snapshot.clone(),
             after_snapshot: current.snapshot,
-            changes: snapshot_diff(retained, &current.input_snapshot)?,
+            changes: if raw {
+                snapshot_diff(retained, &current.input_snapshot)?
+            } else {
+                Vec::new()
+            },
         })
     }
 
@@ -996,6 +1070,15 @@ impl Workbook {
         &self,
         before_id: Uuid,
         after_id: Uuid,
+    ) -> Result<ReviewComparison, String> {
+        self.compare_versions(before_id, after_id, true)
+    }
+
+    fn compare_versions(
+        &self,
+        before_id: Uuid,
+        after_id: Uuid,
+        raw: bool,
     ) -> Result<ReviewComparison, String> {
         let before = self
             .reviews
@@ -1018,16 +1101,38 @@ impl Workbook {
             .input_snapshot
             .as_ref()
             .ok_or("After review has no retained inputs")?;
-        let mut changes = snapshot_diff(a, b)?;
-        diff_json(
-            "/attachments",
-            Some(&serde_json::to_value(&before.attachments).map_err(|e| e.to_string())?),
-            Some(&serde_json::to_value(&after.attachments).map_err(|e| e.to_string())?),
-            &mut changes,
-        );
+        let evidence_metadata = |record: &ReviewRecord| {
+            serde_json::json!({
+                "references":record.evidence,
+                "attachments":record.attachments.iter().map(|item| serde_json::json!({
+                    "id":item.id,"filename":item.filename,"version":item.version,
+                    "sha256":item.sha256,"media_type":item.media_type,
+                    "previous_version_id":item.previous_version_id,"byte_count":item.bytes.len(),
+                })).collect::<Vec<_>>(),
+            })
+        };
+        let (old_files, new_files) = if raw {
+            (
+                serde_json::to_value(&before.attachments).map_err(|e| e.to_string())?,
+                serde_json::to_value(&after.attachments).map_err(|e| e.to_string())?,
+            )
+        } else {
+            (evidence_metadata(before), evidence_metadata(after))
+        };
+        let mut changes = if raw {
+            snapshot_diff(a, b)?
+        } else {
+            Vec::new()
+        };
+        if raw {
+            diff_json(
+                "/attachments",
+                Some(&old_files),
+                Some(&new_files),
+                &mut changes,
+            );
+        }
         let (mut summaries, affected_cells) = self.summarize_changes(a, b);
-        let old_files = serde_json::to_value(&before.attachments).map_err(|e| e.to_string())?;
-        let new_files = serde_json::to_value(&after.attachments).map_err(|e| e.to_string())?;
         if old_files != new_files {
             summaries.push(ChangeSummary {
                 category: "evidence".into(),
@@ -1062,21 +1167,27 @@ impl Workbook {
             .chain(after.inputs.keys())
             .cloned()
             .collect();
+        let old_nodes: BTreeMap<_, _> = before
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node))
+            .collect();
+        let new_nodes: BTreeMap<_, _> = after
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node))
+            .collect();
         for key in keys {
             let old = before.inputs.get(&key);
             let new = after.inputs.get(&key);
             if old == new {
                 continue;
             }
-            let node = after
-                .nodes
-                .iter()
-                .find(|n| n.id == key)
-                .or_else(|| before.nodes.iter().find(|n| n.id == key));
+            let old_node = old_nodes.get(key.as_str()).copied();
+            let new_node = new_nodes.get(key.as_str()).copied();
+            let node = new_node.or(old_node);
             let sheet = node.and_then(|n| n.sheet_name.clone());
             let coord = node.and_then(|n| n.coord);
-            let old_node = before.nodes.iter().find(|n| n.id == key);
-            let new_node = after.nodes.iter().find(|n| n.id == key);
             let category = if key.starts_with("cell:") {
                 if old_node.and_then(|n| n.formula.as_ref())
                     != new_node.and_then(|n| n.formula.as_ref())
