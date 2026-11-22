@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/gridloom-core",
     "crates/gridloom-server",
+    "crates/gridloom-mcp",
     "crates/gridloom-desktop",
 ]
 

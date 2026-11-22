@@ -1,0 +1,16 @@
+[package]
+name = "gridloom-mcp"
+version = "0.12.0"
+edition = "2021"
+description = "Headless local MCP server for Gridloom workbooks"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+gridloom-core = { workspace = true }
+rust_decimal = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.10.9"
+
+[dev-dependencies]
+tempfile = { workspace = true }

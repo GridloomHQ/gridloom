@@ -81,7 +81,10 @@ jobs:
 
       - name: Build application binaries
         id: binaries
-        run: cargo build --locked -p gridloom-server -p gridloom-desktop
+        run: cargo build --locked -p gridloom-server -p gridloom-desktop -p gridloom-mcp
+
+      - name: Headless MCP workbook round trip
+        run: python3 scripts/mcp-smoke.py target/debug/gridloom-mcp
 
       - name: Real browser monthly-close acceptance
         working-directory: ./frontend

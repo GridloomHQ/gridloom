@@ -59,7 +59,7 @@ class PackageTests(unittest.TestCase):
             for name, data in contents.items():
                 member = tarfile.TarInfo("package/" + name)
                 member.size = len(data)
-                member.mode = 0o755 if name in ("gridloom", "gridloom-server", "gridloom-desktop") else 0o644
+                member.mode = 0o755 if name in ("gridloom", "gridloom-server", "gridloom-desktop", "gridloom-mcp", "gridloom-mcp-bin") else 0o644
                 bundle.addfile(member, io.BytesIO(data))
             for member, data in extra_members:
                 bundle.addfile(member, io.BytesIO(data) if data is not None else None)
@@ -80,6 +80,16 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(info["source_commit"], COMMIT)
         self.assertEqual((root / "lib/libduckdb.so").read_bytes(), b"fake library")
         self.assertTrue((root / "gridloom").stat().st_mode & 0o111)
+
+    def test_headless_mcp_package_requires_both_executables(self):
+        info = build_info(mcp_stdio=True)
+        files = {"gridloom-mcp": b"launcher", "gridloom-mcp-bin": b"binary"}
+        for missing in files:
+            with self.subTest(missing=missing), self.assertRaisesRegex(smoke.SmokeError, "MCP launcher/binary"):
+                self.verify(self.package(info=info, files=files, omit_files=[missing]))
+        root, actual = self.verify(self.package(info=info, files=files))
+        self.assertTrue(actual["mcp_stdio"])
+        self.assertEqual((root / "gridloom-mcp-bin").read_bytes(), b"binary")
 
     def test_external_checksum_tampering_missing_wrong_filename(self):
         archive = self.package()

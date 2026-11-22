@@ -162,6 +162,13 @@ Gridloom periodically saves committed workbook changes (approximately every two 
 
 Set `GRIDLOOM_RECOVERY_DIR` to choose a private recovery directory. By default it is under the operating system's user-specific state/application-data directory. Recovery files can contain workbook data and should be protected like the original workbook.
 
+## Operate worksheets from an agent
+
+The Linux packages include a separate headless `gridloom-mcp` command. A local
+MCP client can open standalone workbooks, read exact values, edit and validate
+formulas, follow dependencies, and explicitly save without starting the UI.
+See [agent setup and the workbook example](docs/MCP.md).
+
 ## Important boundaries
 
 - **Native workbook model.** Save the working model as `.gridloom`, which retains its source links, review notes and evidence. Use the reporting tools for CSV, HTML or JSON outputs where available. Gridloom does not import or export Excel workbooks.
@@ -174,7 +181,7 @@ Set `GRIDLOOM_RECOVERY_DIR` to choose a private recovery directory. By default i
 
 ## Development and verification
 
-The repository separates `gridloom-core` (Rust calculation, database and working-paper logic), `gridloom-server` (Axum API and local app hosting), `gridloom-desktop` (Wry/Tao shell), and `frontend` (React/TypeScript interface).
+The repository separates `gridloom-core` (Rust calculation, database and working-paper logic), `gridloom-server` (Axum API and local app hosting), `gridloom-desktop` (Wry/Tao shell), `gridloom-mcp` (stdio agent tools), and `frontend` (React/TypeScript interface).
 
 With the source-build environment above configured, including the optional desktop dependencies for the full workspace tests:
 
