@@ -697,6 +697,18 @@ impl Workbook {
         self.edit_range(sheet_name, coord, vec![vec![raw_input]])
     }
 
+    /// Recalculate for a headless editor without leaving a partial state on failure.
+    pub fn recalculate_atomic(&mut self, sheet_name: &str) -> Result<(), CellError> {
+        let original_sheets = self.sheets.clone();
+        let original_graph = self.dep_graph.clone();
+        if let Err(error) = self.recalculate(sheet_name) {
+            self.sheets = original_sheets;
+            self.dep_graph = original_graph;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     pub fn recalculate(&mut self, sheet_name: &str) -> Result<(), CellError> {
         if !self.sheets.contains_key(sheet_name) {
             return Err(CellError::Ref);
@@ -1322,18 +1334,32 @@ impl Workbook {
 
     /// Atomic file package save
     pub fn save_to_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), CellError> {
-        self.write_workbook_file(path, true)
+        self.write_workbook_file(path, true, false, |_| Ok(()))
     }
 
     /// Write a recovery copy without changing the path used by explicit Save.
     pub fn save_recovery_copy<P: AsRef<Path>>(&mut self, path: P) -> Result<(), CellError> {
-        self.write_workbook_file(path, false)
+        self.write_workbook_file(path, false, false, |_| Ok(()))
+    }
+
+    /// Atomically save a detached editor's document. For new paths, fail if any
+    /// file appears at the destination. For existing paths, run the caller's
+    /// conflict check immediately before replacement.
+    pub fn save_detached<P: AsRef<Path>>(
+        &mut self,
+        path: P,
+        create_only: bool,
+        check: impl FnOnce(&Path) -> Result<(), CellError>,
+    ) -> Result<(), CellError> {
+        self.write_workbook_file(path, true, create_only, check)
     }
 
     fn write_workbook_file<P: AsRef<Path>>(
         &mut self,
         path: P,
         set_path: bool,
+        create_only: bool,
+        check: impl FnOnce(&Path) -> Result<(), CellError>,
     ) -> Result<(), CellError> {
         self.invalidate_changed_reviews();
         let p = path.as_ref().to_path_buf();
@@ -1445,9 +1471,18 @@ impl Workbook {
             })?;
         }
         // Same-directory rename is the commit point. Failures before this preserve the target.
-        fs::rename(&tmp_path, &p)
-            .map_err(|e| CellError::Sql(format!("Failed to commit atomic save: {}", e)))?;
-        temporary.committed = true;
+        check(&tmp_path)?;
+        if create_only {
+            // A same-directory hard link publishes a complete file without
+            // ever replacing another writer's newly created file.
+            fs::hard_link(&tmp_path, &p)
+                .map_err(|e| CellError::Sql(format!("Failed to publish new workbook: {e}")))?;
+            drop(temporary); // remove only the staging name
+        } else {
+            fs::rename(&tmp_path, &p)
+                .map_err(|e| CellError::Sql(format!("Failed to commit atomic save: {e}")))?;
+            temporary.committed = true;
+        }
         // The replacement is already committed. A directory-sync failure must not be
         // reported as a failed save (which would falsely imply the old file remains).
         // Best effort on Unix; this is not a full power-loss/crash recovery guarantee.
@@ -1463,6 +1498,16 @@ impl Workbook {
 
     /// Open and deserialize workbook
     pub fn open_from_file<P: AsRef<Path>>(path: P) -> Result<Self, CellError> {
+        Self::open_file(path, false)
+    }
+
+    /// Load only standalone workbooks, before any automatic source reconnection.
+    /// Workbook-owned SQL tables remain available; external source files never do.
+    pub fn open_standalone_file<P: AsRef<Path>>(path: P) -> Result<Self, CellError> {
+        Self::open_file(path, true)
+    }
+
+    fn open_file<P: AsRef<Path>>(path: P, standalone: bool) -> Result<Self, CellError> {
         let p = path.as_ref().to_path_buf();
         let mut file = File::open(&p)
             .map_err(|e| CellError::Sql(format!("Failed to open workbook file: {e}")))?;
@@ -1475,6 +1520,16 @@ impl Workbook {
             serde_json::from_reader(BufReader::new(file))
                 .map_err(|e| CellError::Sql(format!("Corrupt workbook format: {e}")))?
         };
+
+        if standalone && (!serialized.connection_configs.is_empty()
+            || !serialized.named_sources.is_empty()
+            || !serialized.staged.patches.is_empty()
+            || serialized.sheets.values().any(|sheet| {
+                !sheet.ledger_links.is_empty() || sheet.tables.values().any(|table| table.local.is_none() || table.live.is_some())
+            }))
+        {
+            return Err(CellError::Sql("Linked database workbooks are not supported in standalone mode.".into()));
+        }
 
         let mut wb = Workbook {
             sheets: serialized.sheets,

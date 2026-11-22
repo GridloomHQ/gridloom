@@ -1431,6 +1431,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "gridloom-mcp"
+version = "0.12.0"
+dependencies = [
+ "gridloom-core",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "gridloom-server"
 version = "0.12.0"
 dependencies = [

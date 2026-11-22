@@ -535,6 +535,27 @@ impl Workbook {
         }
         self.commit_cells(name, changes, true)
     }
+    /// Apply a sparse batch of exact workbook inputs using the same atomic path
+    /// as UI edits, preserving existing cell styles and typed column rules.
+    pub fn edit_typed_cells(
+        &mut self,
+        name: &str,
+        mut cells: Vec<CellData>,
+    ) -> Result<(), CellError> {
+        let sheet = self.sheets.get(name).ok_or(CellError::Ref)?;
+        let mut seen = std::collections::BTreeSet::new();
+        for data in &mut cells {
+            if !seen.insert(data.coord) {
+                return Err(CellError::Value);
+            }
+            if let Some(old) = sheet.get_cell(&data.coord) {
+                data.style = old.style.clone();
+                data.number_format = old.number_format.clone();
+            }
+        }
+        self.commit_cells(name, cells.into_iter().map(|d| (d.coord, Some(d))).collect(), true)
+    }
+
     /// Changes one attribute across a range without flattening mixed styles.
     pub fn format_range_attribute(
         &mut self,

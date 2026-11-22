@@ -217,6 +217,10 @@ def verify_package(archive, destination, expected_commit=None, expected_tree=Non
         raise SmokeError("Package launcher/binary is not executable")
     if "lib/libduckdb.so" not in files:
         raise SmokeError("Bundled DuckDB library missing")
+    if info.get("mcp_stdio") is True:
+        for name in ("gridloom-mcp", "gridloom-mcp-bin"):
+            if name not in files or not os.access(root / name, os.X_OK):
+                raise SmokeError(f"Missing executable MCP launcher/binary: {name}")
     return root, info
 
 
@@ -412,7 +416,12 @@ def main(argv=None):
             root, info = verify_package(args.archive, Path(location), args.expected_commit, args.expected_tree)
             print(f"Verified checksums and build identity: {info['mode']} {info['version']} {info['source_commit']} (checksums are not signatures).", flush=True)
             launch_smoke(root, info, args.native_window, args.timeout)
-    except (SmokeError, OSError, ValueError) as error:
+            if info.get("mcp_stdio") is True:
+                command = [sys.executable, str(Path(__file__).with_name("mcp-smoke.py")), str(root / "gridloom-mcp")]
+                test = subprocess.run(command, env=isolated_environment(), timeout=30)
+                if test.returncode:
+                    raise SmokeError("Relocated package MCP smoke failed")
+    except (SmokeError, OSError, ValueError, subprocess.TimeoutExpired) as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1
     return 0

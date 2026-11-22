@@ -26,12 +26,14 @@ if name=="cargo":
     if args==["--version"]:
         print("cargo 1.95.0 (test fixture)")
     else:
-        assert args==["build","--locked","--release","-p","gridloom-server","--message-format=json-render-diagnostics"], args
-        fresh=root/"custom target"/"release"/"gridloom-server"
+        assert len(args)==6 and args[:4]==["build","--locked","--release","-p"] and args[-1]=="--message-format=json-render-diagnostics", args
+        package=args[4]
+        assert package in ("gridloom-server","gridloom-mcp")
+        fresh=root/"custom target"/"release"/package
         fresh.parent.mkdir(parents=True,exist_ok=True)
-        fresh.write_bytes((root/"fresh-template").read_bytes())
+        fresh.write_bytes((root/("mcp-template" if package=="gridloom-mcp" else "fresh-template")).read_bytes())
         fresh.chmod(0o755)
-        print(json.dumps({"reason":"compiler-artifact","target":{"name":"gridloom-server","kind":["bin"]},"executable":str(fresh)}))
+        print(json.dumps({"reason":"compiler-artifact","target":{"name":package,"kind":["bin"]},"executable":str(fresh)}))
         print(json.dumps({"reason":"build-finished","success":True}))
 elif name=="git":
     if args==["status","--porcelain","--untracked-files=normal"]:
@@ -60,14 +62,18 @@ elif name=="npm":
         target.mkdir(exist_ok=True)
         (target/"index.html").write_text("fresh frontend")
 elif name=="ldd":
-    assert len(args)==1,args
-    assert pathlib.Path(args[0]).read_bytes()==(root/"fresh-template").read_bytes(), "ldd received stale artifact"
+    assert 1<=len(args)<=2,args
+    for arg in args:
+        path=pathlib.Path(arg)
+        assert path.read_bytes()==(root/("mcp-template" if path.name=="gridloom-mcp-bin" else "fresh-template")).read_bytes(), "ldd received stale artifact"
     library=root/"native"/"libduckdb.so"
     if os.environ.get("LD_LIBRARY_PATH"):
         candidate=pathlib.Path(os.environ["LD_LIBRARY_PATH"].split(":")[0])/"libduckdb.so"
         if candidate.is_file():library=candidate
-    print("\tlibduckdb.so => %s (0x1234)"%library)
-    with (root/"ldd-paths").open("a") as log: log.write(args[0]+"\n")
+    with (root/"ldd-paths").open("a") as log:
+        for arg in args:
+            print("\tlibduckdb.so => %s (0x1234)"%library)
+            log.write(arg+"\n")
 elif name in ("rustc","node"):
     assert args==["--version"],args
     print(name+" fixture-version")
@@ -88,7 +94,7 @@ class PackageShellTests(unittest.TestCase):
             (self.root / folder).mkdir(parents=True, exist_ok=True)
         for script in ("package-linux.sh", "package-artifact.py"):
             shutil.copy2(SCRIPTS / script, self.root / "scripts" / script)
-        for name in ("README.md", "LICENSE", "CHANGELOG.md", "docs/RELEASE-0.3.md", "docs/VERIFICATION-0.3.md"):
+        for name in ("README.md", "LICENSE", "CHANGELOG.md", "docs/RELEASE-0.3.md", "docs/VERIFICATION-0.3.md", "docs/MCP.md"):
             (self.root / name).write_text(name + " fixture\n")
         (self.root / "Cargo.lock").write_text('[[package]]\nname = "libduckdb-sys"\nversion = "1.10506.1"\n')
         shutil.copy2(SCRIPTS.parent / "docs/third-party/duckdb-1.5.6.LICENSE", self.root / "docs/third-party/duckdb-1.5.6.LICENSE")
@@ -100,6 +106,8 @@ class PackageShellTests(unittest.TestCase):
         struct.pack_into("<HHI", header, 16, 3, ARCHITECTURES[platform.machine()], 1)
         struct.pack_into("<H", header, 52, 64)
         self.fresh = bytes(header) + b"fresh artifact from custom Cargo target"
+        self.mcp = bytes(header) + b"fresh MCP artifact from custom Cargo target"
+        (self.root / "mcp-template").write_bytes(self.mcp)
         (self.root / "fresh-template").write_bytes(self.fresh)
         (self.root / "target/release/gridloom-server").write_bytes(bytes(header) + b"stale default artifact")
         for tool in ("cargo", "git", "npm", "ldd", "rustc", "node"):
@@ -129,11 +137,15 @@ class PackageShellTests(unittest.TestCase):
         stem = f"gridloom-0.3.0-linux-{platform.machine()}-server"
         self.assertEqual(archive.name, stem + ".tar.gz")
         self.assertEqual(contents[stem + "/gridloom-server"], self.fresh)
+        self.assertEqual(contents[stem + "/gridloom-mcp-bin"], self.mcp)
+        self.assertIn(b'exec "$base/gridloom-mcp-bin" "$@"', contents[stem + "/gridloom-mcp"])
+        self.assertIn(stem + "/docs/MCP.md", contents)
         self.assertEqual(contents[stem + "/frontend/dist/index.html"], b"fresh frontend")
         info = json.loads(contents[stem + "/docs/build-info.json"])
         self.assertEqual((info["source_commit"], info["source_tree"], info["source_dirty"]), (COMMIT, TREE, False))
         self.assertEqual(info["architecture"], platform.machine())
         self.assertEqual(info["mode"], "server")
+        self.assertIs(info["mcp_stdio"], True)
         self.assertEqual(info["duckdb_version"], "1.5.6")
         self.assertIn(b"Stichting DuckDB Foundation", contents[stem + "/docs/DuckDB-LICENSE"])
         self.assertEqual(info["build_profile"], "release")

@@ -16,6 +16,9 @@ artifact=$(cargo build --locked --release -p "gridloom-$mode" --message-format=j
   | python3 scripts/package-artifact.py "gridloom-$mode")
 binary=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["executable"])' <<< "$artifact")
 architecture=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["architecture"])' <<< "$artifact")
+mcp_artifact=$(cargo build --locked --release -p gridloom-mcp --message-format=json-render-diagnostics \
+  | python3 scripts/package-artifact.py gridloom-mcp)
+mcp_binary=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["executable"])' <<< "$mcp_artifact")
 version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' "crates/gridloom-$mode/Cargo.toml" | head -1)
 name="gridloom-$version-linux-$architecture-$mode"
 output="${GRIDLOOM_PACKAGE_DIR:-target/package}"
@@ -26,9 +29,18 @@ trap 'rm -rf "$work"' EXIT
 stage="$work/$name"
 mkdir -p "$stage/lib" "$stage/frontend" "$stage/docs"
 cp "$binary" "$stage/gridloom-$mode"
+cp "$mcp_binary" "$stage/gridloom-mcp-bin"
+cat > "$stage/gridloom-mcp" <<'EOFMCP'
+#!/usr/bin/env bash
+set -euo pipefail
+base=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+export LD_LIBRARY_PATH="$base/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+exec "$base/gridloom-mcp-bin" "$@"
+EOFMCP
+chmod +x "$stage/gridloom-mcp"
 cp -R frontend/dist "$stage/frontend/"
 cp README.md LICENSE CHANGELOG.md "$stage/"
-cp docs/RELEASE-*.md docs/VERIFICATION-*.md "$stage/docs/"
+cp docs/RELEASE-*.md docs/VERIFICATION-*.md docs/MCP.md "$stage/docs/"
 duckdb_version=$(python3 - <<'PYDUCK'
 import tomllib
 from pathlib import Path
@@ -83,7 +95,7 @@ status = command("git", "status", "--porcelain", "--untracked-files=normal", req
 if commit != sys.argv[5] or tree != sys.argv[6]:
     raise SystemExit("Source commit/tree changed during build; no package will be labeled with a different revision.")
 info = {
-    "format": "gridloom-linux-package", "format_version": 1,
+    "format": "gridloom-linux-package", "format_version": 1, "mcp_stdio": True,
     "version": sys.argv[3], "mode": sys.argv[2], "build_profile": "release",
     "duckdb_version": sys.argv[8],
     "source_commit": commit, "source_tree": tree,
@@ -100,7 +112,7 @@ except OSError:
     info["distribution"] = None
 Path(sys.argv[1]).write_text(json.dumps(info, indent=2) + "\n")
 PYINFO
-LD_LIBRARY_PATH="$stage/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ldd "$stage/gridloom-$mode" | tee "$stage/docs/shared-libraries.txt"
+LD_LIBRARY_PATH="$stage/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ldd "$stage/gridloom-$mode" "$stage/gridloom-mcp-bin" | tee "$stage/docs/shared-libraries.txt"
 if grep -q 'not found' "$stage/docs/shared-libraries.txt"; then echo 'Package has unresolved runtime dependencies' >&2; exit 1; fi
 (cd "$stage" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 tar -C "$work" -czf "$output/$name.tar.gz" "$name"
