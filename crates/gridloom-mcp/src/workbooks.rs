@@ -1,3 +1,6 @@
+#[path = "review_tools.rs"]
+mod review_tools;
+
 use gridloom_core::table::LocalColumn;
 use gridloom_core::virtual_view::{ViewportRequest, ViewportResponse};
 use gridloom_core::workbook::CellData;
@@ -476,7 +479,7 @@ impl Session {
                 )
             }
             "save_workbook" => self.save(parse(args)?),
-            _ => Err("Unknown tool.".into()),
+            _ => self.call_review(name, args),
         }
     }
 
@@ -657,6 +660,7 @@ const TOOL_NAMES: &[(&str, bool)] = &[
 pub fn tool_available(name: &str, read_only: bool) -> bool {
     TOOL_NAMES
         .iter()
+        .chain(review_tools::TOOLS.iter())
         .any(|(tool, write)| *tool == name && !(*write && read_only))
 }
 
@@ -697,7 +701,7 @@ pub fn tools(read_only: bool) -> Vec<Json> {
         "type":"object","additionalProperties":false,"required":["cell","input"],
         "properties":{"cell":cell,"input":{"oneOf":typed_values}}
     }});
-    TOOL_NAMES.iter().filter(|(_,write)| !(*write && read_only)).map(|(name,write)| {
+    let mut workbook: Vec<Json> = TOOL_NAMES.iter().filter(|(_,write)| !(*write && read_only)).map(|(name,write)| {
         let (description, props, required) = match *name {
             "list_functions" => ("List calculation functions recognized by the standalone workbook engine.",json!({}),vec![]),
             "create_local_table" => ("Create a workbook-owned typed table on one sheet; the first row is the header and the range must include data rows.",
@@ -723,5 +727,8 @@ pub fn tools(read_only: bool) -> Vec<Json> {
             "type":"object","properties":props,"required":required,"additionalProperties":false},
             "annotations":{"readOnlyHint":!write && !matches!(*name,"open_workbook"|"close_workbook"),"openWorldHint":false,
                 "destructiveHint":matches!(*name,"edit_cells"|"save_workbook"|"close_workbook")}})
-    }).collect()
+    }).collect();
+    let mut review = review_tools::definitions(read_only);
+    review.append(&mut workbook);
+    review
 }

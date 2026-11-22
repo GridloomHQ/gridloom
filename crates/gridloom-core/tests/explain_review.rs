@@ -128,7 +128,10 @@ fn save_open_preserves_evidence_history_and_loads_legacy_without_reviews() {
         serde_json::from_slice(&std::fs::read(&legacy_file).unwrap()).unwrap();
     legacy.as_object_mut().unwrap().remove("reviews");
     std::fs::write(&legacy_file, serde_json::to_vec(&legacy).unwrap()).unwrap();
-    assert!(Workbook::open_from_file(legacy_file).unwrap().reviews.is_empty());
+    assert!(Workbook::open_from_file(legacy_file)
+        .unwrap()
+        .reviews
+        .is_empty());
 }
 
 #[test]
@@ -574,4 +577,93 @@ fn cross_sheet_review_captures_correct_inputs_and_stays_bound_after_save() {
         .changes
         .iter()
         .any(|c| c.path == "/inputs/cell:Prior Month!A1/raw_input"));
+}
+
+#[test]
+fn workbook_owned_table_review_traces_exact_referenced_cells_and_transitive_formulas() {
+    use gridloom_core::{
+        table::{LocalColumn, LocalColumnType},
+        CellRange,
+    };
+    let mut wb = Workbook::new();
+    wb.create_local_table(
+        "Sheet1",
+        "Rates",
+        CellRange::from_a1("A1:B3").unwrap(),
+        vec![
+            LocalColumn {
+                name: "Rate".into(),
+                kind: LocalColumnType::Any,
+            },
+            LocalColumn {
+                name: "Unused".into(),
+                kind: LocalColumnType::Integer,
+            },
+        ],
+    )
+    .unwrap();
+    let set = |w: &mut Workbook, cell, value: &str| {
+        w.set_cell("Sheet1", coord(cell), value.into()).unwrap()
+    };
+    set(&mut wb, "E1", "1");
+    set(&mut wb, "A2", "=E1");
+    set(&mut wb, "A3", "2");
+    set(&mut wb, "D1", "=SUM(Rates[Rate])");
+    let explained = wb.explain_review_snapshot("Sheet1", coord("D1")).unwrap();
+    assert!(explained.can_review);
+    assert!(explained.nodes.iter().any(|n| n.id == "table:Rates"));
+    for cell in ["cell:A2", "cell:A3", "cell:E1"] {
+        assert!(explained.nodes.iter().any(|n| n.id == cell), "{cell}");
+    }
+    assert!(!explained.nodes.iter().any(|n| n.id == "cell:B2"));
+    let signoff = wb.record_review(request(&wb, "Sheet1", "D1")).unwrap();
+    set(&mut wb, "B2", "7");
+    assert!(!wb.reviews[0].invalidated);
+    let next = |w: &mut Workbook, first: &str, second: &str| {
+        w.edit_typed_cells(
+            "Sheet1",
+            vec![
+                gridloom_core::workbook::CellData::new(coord("E1"), first.into()),
+                gridloom_core::workbook::CellData::new(coord("A3"), second.into()),
+            ],
+        )
+        .unwrap()
+    };
+    next(&mut wb, "2", "1");
+    assert_eq!(
+        wb.explain_cell("Sheet1", coord("D1")).unwrap().value,
+        explained.value
+    );
+    assert!(wb.reviews[0].invalidated);
+    let differences = wb.compare_review_summary(signoff.id, None).unwrap();
+    assert!(differences.changes.is_empty());
+    assert!(differences
+        .summaries
+        .iter()
+        .any(|s| s.coord == Some(coord("E1"))));
+    assert!(differences
+        .summaries
+        .iter()
+        .any(|s| s.coord == Some(coord("A3"))));
+}
+
+#[test]
+fn review_includes_unselected_condition_dependencies_without_false_currentness() {
+    let mut wb = Workbook::new();
+    for (cell, value) in [("A1", "5"), ("A2", "8"), ("B1", "=IF(TRUE,A1,A2)")] {
+        wb.set_cell("Sheet1", coord(cell), value.into()).unwrap();
+    }
+    let r = wb.record_review(request(&wb, "Sheet1", "B1")).unwrap();
+    wb.set_cell("Sheet1", coord("A2"), "9".into()).unwrap();
+    assert_eq!(
+        wb.explain_cell("Sheet1", coord("B1")).unwrap().value,
+        Value::Integer(5)
+    );
+    assert!(wb.reviews[0].invalidated);
+    assert!(wb
+        .compare_review_summary(r.id, None)
+        .unwrap()
+        .summaries
+        .iter()
+        .any(|s| s.coord == Some(coord("A2"))));
 }

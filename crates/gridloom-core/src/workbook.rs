@@ -864,6 +864,17 @@ impl Workbook {
             Expr::StructuredRef(sref) => {
                 self.dep_graph
                     .add_dependency(node.clone(), DepNode::Table(sref.table_name.clone()))?;
+                // Local tables use worksheet values, including formulas in Any cells.
+                let current = match node { DepNode::SheetCell(_, coord) => Some(*coord), _ => None };
+                let local_range = self.sheets.get(sheet_name)
+                    .and_then(|sheet| sheet.tables.values().find(|t| t.local.is_some() && t.name.eq_ignore_ascii_case(&sref.table_name)))
+                    .and_then(|table| table.resolve_structured_ref(sref, current).ok());
+                if let Some(range) = local_range {
+                    if range.height() > 100_000 { return Err(CellError::Ref); }
+                    for row in range.start_row..=range.end_row {
+                        self.add_cell_dependency(sheet_name, node, CellCoord::new(row, range.start_col))?;
+                    }
+                }
             }
             Expr::Unary { expr, .. } => self.extract_ast_dependencies(sheet_name, node, expr)?,
             Expr::Binary { left, right, .. } => {

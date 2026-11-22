@@ -115,6 +115,8 @@ def run(executable):
                 "list_workbooks", "list_functions", "open_workbook", "create_workbook", "workbook_info",
                 "close_workbook", "add_sheet", "create_local_table", "read_cells", "validate_cells",
                 "edit_cells", "recalculate", "explain_cell", "save_workbook",
+                "review_cell", "list_reviews", "get_review", "compare_review",
+                "record_review", "transition_question",
             }
             assert "SUM" in c.call("list_functions")["names"]
             assert "SQLVALUE" not in c.call("list_functions")["names"]

@@ -164,10 +164,14 @@ Set `GRIDLOOM_RECOVERY_DIR` to choose a private recovery directory. By default i
 
 ## Operate worksheets from an agent
 
-The Linux packages include a separate headless `gridloom-mcp` command. A local
-MCP client can open standalone workbooks, read exact values, edit and validate
-formulas, follow dependencies, and explicitly save without starting the UI.
-See [agent setup and the workbook example](docs/MCP.md).
+The Linux packages include a headless `gridloom-mcp` command. A local agent can
+build a standalone workbook, re-read the exact result, trace its inputs, raise a
+question, and record a snapshot-bound review without opening the UI. The app
+shows the same review history. A later edit to the calculation or its inputs
+can make a review stale, even if the displayed total did not change. MCP
+records are labeled AI-assisted, not authenticated human approvals.
+
+See [agent setup and a self-review walkthrough](docs/MCP.md).
 
 ## Important boundaries
 
