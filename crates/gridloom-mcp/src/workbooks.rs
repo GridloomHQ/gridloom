@@ -164,13 +164,7 @@ fn checked_metadata(path: &Path) -> Result<Option<fs::Metadata>, String> {
     if !metadata.is_file() || metadata.len() > MAX_FILE {
         return Err("Expected a regular workbook file no larger than 64 MiB, not a link.".into());
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        if metadata.nlink() != 1 {
-            return Err("Do not use a hard-linked workbook.".into());
-        }
-    }
+    gridloom_core::check_workbook_file(path, &metadata).map_err(|e| e.to_string())?;
     Ok(Some(metadata))
 }
 

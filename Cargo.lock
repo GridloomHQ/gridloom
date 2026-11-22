@@ -1397,7 +1397,7 @@ dependencies = [
 
 [[package]]
 name = "gridloom-core"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1413,11 +1413,12 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "gridloom-desktop"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1432,7 +1433,7 @@ dependencies = [
 
 [[package]]
 name = "gridloom-mcp"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "gridloom-core",
  "rust_decimal",
@@ -1443,7 +1444,7 @@ dependencies = [
 
 [[package]]
 name = "gridloom-server"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "anyhow",
  "axum",

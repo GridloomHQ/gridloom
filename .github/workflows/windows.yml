@@ -1,0 +1,96 @@
+name: Windows package
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Windows x64 native package and MCP verification
+    runs-on: windows-2025
+    timeout-minutes: 40
+    env:
+      CARGO_TERM_COLOR: always
+      PYTHONUTF8: "1"
+      GRIDLOOM_PACKAGE_DIR: ${{ runner.temp }}/gridloom-packages
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Configure Rust for Windows x64
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-x64-release-package
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install official locked DuckDB native library
+        shell: pwsh
+        run: |
+          $Version = python -c 'import tomllib; packages=tomllib.load(open("Cargo.lock","rb"))["package"]; n=int(next(p["version"] for p in packages if p["name"]=="libduckdb-sys").split(".")[1]); print(f"{n//10000}.{n//100%100}.{n%100}")'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read the DuckDB version from Cargo.lock' }
+          $Native = Join-Path $env:RUNNER_TEMP "gridloom-duckdb-$Version"
+          New-Item -ItemType Directory -Force $Native | Out-Null
+          $Archive = Join-Path $Native libduckdb.zip
+          curl.exe --fail --location --retry 3 "https://github.com/duckdb/duckdb/releases/download/v$Version/libduckdb-windows-amd64.zip" --output "$Archive"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch the locked official DuckDB Windows library' }
+          # Pinned against the official upstream release asset digest.
+          $ExpectedSha = '44cf59583f9951d2cb09b1bf115a63ecb2d8901e363903029d86c7d8683fe96a'
+          if ($Version -ne '1.5.6' -or (Get-FileHash $Archive -Algorithm SHA256).Hash -ine $ExpectedSha) {
+            throw 'DuckDB Windows download did not match the pinned official SHA-256'
+          }
+          Expand-Archive -Path $Archive -DestinationPath $Native
+          foreach ($File in 'duckdb.dll','duckdb.lib','duckdb.h') {
+            if (!(Test-Path (Join-Path $Native $File) -PathType Leaf)) { throw "Missing official $File" }
+          }
+          "DUCKDB_LIB_DIR=$Native" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DUCKDB_INCLUDE_DIR=$Native" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build native desktop and headless MCP, then stage and zip
+        run: python scripts/package-windows.py
+
+      - name: Verify exact package on Windows outside the checkout
+        shell: pwsh
+        run: |
+          $Tree = git rev-parse 'HEAD^{tree}'
+          $Zip = @(Get-ChildItem $env:GRIDLOOM_PACKAGE_DIR -Filter '*.zip')
+          if ($Zip.Count -ne 1) { throw 'Expected one Windows desktop ZIP' }
+          python -u scripts/windows-package-smoke.py $Zip[0].FullName --expected-commit $env:GITHUB_SHA --expected-tree $Tree 2>&1 | Tee-Object ($Zip[0].FullName + '.smoke.log')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Save verified Windows release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: gridloom-windows-x86_64-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            ${{ env.GRIDLOOM_PACKAGE_DIR }}/*.zip
+            ${{ env.GRIDLOOM_PACKAGE_DIR }}/*.zip.sha256
+            ${{ env.GRIDLOOM_PACKAGE_DIR }}/*.smoke.log
+
+      - name: Save smoke diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gridloom-windows-diagnostics-${{ github.sha }}
+          retention-days: 7
+          path: ${{ env.GRIDLOOM_PACKAGE_DIR }}/*.smoke.log
