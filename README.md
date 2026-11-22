@@ -20,8 +20,6 @@ Pick a result and open **Review → Explain & Review**. Follow its inputs or see
 
 ![Gridloom's Explain and Review panel traces gross profit of 51,200 to June sales and direct costs, with the sales input highlighted in the worksheet.](https://raw.githubusercontent.com/lhemerly/gridloom/main/docs/images/explain-and-review.webp)
 
-These are workbook review records, not authenticated sign-offs or audit assurance.
-
 ## Give your agent a way to check its own work
 
 The bundled headless MCP server lets an agent write a formula, compare the exact result with an independent calculation, trace and fix a mismatch, and record an AI-assisted review you can open in Gridloom. [Try the agent self-review walkthrough.](https://github.com/lhemerly/gridloom/blob/main/docs/MCP.md)
