@@ -205,13 +205,31 @@ async fn open_workbook(
     ))
 }
 
+#[derive(Deserialize)]
+struct SavePathPayload {
+    path: String,
+    #[serde(default)]
+    create_only: bool,
+}
+
 async fn save_workbook(
     State(state): State<AppState>,
-    Json(payload): Json<PathPayload>,
+    Json(payload): Json<SavePathPayload>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let mut wb = state.workbook.write().await;
-    wb.save_to_file(&payload.path)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.message().to_owned()))?;
+    let saved = if payload.create_only {
+        wb.save_new_file(&payload.path)
+    } else {
+        wb.save_to_file(&payload.path)
+    };
+    saved.map_err(|e| {
+        let status = if matches!(e, gridloom_core::CellError::SaveConflict(_)) {
+            StatusCode::CONFLICT
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        };
+        (status, e.message().to_owned())
+    })?;
     Ok(Json(
         serde_json::json!({ "status": "saved", "path": payload.path }),
     ))

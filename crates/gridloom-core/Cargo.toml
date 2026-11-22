@@ -1,6 +1,6 @@
 [package]
 name = "gridloom-core"
-version = "0.12.0"
+version = "0.13.0-preview.1"
 edition = "2021"
 description = "Core calculation, database connection, lineage, writeback, and formula engine for Gridloom"
 license = "MIT OR Apache-2.0"

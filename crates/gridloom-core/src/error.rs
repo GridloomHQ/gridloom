@@ -25,6 +25,8 @@ pub enum CellError {
     Cycle,
     /// #STALE! - Query failed or cancelled, retaining last known value
     Stale,
+    /// Explicit workbook save lost the optimistic disk revision check.
+    SaveConflict(String),
 }
 
 impl CellError {
@@ -41,6 +43,7 @@ impl CellError {
             CellError::Sql(_) => "#SQL!",
             CellError::Cycle => "#CYCLE!",
             CellError::Stale => "#STALE!",
+            CellError::SaveConflict(_) => "#CONFLICT!",
         }
     }
 
@@ -54,7 +57,7 @@ impl CellError {
             CellError::Num => "Number calculation error or overflow",
             CellError::NA => "Value not available",
             CellError::Spill => "Spill range is blocked by existing cells",
-            CellError::Sql(msg) => msg.as_str(),
+            CellError::Sql(msg) | CellError::SaveConflict(msg) => msg.as_str(),
             CellError::Cycle => "Circular reference detected",
             CellError::Stale => "Calculation stale due to error or cancellation",
         }

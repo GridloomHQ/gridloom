@@ -248,7 +248,7 @@ pub async fn restore(
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
         .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))?;
     // A recovery copy is not the explicit file associated with the document.
-    restored.file_path = None;
+    restored.detach_workbook_file();
     *state.workbook.write().await = restored;
     Ok(Json(serde_json::json!({"status":"restored"})))
 }

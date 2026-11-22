@@ -233,6 +233,7 @@ pub struct Workbook {
     pub stale_sources: BTreeSet<String>,
     pub stale_calculation_sheets: BTreeSet<String>,
     pub file_path: Option<PathBuf>,
+    disk_baseline: Option<crate::workbook_file_guard::Baseline>,
     pub edit_history: crate::spreadsheet::EditHistory,
 }
 
@@ -276,6 +277,7 @@ impl Workbook {
             stale_sources: BTreeSet::new(),
             stale_calculation_sheets: BTreeSet::new(),
             file_path: None,
+            disk_baseline: None,
             edit_history: Default::default(),
         }
     }
@@ -1332,37 +1334,61 @@ impl Workbook {
         Ok(record)
     }
 
-    /// Atomic file package save
+    /// Atomically save the opened workbook if its disk revision still matches,
+    /// or publish a new file without replacing another workbook.
     pub fn save_to_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), CellError> {
-        self.write_workbook_file(path, true, false, |_| Ok(()))
+        self.write_workbook_file(path.as_ref(), true, false, None)
     }
 
-    /// Write a recovery copy without changing the path used by explicit Save.
-    pub fn save_recovery_copy<P: AsRef<Path>>(&mut self, path: P) -> Result<(), CellError> {
-        self.write_workbook_file(path, false, false, |_| Ok(()))
+    /// Save As never replaces a named destination, including the source.
+    pub fn save_new_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), CellError> {
+        self.write_workbook_file(path.as_ref(), true, true, None)
     }
 
-    /// Atomically save a detached editor's document. For new paths, fail if any
-    /// file appears at the destination. For existing paths, run the caller's
-    /// conflict check immediately before replacement.
-    pub fn save_detached<P: AsRef<Path>>(
+    /// Same guard used by the desktop, with a size limit and optional
+    /// new-filename requirement for the headless session.
+    pub fn save_bounded_workbook<P: AsRef<Path>>(
         &mut self,
         path: P,
         create_only: bool,
-        check: impl FnOnce(&Path) -> Result<(), CellError>,
+        max_bytes: u64,
     ) -> Result<(), CellError> {
-        self.write_workbook_file(path, true, create_only, check)
+        self.write_workbook_file(path.as_ref(), true, create_only, Some(max_bytes))
     }
 
-    fn write_workbook_file<P: AsRef<Path>>(
+    /// Write a recovery copy without changing the explicit file path or
+    /// advancing the optimistic revision of the manually saved workbook.
+    pub fn save_recovery_copy<P: AsRef<Path>>(&mut self, path: P) -> Result<(), CellError> {
+        self.write_workbook_file(path.as_ref(), false, false, None)
+    }
+
+    /// A restored recovery copy has never opened the named destination.
+    pub fn detach_workbook_file(&mut self) {
+        self.file_path = None;
+        self.disk_baseline = None;
+    }
+
+    fn write_workbook_file(
         &mut self,
-        path: P,
+        path: &Path,
         set_path: bool,
         create_only: bool,
-        check: impl FnOnce(&Path) -> Result<(), CellError>,
+        max_bytes: Option<u64>,
     ) -> Result<(), CellError> {
-        self.invalidate_changed_reviews();
-        let p = path.as_ref().to_path_buf();
+        use crate::workbook_file_guard as guard;
+        let p = if set_path {
+            guard::normalized_path(path)?
+        } else {
+            if self.disk_baseline.as_ref().is_some_and(|baseline| {
+                guard::normalized_path(path).is_ok_and(|recovery| baseline.path == recovery)
+            }) {
+                return Err(CellError::Sql("A recovery copy cannot replace the named workbook.".into()));
+            }
+            path.to_path_buf()
+        };
+        let expected = self.disk_baseline.as_ref()
+            .filter(|baseline| !create_only && baseline.path == p)
+            .map(|baseline| baseline.digest);
         let parent = p
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
@@ -1381,8 +1407,12 @@ impl Workbook {
             }) {
                 return Err(CellError::Sql("Choose a workbook path, not an attached database.".into()));
             }
+            // Reject changed and pre-existing destinations before staging.
+            // The second check, under the common lock, is the commit gate.
             crate::workbook_store::protect_existing(&p)?;
+            guard::verify(&p, expected, max_bytes)?;
         }
+        self.invalidate_changed_reviews();
         // Bounded name length also permits destinations near a filesystem's filename limit.
         let tmp_path = parent.join(format!(".gridloom-save-{}.tmp", uuid::Uuid::new_v4()));
 
@@ -1471,18 +1501,34 @@ impl Workbook {
             })?;
         }
         // Same-directory rename is the commit point. Failures before this preserve the target.
-        check(&tmp_path)?;
-        if create_only {
-            // A same-directory hard link publishes a complete file without
-            // ever replacing another writer's newly created file.
-            fs::hard_link(&tmp_path, &p)
-                .map_err(|e| CellError::Sql(format!("Failed to publish new workbook: {e}")))?;
-            drop(temporary); // remove only the staging name
+        let committed_baseline = if set_path {
+            let digest = guard::fingerprint(&tmp_path, max_bytes)?.ok_or_else(||
+                CellError::Sql("Staged workbook disappeared before save".into()))?;
+            let _lock = guard::lock_parent(&p)?;
+            guard::verify(&p, expected, max_bytes)?;
+            if expected.is_none() {
+                // A hard link publishes a complete new file and never clobbers
+                // an existing path, even with a non-cooperating writer.
+                fs::hard_link(&tmp_path, &p).map_err(|e| {
+                    if e.kind() == std::io::ErrorKind::AlreadyExists {
+                        CellError::SaveConflict("Save destination appeared on disk. Choose a new filename.".into())
+                    } else {
+                        CellError::Sql(format!("Failed to publish new workbook: {e}"))
+                    }
+                })?;
+                drop(temporary);
+            } else {
+                fs::rename(&tmp_path, &p)
+                    .map_err(|e| CellError::Sql(format!("Failed to commit atomic save: {e}")))?;
+                temporary.committed = true;
+            }
+            Some(guard::Baseline { path: p.clone(), digest })
         } else {
             fs::rename(&tmp_path, &p)
-                .map_err(|e| CellError::Sql(format!("Failed to commit atomic save: {e}")))?;
+                .map_err(|e| CellError::Sql(format!("Failed to commit atomic recovery save: {e}")))?;
             temporary.committed = true;
-        }
+            None
+        };
         // The replacement is already committed. A directory-sync failure must not be
         // reported as a failed save (which would falsely imply the old file remains).
         // Best effort on Unix; this is not a full power-loss/crash recovery guarantee.
@@ -1491,24 +1537,27 @@ impl Workbook {
             tracing::warn!(path = %parent.display(), %error, "Workbook replaced; directory durability could not be confirmed");
         }
         if set_path {
-            self.file_path = Some(p);
+            self.file_path = Some(path.to_path_buf());
+            self.disk_baseline = committed_baseline;
         }
         Ok(())
     }
 
     /// Open and deserialize workbook
     pub fn open_from_file<P: AsRef<Path>>(path: P) -> Result<Self, CellError> {
-        Self::open_file(path, false)
+        Self::open_file(path, false, None)
     }
 
     /// Load only standalone workbooks, before any automatic source reconnection.
     /// Workbook-owned SQL tables remain available; external source files never do.
-    pub fn open_standalone_file<P: AsRef<Path>>(path: P) -> Result<Self, CellError> {
-        Self::open_file(path, true)
+    pub fn open_standalone_file<P: AsRef<Path>>(path: P, max_bytes: u64) -> Result<Self, CellError> {
+        Self::open_file(path, true, Some(max_bytes))
     }
 
-    fn open_file<P: AsRef<Path>>(path: P, standalone: bool) -> Result<Self, CellError> {
-        let p = path.as_ref().to_path_buf();
+    fn open_file<P: AsRef<Path>>(path: P, standalone: bool, max_bytes: Option<u64>) -> Result<Self, CellError> {
+        use crate::workbook_file_guard as guard;
+        let p = guard::normalized_path(path.as_ref())?;
+        let digest = guard::fingerprint(&p, max_bytes)?.ok_or_else(|| guard::detail("Workbook not found."))?;
         let mut file = File::open(&p)
             .map_err(|e| CellError::Sql(format!("Failed to open workbook file: {e}")))?;
         let mut header = [0; 16];
@@ -1521,6 +1570,9 @@ impl Workbook {
                 .map_err(|e| CellError::Sql(format!("Corrupt workbook format: {e}")))?
         };
 
+        if guard::fingerprint(&p, max_bytes)? != Some(digest) {
+            return Err(CellError::SaveConflict("Workbook changed while opening. Try opening it again.".into()));
+        }
         if standalone && (!serialized.connection_configs.is_empty()
             || !serialized.named_sources.is_empty()
             || !serialized.staged.patches.is_empty()
@@ -1545,7 +1597,8 @@ impl Workbook {
             stale_sources: serialized.stale_sources,
             stale_calculation_sheets: serialized.stale_calculation_sheets,
             dep_graph: DependencyGraph::new(),
-            file_path: Some(p),
+            file_path: Some(path.as_ref().to_path_buf()),
+            disk_baseline: Some(guard::Baseline { path: p, digest }),
             edit_history: Default::default(),
         };
 

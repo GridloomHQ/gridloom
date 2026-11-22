@@ -94,3 +94,60 @@ fn new_workbooks_are_private_and_replacement_preserves_permission_bits() {
         );
     }
 }
+
+#[test]
+fn detached_recovery_and_new_names_cannot_replace_named_workbooks() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = dir.path().join("original.gridloom");
+    let recovery = dir.path().join("detached.gridloom");
+    let copy = dir.path().join("copy.gridloom");
+    let mut owner = Workbook::new();
+    edit(&mut owner, "original");
+    owner.save_to_file(&original).unwrap();
+    let bytes = std::fs::read(&original).unwrap();
+    edit(&mut owner, "recovered instead");
+    assert!(owner.save_recovery_copy(&original).is_err());
+    owner.save_recovery_copy(&recovery).unwrap();
+    let mut loaded = Workbook::open_from_file(&recovery).unwrap();
+    loaded.detach_workbook_file();
+    assert!(matches!(
+        loaded.save_to_file(&original),
+        Err(gridloom_core::CellError::SaveConflict(_))
+    ));
+    assert_eq!(std::fs::read(&original).unwrap(), bytes);
+    loaded.save_new_file(&copy).unwrap();
+    assert!(matches!(
+        loaded.save_new_file(&copy),
+        Err(gridloom_core::CellError::SaveConflict(_))
+    ));
+    assert_eq!(
+        Workbook::open_from_file(copy).unwrap().sheets["Sheet1"].cells["A1"].raw_input,
+        "recovered instead"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn canonical_directory_aliases_have_the_same_save_baseline() {
+    let dir = tempfile::tempdir().unwrap();
+    let real = dir.path().join("real");
+    std::fs::create_dir(&real).unwrap();
+    let alias = dir.path().join("alias");
+    std::os::unix::fs::symlink(&real, &alias).unwrap();
+    let mut owner = Workbook::new();
+    let direct = real.join("test.gridloom");
+    let indirect = alias.join("test.gridloom");
+    owner.save_to_file(&direct).unwrap();
+    let mut stale = Workbook::open_from_file(&indirect).unwrap();
+    edit(&mut owner, "current");
+    owner.save_to_file(&indirect).unwrap();
+    edit(&mut stale, "stale");
+    assert!(matches!(
+        stale.save_to_file(&direct),
+        Err(gridloom_core::CellError::SaveConflict(_))
+    ));
+    assert_eq!(
+        Workbook::open_from_file(direct).unwrap().sheets["Sheet1"].cells["A1"].raw_input,
+        "current"
+    );
+}

@@ -2,12 +2,17 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
-const artifacts=path.join(root,'target/save-smoke');mkdirSync(artifacts,{recursive:true});
-const server=spawn(process.env.GRIDLOOM_SERVER||path.join(root,'target/debug/gridloom-server'),['--port','0'],{cwd:root,env:process.env,stdio:['ignore','pipe','pipe']});
+const evidence=path.join(root,'target/save-smoke');mkdirSync(evidence,{recursive:true});
+const artifacts=mkdtempSync(path.join(evidence,'run-'));
+const executable=process.env.GRIDLOOM_SERVER||path.join(root,'target/debug/gridloom-server');
+const startBackend=folder=>spawn(executable,['--port','0'],{cwd:root,
+ env:{...process.env,GRIDLOOM_RECOVERY_DIR:path.join(artifacts,folder)},stdio:['ignore','pipe','pipe']});
+const server=startBackend('recovery-primary');
+let other;
 let log='',browser,page;server.stdout.on('data',d=>log+=d);server.stderr.on('data',d=>log+=d);
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 try {
@@ -42,6 +47,37 @@ try {
  // No known path in new workbook: canceling Save aborts replacement.
  await page.getByRole('tab',{name:'File',exact:true}).click();await page.getByRole('button',{name:'Open',exact:true}).click();page.once('dialog',d=>d.dismiss());await replacement.getByRole('button',{name:'Save and continue',exact:true}).click();assert.equal(await replacement.count(),1);
  page.once('dialog',d=>d.accept(second));await replacement.getByRole('button',{name:'Discard and continue',exact:true}).click();await page.getByText(`Opened workbook from ${second}`,{exact:true}).waitFor();await idle();assert.equal(await cell('A1').innerText(),'12');
- await page.screenshot({path:path.join(artifacts,'save.png'),fullPage:true});assert.deepEqual(errors,[]);console.log('PASS known-path Save, Save As, shortcut, failed path retention, draft guards, replacement cancel/save/discard, serialized save.');
+
+ // A real second backend saves another cell to the same file. The main UI
+ // must keep its in-memory edit and offer a safe copy, not replay the write.
+ await edit('A1','13');
+ other=startBackend('recovery-other');let otherLog='';
+ other.stdout.on('data',data=>otherLog+=data);other.stderr.on('data',data=>otherLog+=data);
+ const otherBase=await new Promise((resolve,reject)=>{
+  const timer=setTimeout(()=>{clearInterval(poll);reject(new Error(otherLog));},12000);
+  const poll=setInterval(()=>{const m=otherLog.match(/Server running at (http:\/\/127\.0\.0\.1:\d+)/);
+   if(m){clearInterval(poll);clearTimeout(timer);resolve(m[1]);}},30);
+ });
+ const post=async(endpoint,body)=>{
+  const response=await fetch(`${otherBase}/api/${endpoint}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+  assert.equal(response.status,200,await response.clone().text());return response.json();
+ };
+ await post('workbook/open',{path:second});
+ await post('cells/set',{sheet_name:'Sheet1',row:0,col:1,raw_input:'99'});
+ await post('workbook/save',{path:second});
+ const winning=readFileSync(second);
+ await save.click();
+ const conflict=page.getByRole('alert').filter({hasText:'Workbook changed on disk'});
+ await conflict.waitFor();assert.equal(await cell('A1').innerText(),'13');
+ assert.deepEqual(readFileSync(second),winning);
+ const copy=path.join(artifacts,'conflict-copy.gridloom');
+ page.once('dialog',d=>d.accept(copy));await page.getByRole('button',{name:'Save a copy…'}).click();
+ await page.getByText(`Saved workbook to ${copy}`,{exact:true}).waitFor();
+ assert.equal(await conflict.count(),0);
+ assert.deepEqual(readFileSync(second),winning);
+ await post('workbook/open',{path:copy});
+ const copyCells=await post('ranges/read',{sheet_name:'Sheet1',range:{start_row:0,start_col:0,end_row:0,end_col:1}});
+ assert.deepEqual(copyCells,[['13','']]);
+ await page.screenshot({path:path.join(artifacts,'save.png'),fullPage:true});assert.deepEqual(errors,[]);console.log('PASS known-path Save, Save As, shortcut, failed path retention, draft guards, replacement cancel/save/discard, serialized save, and real mixed-session save conflict.');
 }catch(error){writeFileSync(path.join(artifacts,'server.log'),log);if(page)await page.screenshot({path:path.join(artifacts,'failure.png'),fullPage:true}).catch(()=>{});throw error;}
-finally{if(browser)await browser.close();server.kill('SIGTERM');}
+finally{if(browser)await browser.close();if(other)other.kill('SIGTERM');server.kill('SIGTERM');}

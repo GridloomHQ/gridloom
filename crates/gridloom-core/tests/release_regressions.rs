@@ -191,9 +191,10 @@ fn spills_round_trip_and_child_dependents_recalculate_in_order() {
     wb.set_cell("Sheet1", CellCoord::new(0, 0), "=SEQUENCE(2)".into())
         .unwrap();
     assert_eq!(viewport(&wb).cells["C1"].raw_value, Value::Integer(3));
-    let file = NamedTempFile::new().unwrap();
-    wb.save_to_file(file.path()).unwrap();
-    let mut loaded = Workbook::open_from_file(file.path()).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("spill.gridloom");
+    wb.save_to_file(&file).unwrap();
+    let mut loaded = Workbook::open_from_file(&file).unwrap();
     assert_eq!(viewport(&loaded).cells["A2"].raw_value, Value::Integer(2));
     loaded
         .set_cell("Sheet1", CellCoord::new(0, 0), "=SEQUENCE(3,1,10)".into())

@@ -47,12 +47,20 @@ const mutationListeners=new Set<()=>void>();
 export const getPendingMutations=()=>pendingMutations;
 export const subscribeMutations=(listener:()=>void)=>{mutationListeners.add(listener);return()=>{mutationListeners.delete(listener);};};
 const readPostPaths=new Set(['/api/ranges/sort-filter','/api/ledger/page','/api/pivots/refresh','/api/ranges/summary','/api/ranges/capture','/api/ranges/read','/api/cells/find','/api/cells/explain','/api/cells/dependencies','/api/cells/viewport','/api/cells/viewport-panes','/api/query/analyze','/api/query/preview','/api/writeback/review','/api/benchmark/run']);
+export class GridloomApiError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.name = 'GridloomApiError';
+  }
+}
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const changing=!!options?.method && options.method!=='GET' && !readPostPaths.has(url);
   if(changing){pendingMutations++;mutationListeners.forEach(listener=>listener());}
   try {
     const res=await fetch(`${BASE_URL}${url}`,{...options,headers:{'Content-Type':'application/json',...options?.headers}});
-    if(!res.ok)throw new Error(await res.text()||`HTTP error ${res.status}`);
+    if(!res.ok)throw new GridloomApiError(res.status,await res.text()||`HTTP error ${res.status}`);
     return await res.json();
   } finally {if(changing){pendingMutations--;mutationListeners.forEach(listener=>listener());}}
 }
@@ -110,7 +118,7 @@ export const api = {
   getWorkbook: () => fetchJson<WorkbookSummary>('/api/workbook'),
   newWorkbook: () => fetchJson<{ status: string }>('/api/workbook/new', { method: 'POST' }),
   openWorkbook: (path: string) => fetchJson<any>('/api/workbook/open', { method: 'POST', body: JSON.stringify({ path }) }),
-  saveWorkbook: (path: string) => fetchJson<any>('/api/workbook/save', { method: 'POST', body: JSON.stringify({ path }) }),
+  saveWorkbook: (path: string, create_only=false) => fetchJson<{status:string,path:string}>('/api/workbook/save', { method: 'POST', body: JSON.stringify({ path,create_only }) }),
 
   getLedgerTrace: (target: LedgerTarget, signal?: AbortSignal) => fetchJson<LedgerTrace>("/api/ledger/trace?" + new URLSearchParams({sheet_name:target.sheet_name,row:String(target.row),col:String(target.col)}),{signal}),
   setLedgerTrace: (target: LedgerTarget, session: string|null, signal?: AbortSignal) => fetchJson<LedgerTrace>("/api/ledger/trace",{method:"POST",body:JSON.stringify({target,session}),signal}),

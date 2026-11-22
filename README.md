@@ -154,7 +154,7 @@ For frontend development, run the server in one terminal and `cd frontend && npm
 
 ### Try a first workbook
 
-Enter a few values and a formula, select its result, and open **Explain & Review**. To use your own data, connect an existing SQLite or DuckDB file, or enable the **Monthly close** add-on to import a trial balance. Save the workbook before closing the application. Use **Save As** to keep a separate copy. Older JSON workbooks still open without changing the original file. An explicit save uses the new SQLite container; use **Save As** if you want to retain the older JSON file for use with older releases.
+Enter a few values and a formula, select its result, and open **Explain & Review**. To use your own data, connect an existing SQLite or DuckDB file, or enable the **Monthly close** add-on to import a trial balance. Save the workbook before closing the application. Save refuses to overwrite another session’s changes; use **Save As** with a new filename to keep your edits as a separate copy. Older JSON workbooks still open without changing the original file. An explicit save uses the new SQLite container; use **Save As** if you want to retain the older JSON file for use with older releases.
 
 ### Recover unsaved edits
 
