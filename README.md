@@ -24,8 +24,14 @@ Pick a result and open **Review → Explain & Review**. Follow its inputs or see
 
 The bundled headless MCP server lets an agent write a formula, compare the exact result with an independent calculation, trace and fix a mismatch, and record an AI-assisted review you can open in Gridloom. [Try the agent self-review walkthrough.](https://github.com/lhemerly/gridloom/blob/main/docs/MCP.md)
 
-## Start with a number
+## Try it with a real workbook
 
-Enter `100.25` in **A1**, `40.10` in **B1**, and `=A1-B1` in **C1**. Select the **60.15** result, open **Explain & Review**, and record a check. Change **A1** and see that review go stale. Save the calculation and review history together in one `.gridloom` file.
+Start with [**The Total Still Ties**](https://github.com/GridloomHQ/gridloom-demos/blob/main/workbooks/the-total-still-ties.gridloom). The control total is **$100.25**, but rent and software are swapped. Trace the amounts with **Explain & Review**, fix the two mappings, then record a review on the total. Move $1 from rent to software in the ledger: the total still ties, but the review goes stale because its inputs changed.
+
+- [**Alphabet DCF**](https://github.com/GridloomHQ/gridloom-demos/blob/main/workbooks/alphabet-fcff.gridloom): Trace an illustrative per-share value back through cash flows, the cost of capital, and SEC-filed figures.
+- [**U.S. Treasury curve**](https://github.com/GridloomHQ/gridloom-demos/blob/main/derivatives/treasury-snapshot.gridloom): Turn a dated set of public Treasury yields into modeled forward rates and a trade value.
+- [**OIS swap**](https://github.com/GridloomHQ/gridloom-demos/blob/main/derivatives/ois-swap.gridloom): Trace synthetic swap quotes through the discount curve to the price and its sensitivity to a rate change.
+
+[Download the workbooks and follow the walkthroughs](https://github.com/GridloomHQ/gridloom-demos). Open any of them in Gridloom using **File → Open**.
 
 [Workbook guide](https://github.com/lhemerly/gridloom/blob/main/docs/WORKBOOKS.md) · [Build from source](https://github.com/lhemerly/gridloom/blob/main/docs/DEVELOPMENT.md) · [License](LICENSE)
