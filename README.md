@@ -1,7 +1,5 @@
 # Tayriva
 
-<img src="docs/images/tayriva-mark.png" width="112" height="112" alt="Tayriva logo">
-
 **Work with millions of rows. Show where the numbers come from.**
 
 Tayriva (formerly Gridloom) is a local-first spreadsheet for financial models and accounting work. Browse a live database table without importing every row. Then audit a calculation in the same workbook, from the result back to its inputs.
