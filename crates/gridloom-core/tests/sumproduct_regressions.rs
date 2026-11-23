@@ -166,7 +166,7 @@ fn sumproduct_referenced_errors_recalculate_dependents_and_invalidate_old_review
     })
     .unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("old.gridloom");
+    let path = dir.path().join("old.tay");
     w.save_to_file(&path).unwrap();
     let loaded = Workbook::open_from_file(&path).unwrap();
     for addr in ["B1", "C1"] {

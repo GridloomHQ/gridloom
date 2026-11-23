@@ -119,7 +119,7 @@ export function LedgerPanel({onClose,target}:{onClose:()=>void;target?:LedgerTar
         <button type="button" disabled={!canSave} onClick={()=>void storeLink(false)} className="border rounded px-2 py-1">Save link to cell</button>
         {trace?.link&&<button type="button" disabled={saving} onClick={()=>void storeLink(true)} className="border rounded px-2 py-1">Remove saved link</button>}
       </div>
-      <p className="text-slate-600">To reuse this link after closing Gridloom, save the workbook. Saving a link does not change the source database.</p>
+      <p className="text-slate-600">To reuse this link after closing Tayriva, save the workbook. Saving a link does not change the source database.</p>
       {traceError&&<p role="alert" className="text-red-700">{traceError}</p>}
     </div>}
     {error && <p role="alert" className="text-red-700">{error}</p>}

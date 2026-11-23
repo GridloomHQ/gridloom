@@ -20,7 +20,7 @@ export function AboutDialog({onClose}:{onClose:()=>void}){
   }}>
     <section role="dialog" aria-modal="true" aria-labelledby="gridloom-about-title" className="bg-white rounded-lg shadow-xl max-w-xl w-full max-h-full overflow-y-auto p-5 space-y-4">
       <header className="flex items-center justify-between gap-4">
-        <div><h2 id="gridloom-about-title" className="text-lg font-semibold">About Gridloom</h2><p className="text-xs text-slate-600">Version {version}</p></div>
+        <div><h2 id="gridloom-about-title" className="text-lg font-semibold">About Tayriva</h2><p className="text-xs text-slate-600">Version {version}</p></div>
         <button ref={closeButton} onClick={onClose} className="px-2 py-1 border rounded">Close</button>
       </header>
     </section>

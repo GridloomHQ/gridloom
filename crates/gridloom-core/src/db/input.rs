@@ -113,7 +113,7 @@ fn sql_value(
 ) -> Result<Value, CellError> {
     use SqlEditInput::{Raw, Typed};
     let kind = spec(engine, &column.data_type)
-        .ok_or_else(|| error(column, "This SQL type is read-only in Gridloom."))?;
+        .ok_or_else(|| error(column, "This SQL type is read-only in Tayriva."))?;
     if matches!(&input, Typed(Value::Null))
         || (!matches!(&kind, Kind::Text)
             && matches!(&input, Raw(s) if s.trim().eq_ignore_ascii_case("NULL")))
@@ -173,7 +173,7 @@ fn sql_value(
                 if value.fract().is_zero() {
                     return value.to_i64().map(Value::Integer).ok_or_else(|| error(column, "SQLite can preserve whole numbers only within its signed 64-bit integer range."));
                 }
-                // SQLite NUMERIC stores fractions as REAL. Match the actual canonical Gridloom
+                // SQLite NUMERIC stores fractions as REAL. Match the actual canonical Tayriva
                 // decode, and reject magnitudes/scales for which the staged decimal would change.
                 if value.to_f64().and_then(Decimal::from_f64) != Some(value) {
                     return Err(error(column, "SQLite would change this numeric value on readback. Use a scaled INTEGER account value or a DuckDB DECIMAL column to preserve it."));

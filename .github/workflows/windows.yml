@@ -79,7 +79,7 @@ jobs:
       - name: Save verified Windows release candidate
         uses: actions/upload-artifact@v4
         with:
-          name: gridloom-windows-x86_64-${{ github.sha }}
+          name: tayriva-windows-x86_64-${{ github.sha }}
           if-no-files-found: error
           retention-days: 14
           path: |
@@ -91,6 +91,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: gridloom-windows-diagnostics-${{ github.sha }}
+          name: tayriva-windows-diagnostics-${{ github.sha }}
           retention-days: 7
           path: ${{ env.GRIDLOOM_PACKAGE_DIR }}/*.smoke.log

@@ -206,7 +206,7 @@ fn test_spill_collision_prevention() {
 #[test]
 fn test_workbook_save_and_reopen_persistence() {
     let directory = tempfile::tempdir().unwrap();
-    let save_path = directory.path().join("roundtrip.gridloom");
+    let save_path = directory.path().join("roundtrip.tay");
 
     let mut wb = Workbook::new();
     wb.set_cell("Sheet1", CellCoord::new(0, 0), "100".to_string()).unwrap();

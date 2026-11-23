@@ -534,14 +534,14 @@ export const App: React.FC = () => {
   };
   const handleSaveWorkbook=async(saveAs=false):Promise<boolean>=>{
     if(!readyForFileAction())return false;
-    const path=saveAs||!filePath?prompt('Save committed workbook content to:',filePath??'my_workbook.gridloom'):filePath;
+    const path=saveAs||!filePath?prompt('Save committed workbook content to:',filePath??'my_workbook.tay'):filePath;
     if(!path?.trim())return false;
     if(!readyForFileAction())return false;
     mutationLock.current=true;setBusy(true);
     try {
-      await api.saveWorkbook(path,saveAs);
-      metadataSequence.current++;setFilePath(path);setSaveConflict(null);
-      setStatusMsg(`Saved workbook to ${path}`);return true;
+      const saved=await api.saveWorkbook(path,saveAs);
+      metadataSequence.current++;setFilePath(saved.path);setSaveConflict(null);
+      setStatusMsg(`Saved workbook to ${saved.path}`);return true;
     } catch(err:any) {
       if(err instanceof GridloomApiError && err.status===409) setSaveConflict(err.message);
       setStatusMsg(`Failed to save: ${err.message}`);return false;
@@ -554,7 +554,7 @@ export const App: React.FC = () => {
     const kind=replacement;
     if(kind==='recover'&&!recoveryId)return;
     if(save&&!await handleSaveWorkbook())return;
-    const path=kind==='open'?prompt('Enter path of .gridloom file to open:',filePath??'my_workbook.gridloom'):null;
+    const path=kind==='open'?prompt('Enter path of .tay file to open:',filePath??'my_workbook.tay'):null;
     if(kind==='open'&&!path?.trim())return;
     if(!readyForFileAction())return;
     setReplacement(null);

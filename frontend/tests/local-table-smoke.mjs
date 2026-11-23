@@ -14,13 +14,13 @@ const server=spawn(process.env.GRIDLOOM_SERVER||path.join(root,'target/debug/gri
 let browser;
 try {
   const base=await new Promise((resolve,reject)=>{
-    const timeout=setTimeout(()=>reject(new Error('Gridloom did not start')),10000);
+    const timeout=setTimeout(()=>reject(new Error('Tayriva did not start')),10000);
     server.stdout.on('data',chunk=>{
       const match=String(chunk).match(/Server running at (http:\/\/127\.0\.0\.1:\d+)/);
       if(match){clearTimeout(timeout);resolve(match[1]);}
     });
     server.once('error',error=>{clearTimeout(timeout);reject(error)});
-    server.once('exit',code=>{clearTimeout(timeout);reject(new Error('Gridloom exited: '+code))});
+    server.once('exit',code=>{clearTimeout(timeout);reject(new Error('Tayriva exited: '+code))});
   });
   browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH,args:['--no-sandbox']});
   const page=await browser.newPage();
@@ -60,7 +60,7 @@ try {
   await page.reload();
   await cell('A5').getByText('0.3',{exact:true}).waitFor();
 
-  const file=path.join(fixture,'budget.gridloom');
+  const file=path.join(fixture,'budget.tay');
   await post('/api/workbook/save',{path:file});
   const opened=await page.request.get(base+'/api/workbook');
   const summary=await opened.json();

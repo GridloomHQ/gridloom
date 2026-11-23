@@ -73,7 +73,7 @@ export function MonthlyClosePanel({ onClose, onChanged, onSelectCell }: Props) {
     const mime = format === 'json' ? 'application/json' : format === 'csv' ? 'text/csv;charset=utf-8' : 'text/html;charset=utf-8';
     const url = URL.createObjectURL(new Blob([content], { type: mime }));
     const anchor = document.createElement('a'); anchor.href = url;
-    anchor.download = evidenceDownloadName(`gridloom-${format === 'csv' ? 'pl' : format === 'html' ? 'close-summary' : 'review'}-${pack.status.period.period}-v${pack.status.period.version}.${format}`);
+    anchor.download = evidenceDownloadName(`tayriva-${format === 'csv' ? 'pl' : format === 'html' ? 'close-summary' : 'review'}-${pack.status.period.period}-v${pack.status.period.version}.${format}`);
     anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     setMessage(format === 'json' ? 'Review pack downloaded as JSON, including captured inputs and attached evidence. This is not independent audit assurance.' : format === 'csv' ? 'P&L CSV downloaded with exact decimal text. Spreadsheet importers may round numeric amounts; use text import when exact preservation is required.' : 'Readable close summary downloaded. Keep the companion JSON pack for full captured inputs and support file bytes. This is not audit assurance.');
   });

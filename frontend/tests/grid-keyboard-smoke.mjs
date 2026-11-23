@@ -64,7 +64,7 @@ try {
   await page.unrouteAll({behavior:'wait'});
   assert.equal(await cell('B3').getAttribute('aria-selected'),'true');
   // Huge but sparse fixture: exercise the normal Grid without populating a data table.
-  const file=path.join(fixture,'deep.gridloom');
+  const file=path.join(fixture,'deep.tay');
   const post=async(endpoint,data)=>{
     const response=await page.request.post(`${base}${endpoint}`,{data});
     assert(response.ok(),await response.text());

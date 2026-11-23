@@ -12,7 +12,7 @@ pub struct CellStyle {
     pub fill: Option<String>,
     pub number_format: Option<String>,
 }
-/// Gridloom-only paste modes. Ordinary copy still carries formula and styling.
+/// Tayriva-only paste modes. Ordinary copy still carries formula and styling.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PasteMode {

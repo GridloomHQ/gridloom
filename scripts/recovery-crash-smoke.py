@@ -76,7 +76,7 @@ def write_cell(base, text):
 def wait_for_checkpoint(recovery, text, patch_id):
     deadline = time.monotonic() + 8
     while time.monotonic() < deadline:
-        for file in recovery.glob("*.gridloom"):
+        for file in recovery.glob("*.tay"):
             snapshot = file.read_bytes()
             if text.encode() in snapshot and patch_id.encode() in snapshot:
                 return file
@@ -86,8 +86,8 @@ def wait_for_checkpoint(recovery, text, patch_id):
 
 def smoke(binary, folder):
     recovery = folder / "recovery"
-    named = folder / "named.gridloom"
-    exported = folder / "recovered-copy.gridloom"
+    named = folder / "named.tay"
+    exported = folder / "recovered-copy.tay"
     database = folder / "ledger.sqlite"
     with sqlite3.connect(database) as db:
         db.executescript(

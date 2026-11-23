@@ -7,8 +7,8 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "gridloom",
-    about = "Gridloom - Local-first SQL Worksheet Desktop App"
+    name = "tayriva",
+    about = "Tayriva - Local-first SQL Worksheet Desktop App"
 )]
 struct Args {
     #[arg(short, long, default_value_t = 0)]
@@ -33,10 +33,10 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     if args.bench {
-        println!("Running Gridloom V1 Performance Acceptance Protocol Benchmarks...\n");
+        println!("Running Tayriva V1 Performance Acceptance Protocol Benchmarks...\n");
         let report = run_performance_benchmarks();
         println!("============================================================");
-        println!(" GRIDLOOM V1 PERFORMANCE ACCEPTANCE REPORT");
+        println!(" TAYRIVA V1 PERFORMANCE ACCEPTANCE REPORT");
         println!("============================================================");
         for r in &report.results {
             println!("\n* Workload: {}", r.workload_name);
@@ -80,7 +80,7 @@ fn main() -> anyhow::Result<()> {
         rt.block_on(async { start_server(args.port).await })?;
 
     println!(
-        "Gridloom Core Engine active at http://127.0.0.1:{}",
+        "Tayriva Core Engine active at http://127.0.0.1:{}",
         actual_port
     );
 
@@ -111,10 +111,10 @@ fn main() -> anyhow::Result<()> {
 
         let event_loop = EventLoop::new();
         let window = WindowBuilder::new()
-            .with_title("Gridloom — SQL-Connected Worksheet")
+            .with_title("Tayriva — SQL-Connected Worksheet")
             .with_inner_size(LogicalSize::new(1280.0, 800.0))
             .build(&event_loop)?;
-        println!("Gridloom native window constructed.");
+        println!("Tayriva native window constructed.");
 
         let webview_url = format!("http://127.0.0.1:{}", actual_port);
         let builder = WebViewBuilder::new().with_url(&webview_url);
@@ -128,17 +128,17 @@ fn main() -> anyhow::Result<()> {
 
             let container = window
                 .default_vbox()
-                .ok_or_else(|| anyhow::anyhow!("Gridloom native window has no GTK container"))?;
+                .ok_or_else(|| anyhow::anyhow!("Tayriva native window has no GTK container"))?;
             builder.build_gtk(container)?
         };
         #[cfg(not(target_os = "linux"))]
         let _webview = builder.build(&window)?;
-        println!("Gridloom native webview initialized.");
+        println!("Tayriva native webview initialized.");
 
         event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Wait;
             match event {
-                Event::NewEvents(StartCause::Init) => println!("Gridloom desktop window opened."),
+                Event::NewEvents(StartCause::Init) => println!("Tayriva desktop window opened."),
                 Event::WindowEvent {
                     event: WindowEvent::CloseRequested,
                     ..

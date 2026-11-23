@@ -184,7 +184,7 @@ fn reopened_old_mod_cache_invalidates_review_and_recalculates_dependents() {
     })
     .unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("old.gridloom");
+    let path = dir.path().join("old.tay");
     wb.save_to_file(&path).unwrap();
     let loaded = Workbook::open_from_file(&path).unwrap();
     assert!(loaded.reviews[0].invalidated);

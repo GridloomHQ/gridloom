@@ -530,7 +530,7 @@ mod tests {
                 .to_string_repr(),
             "#SQL!"
         );
-        let saved = dir.path().join("test.gridloom");
+        let saved = dir.path().join("test.tay");
         book.save_to_file(&saved).unwrap();
         let loaded = Workbook::open_from_file(saved).unwrap();
         assert!(loaded.named_sources.is_empty());

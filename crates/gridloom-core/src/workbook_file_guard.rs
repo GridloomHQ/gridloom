@@ -140,11 +140,11 @@ pub(crate) fn lock_parent(path: &Path) -> Result<File, CellError> {
         .write(true)
         .create(true)
         .truncate(false)
-        .open(parent.join(".gridloom-workbook.lock"));
+        .open(parent.join(".tayriva-workbook.lock"));
     let file = lock.map_err(|e| detail(format!("Can't open workbook lock: {e}")))?;
     file.try_lock().map_err(|e| match e {
         fs::TryLockError::WouldBlock => CellError::SaveConflict(
-            "Another Gridloom session is saving in this folder. Try again when it finishes.".into(),
+            "Another Tayriva session is saving in this folder. Try again when it finishes.".into(),
         ),
         fs::TryLockError::Error(e) => detail(format!("Can't lock workbook directory: {e}")),
     })?;

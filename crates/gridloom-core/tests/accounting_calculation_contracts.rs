@@ -54,7 +54,7 @@ fn close_recalculates_large_decimal_reconciliation_across_sheets_after_reopen() 
     exact(&book, "Sheet1", "A3", "13");
 
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("close.gridloom");
+    let file = dir.path().join("close.tay");
     book.save_to_file(&file).unwrap();
     let mut reopened = Workbook::open_from_file(&file).unwrap();
     exact(&reopened, "Sheet1", "A2", "0.13");

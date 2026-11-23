@@ -49,7 +49,7 @@ export function Toolbar(p: ToolbarProps) {
     className={worksheetCommandClass}>{label}</button>;
   const commands: Record<Tab, ReactNode> = {
       File: <>
-        {command('New', p.onNewWorkbook, 'New Workbook')}{command('Open', p.onOpenWorkbook, 'Open Workbook (.gridloom)')}
+        {command('New', p.onNewWorkbook, 'New Workbook')}{command('Open', p.onOpenWorkbook, 'Open Workbook (.tay)')}
         {command('Save', p.onSaveWorkbook, 'Save Workbook')}{command('Save As', p.onSaveAsWorkbook)}{p.fileExtras}
       </>,
       Home: <>
@@ -96,7 +96,7 @@ export function Toolbar(p: ToolbarProps) {
   };
   return <div role="region" aria-label="Worksheet commands"
     className="flex shrink-0 items-center whitespace-nowrap border-b border-slate-200 bg-white px-1 text-xs select-none">
-    <span className="hidden shrink-0 px-2 font-bold text-emerald-800 xl:inline">Gridloom</span>
+    <span className="hidden shrink-0 px-2 font-bold text-emerald-800 xl:inline">Tayriva</span>
     <div role="tablist" aria-label="Command groups"
       className="flex max-w-[54%] shrink-0 items-center overflow-x-auto border-r border-slate-200 px-1 py-1.5">
       {tabs.map((tab, index) => <button key={tab} ref={el => { tabRefs.current[index] = el; }} type="button" role="tab"

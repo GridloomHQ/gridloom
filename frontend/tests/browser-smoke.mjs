@@ -61,7 +61,7 @@ try{
  await page.screenshot({path:path.join(artifacts,'monthly-close-rollforward.png'),fullPage:true});
  await modal.getByRole('button',{name:'Close monthly close',exact:true}).click();
  if(await page.getByRole('button',{name:'Close explanation',exact:true}).count())await page.getByRole('button',{name:'Close explanation',exact:true}).click();
- const saved=path.join(artifacts,'acceptance.gridloom');page.once('dialog',d=>d.accept(saved));await page.getByRole('tab',{name:'File',exact:true}).click();await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByText(`Saved workbook to ${saved}`,{exact:true}).waitFor();
+ const saved=path.join(artifacts,'acceptance.tay');page.once('dialog',d=>d.accept(saved));await page.getByRole('tab',{name:'File',exact:true}).click();await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByText(`Saved workbook to ${saved}`,{exact:true}).waitFor();
  await page.getByRole('tab',{name:'File',exact:true}).click();await page.getByRole('button',{name:'New',exact:true}).click();await page.getByRole('button',{name:'Discard and continue',exact:true}).click();await page.getByRole('grid',{name:'Sheet1 worksheet'}).waitFor();page.once('dialog',d=>d.accept(saved));await page.getByRole('tab',{name:'File',exact:true}).click();await page.getByRole('button',{name:'Open',exact:true}).click();await page.getByRole('button',{name:'Discard and continue',exact:true}).click();await page.getByRole('grid',{name:'Close 2026-11 v1 worksheet'}).waitFor();
  // 0.4 acceptance: custom working paper and end-to-end question/adjustment flow.
  await page.getByRole('tab',{name:'Add-ons',exact:true}).click();await page.getByRole('button',{name:'Monthly close',exact:true}).click();
@@ -70,7 +70,7 @@ try{
  await modal.getByRole('button',{name:'Import and generate P&L',exact:true}).click();
  await modal.getByText('Reconciliation · 2026-12',{exact:true}).waitFor();
  await modal.getByText('Entity, currency & report hierarchy',{exact:true}).click();
- await modal.getByLabel('Entity',{exact:true}).fill('Gridloom Synthetic Ltd');
+ await modal.getByLabel('Entity',{exact:true}).fill('Tayriva Synthetic Ltd');
  await modal.getByLabel('Currency code',{exact:true}).fill('BRL');
  await modal.getByLabel('Units',{exact:true}).fill('units');
  const reportLines=[['profit','Operating result','Credit'],['sales','Sales (reported)','Credit'],['fees','Fees (reported)','Debit'],['assets','Cash and clearing','Debit']];

@@ -179,7 +179,7 @@ export function ExplainReviewPanel({ drafts, sheetName, row, col, revision, onCl
           </form>}
         </section>}
         {explanation.review && explanation.review.decision === 'Reviewed' && <section className="space-y-2"><h3 className="font-bold">Latest review</h3><ReviewCard review={explanation.review} /></section>}
-        <form onSubmit={save} className="space-y-3 border-t pt-4"><h3 className="font-bold">Review this calculation</h3><p className="text-slate-500">Review records stay inside the .gridloom file. Names are self-reported, not authenticated sign-offs.</p>
+        <form onSubmit={save} className="space-y-3 border-t pt-4"><h3 className="font-bold">Review this calculation</h3><p className="text-slate-500">Review records stay inside the .tay file. Names are self-reported, not authenticated sign-offs.</p>
           <fieldset disabled={busy || loading} className="space-y-3 disabled:opacity-60">
             <label className="block">Reviewer name or initials<input required maxLength={120} value={reviewer} onChange={e => setReviewer(e.target.value)} className={`${inputClass} mt-1`} /></label>
             <label className="block">Decision<select value={effectiveDecision} onChange={e => setDecision(e.target.value as 'Reviewed' | 'Question')} className={`${inputClass} mt-1`}><option disabled={signoffBlocked} value="Reviewed">Mark reviewed</option><option value="Question">Circle up a question</option></select></label>

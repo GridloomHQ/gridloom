@@ -80,7 +80,7 @@ async fn local_boundary(request: Request, next: Next) -> Response {
             .is_some_and(|s| !s.contains('/') && !s.contains('@') && local_authority(s))
     });
     if !allowed_host || !allowed_origin {
-        return (StatusCode::FORBIDDEN, "Gridloom accepts only loopback hosts and local browser origins. This is not a remote multi-user service.").into_response();
+        return (StatusCode::FORBIDDEN, "Tayriva accepts only loopback hosts and local browser origins. This is not a remote multi-user service.").into_response();
     }
     next.run(request).await
 }

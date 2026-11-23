@@ -4,7 +4,7 @@ use gridloom_server::start_server;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser, Debug)]
-#[command(name = "gridloom-server", about = "Gridloom local desktop server")]
+#[command(name = "tayriva-server", about = "Tayriva local desktop server")]
 struct Args {
     #[arg(short, long, default_value_t = 3001)]
     port: u16,
@@ -25,10 +25,10 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     if args.bench {
-        println!("Running Gridloom V1 Performance Acceptance Protocol Benchmarks...\n");
+        println!("Running Tayriva V1 Performance Acceptance Protocol Benchmarks...\n");
         let report = run_performance_benchmarks();
         println!("============================================================");
-        println!(" GRIDLOOM V1 PERFORMANCE ACCEPTANCE REPORT");
+        println!(" TAYRIVA V1 PERFORMANCE ACCEPTANCE REPORT");
         println!("============================================================");
         for r in &report.results {
             println!("\n* Workload: {}", r.workload_name);
@@ -68,7 +68,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let (port, handle) = start_server(args.port).await?;
-    println!("Gridloom Server running at http://127.0.0.1:{}", port);
+    println!("Tayriva Server running at http://127.0.0.1:{}", port);
     println!("Press Ctrl+C to terminate.");
     handle.await?;
     Ok(())

@@ -102,7 +102,7 @@ fn full_column_format_survives_growth_and_workbook_reopen() {
         .execute("INSERT INTO ledger VALUES (3, 200)", [])
         .unwrap();
     w.refresh_source("ledger").unwrap();
-    let path = dir.path().join("demo.gridloom");
+    let path = dir.path().join("demo.tay");
     w.save_to_file(&path).unwrap();
     let w = Workbook::open_from_file(&path).unwrap();
     assert_eq!(cell(&w, "B1").display_text, "amount");

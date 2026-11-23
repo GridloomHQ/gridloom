@@ -78,7 +78,7 @@ fn moves_sparse_cells_styles_links_and_cross_sheet_references_then_recalculates(
     assert!(w.undo_sheet_edit().is_err());
 
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("structure.gridloom");
+    let path = tmp.path().join("structure.tay");
     w.save_to_file(&path).unwrap();
     let loaded = Workbook::open_from_file(path).unwrap();
     assert_eq!(raw(&loaded, name, "A4"), "3");

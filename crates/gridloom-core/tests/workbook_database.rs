@@ -7,7 +7,7 @@ const SQLITE: &[u8] = b"SQLite format 3\0";
 #[test]
 fn one_sqlite_file_persists_named_sheets_formulas_and_local_state() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("work.gridloom");
+    let path = dir.path().join("work.tay");
     let mut workbook = Workbook::new();
     assert!(workbook.connections.is_empty());
     assert!(workbook.sheets["Sheet1"].cells.is_empty());
@@ -61,44 +61,47 @@ fn one_sqlite_file_persists_named_sheets_formulas_and_local_state() {
 }
 
 #[test]
-fn old_workbook_opens_without_conversion_and_save_as_leaves_it_intact() {
+fn rejects_old_extension_and_legacy_bytes_even_when_renamed() {
     let dir = tempfile::tempdir().unwrap();
+    let current = dir.path().join("current.TAY");
+    let mut book = Workbook::new();
+    book.save_to_file(&current).unwrap();
+    assert!(Workbook::open_from_file(&current).is_ok());
+    assert_eq!(&fs::read(&current).unwrap()[68..72], b"TAYW");
+
     let old = dir.path().join("previous.gridloom");
-    let new = dir.path().join("new.gridloom");
-    let mut source = Workbook::new();
-    source
-        .set_cell("Sheet1", CellCoord::new(0, 0), "Previous".into())
-        .unwrap();
-    source.save_recovery_copy(&old).unwrap();
-    let mut before: serde_json::Value = serde_json::from_slice(&fs::read(&old).unwrap()).unwrap();
-    before["sheets"]["Sheet1"]
-        .as_object_mut()
+    fs::copy(&current, &old).unwrap();
+    let bytes = fs::read(&old).unwrap();
+    assert!(Workbook::open_from_file(&old).err().unwrap().message().contains(".tay"));
+    assert!(book.save_to_file(&old).unwrap_err().message().contains(".tay"));
+    assert!(book.save_new_file(&old).is_err());
+    assert!(book.save_recovery_copy(&old).is_err());
+    assert_eq!(fs::read(&old).unwrap(), bytes);
+
+    let renamed = dir.path().join("previous.tay");
+    fs::copy(&current, &renamed).unwrap();
+    Connection::open(&renamed)
         .unwrap()
-        .remove("storage_id");
-    let bytes = serde_json::to_vec(&before).unwrap();
-    fs::write(&old, &bytes).unwrap();
-    let mut reopened = Workbook::open_from_file(&old).unwrap();
-    let id = reopened.sheets["Sheet1"].storage_id;
-    assert_eq!(
-        reopened.sheets["Sheet1"].cells["A1"].evaluated_value,
-        Value::Text("Previous".into())
-    );
-    assert_eq!(fs::read(&old).unwrap(), bytes);
-    reopened.save_to_file(&new).unwrap();
-    assert_eq!(fs::read(&old).unwrap(), bytes);
-    assert!(fs::read(&new).unwrap().starts_with(SQLITE));
-    assert_eq!(
-        Workbook::open_from_file(&new).unwrap().sheets["Sheet1"].storage_id,
-        id
-    );
+        .pragma_update(None, "application_id", 0x474c5742)
+        .unwrap();
+    let bytes = fs::read(&renamed).unwrap();
+    assert!(Workbook::open_from_file(&renamed).is_err());
+    assert!(Workbook::open_standalone_file(&renamed, 1_000_000).is_err());
+    assert!(book.save_to_file(&renamed).is_err());
+    assert!(book.add_sqlite_connection("OldWorkbook", &renamed).is_err());
+    assert_eq!(fs::read(&renamed).unwrap(), bytes);
+
+    let json = dir.path().join("legacy-json.tay");
+    fs::write(&json, br#"{"sheets":{},"active_sheet":"Sheet1"}"#).unwrap();
+    assert!(Workbook::open_from_file(&json).is_err());
 }
 
 #[test]
 fn autosave_is_separate_and_save_as_is_independent() {
     let dir = tempfile::tempdir().unwrap();
-    let saved = dir.path().join("saved.gridloom");
-    let recovery = dir.path().join("recovery.gridloom");
-    let copy = dir.path().join("copy.gridloom");
+    let saved = dir.path().join("saved.tay");
+    let recovery = dir.path().join("recovery.tay");
+    let copy = dir.path().join("copy.tay");
     let mut book = Workbook::new();
     book.save_to_file(&saved).unwrap();
     let untouched = fs::read(&saved).unwrap();
@@ -107,7 +110,7 @@ fn autosave_is_separate_and_save_as_is_independent() {
     book.save_recovery_copy(&recovery).unwrap();
     assert_eq!(book.file_path.as_deref(), Some(saved.as_path()));
     assert_eq!(fs::read(&saved).unwrap(), untouched);
-    assert!(fs::read(&recovery).unwrap().starts_with(b"{"));
+    assert!(fs::read(&recovery).unwrap().starts_with(SQLITE));
     let mut recovered = Workbook::open_from_file(&recovery).unwrap();
     recovered.save_to_file(&copy).unwrap();
     assert_eq!(fs::read(&saved).unwrap(), untouched);
@@ -121,8 +124,8 @@ fn autosave_is_separate_and_save_as_is_independent() {
 #[test]
 fn failed_transaction_preserves_prior_save_and_foreign_db_untouched() {
     let dir = tempfile::tempdir().unwrap();
-    let saved = dir.path().join("saved.gridloom");
-    let external = dir.path().join("external.sqlite");
+    let saved = dir.path().join("saved.tay");
+    let external = dir.path().join("external.tay");
     let mut book = Workbook::new();
     book.save_to_file(&saved).unwrap();
     let original = fs::read(&saved).unwrap();
@@ -148,12 +151,12 @@ fn failed_transaction_preserves_prior_save_and_foreign_db_untouched() {
         .save_to_file(&external)
         .unwrap_err()
         .message()
-        .contains("not a supported Gridloom workbook"));
+        .contains("not a supported Tayriva workbook"));
     assert!(Workbook::open_from_file(&external)
         .err()
         .unwrap()
         .message()
-        .contains("not a Gridloom workbook"));
+        .contains("not a Tayriva workbook"));
     book.add_sqlite_connection("Live", &external).unwrap();
     assert!(book
         .save_to_file(&external)
@@ -166,7 +169,7 @@ fn failed_transaction_preserves_prior_save_and_foreign_db_untouched() {
 #[test]
 fn unknown_container_version_is_not_opened_or_replaced() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("newer.gridloom");
+    let path = dir.path().join("newer.tay");
     let mut book = Workbook::new();
     book.save_to_file(&path).unwrap();
     Connection::open(&path)
@@ -187,8 +190,8 @@ fn local_table_keeps_schema_and_exact_values_without_external_connection() {
         CellRange,
     };
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("tables.gridloom");
-    let recovery = dir.path().join("recovery.gridloom");
+    let path = dir.path().join("tables.tay");
+    let recovery = dir.path().join("recovery.tay");
     let mut book = Workbook::new();
     book.add_sheet("Budget").unwrap();
     let sheet = "Budget";
@@ -359,10 +362,10 @@ fn workbook_copy_forks_two_local_tables_while_shared_source_is_unchanged() {
     let folder_b = dir.path().join("copy");
     fs::create_dir(&folder_a).unwrap();
     fs::create_dir(&folder_b).unwrap();
-    let a = folder_a.join("ops.gridloom");
-    let b = folder_b.join("ops.gridloom");
-    let auto = dir.path().join("autosave.gridloom");
-    let recovered_path = folder_b.join("recovered.gridloom");
+    let a = folder_a.join("ops.tay");
+    let b = folder_b.join("ops.tay");
+    let auto = dir.path().join("autosave.tay");
+    let recovered_path = folder_b.join("recovered.tay");
     let external = dir.path().join("external.sqlite");
     let db = Connection::open(&external).unwrap();
     db.execute_batch("CREATE TABLE remote_input(id INTEGER PRIMARY KEY, value TEXT); INSERT INTO remote_input VALUES(1, 'untouched');").unwrap();
@@ -549,34 +552,18 @@ fn workbook_copy_forks_two_local_tables_while_shared_source_is_unchanged() {
 }
 
 #[test]
-fn version_one_container_reads_without_writing_and_upgrades_only_on_save() {
+fn unsupported_earlier_schema_is_not_opened_or_replaced() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("v1.gridloom");
-    let mut first = Workbook::new();
-    first
-        .set_cell("Sheet1", CellCoord::new(0, 0), "=1+2".into())
-        .unwrap();
-    first.save_to_file(&path).unwrap();
-    Connection::open(&path).unwrap().execute_batch(
-        "DROP TABLE worksheet_table_cell; ALTER TABLE worksheet_table RENAME TO worksheet_table_v2;
-         CREATE TABLE worksheet_table(sheet_id TEXT NOT NULL REFERENCES worksheet(id), name TEXT NOT NULL, json TEXT NOT NULL, PRIMARY KEY (sheet_id,name)) STRICT, WITHOUT ROWID;
-         INSERT INTO worksheet_table SELECT sheet_id,name,json FROM worksheet_table_v2;
-         DROP TABLE worksheet_table_v2;
-         PRAGMA user_version=1;",
-    ).unwrap();
-    let previous = fs::read(&path).unwrap();
-    let mut reopened = Workbook::open_from_file(&path).unwrap();
-    assert_eq!(
-        reopened.sheets["Sheet1"].cells["A1"]
-            .evaluated_value
-            .to_string_repr(),
-        "3"
-    );
-    assert_eq!(fs::read(&path).unwrap(), previous);
-    reopened.save_to_file(&path).unwrap();
-    let version: i64 = Connection::open(&path)
+    let path = dir.path().join("v1.tay");
+    let mut book = Workbook::new();
+    book.save_to_file(&path).unwrap();
+    Connection::open(&path)
         .unwrap()
-        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .pragma_update(None, "user_version", 1)
         .unwrap();
-    assert_eq!(version, 2);
+    let bytes = fs::read(&path).unwrap();
+    let error = Workbook::open_from_file(&path).err().unwrap();
+    assert!(error.message().contains("unsupported format version 1"));
+    assert!(book.save_to_file(&path).is_err());
+    assert_eq!(fs::read(&path).unwrap(), bytes);
 }

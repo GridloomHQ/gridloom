@@ -18,7 +18,7 @@ COMMIT, TREE = "a" * 40, "b" * 40
 
 
 def build_info(**overrides):
-    info = dict(format="gridloom-linux-package", format_version=1, version="0.3.0", mode="server", source_commit=COMMIT, source_tree=TREE, source_dirty=False, architecture=platform.machine(), system="Linux", build_profile="release")
+    info = dict(format="tayriva-linux-package", format_version=1, version="0.3.0", mode="server", source_commit=COMMIT, source_tree=TREE, source_dirty=False, architecture=platform.machine(), system="Linux", build_profile="release")
     info.update(overrides)
     return info
 
@@ -34,11 +34,11 @@ class PackageTests(unittest.TestCase):
         self.serial += 1
         archive = self.path / f"package-{self.serial}.tar.gz"
         contents = {
-            "gridloom": b"#!/bin/sh\nexit 0\n",
-            "gridloom-server": b"fake binary",
+            "tayriva": b"#!/bin/sh\nexit 0\n",
+            "tayriva-server": b"fake binary",
             "lib/libduckdb.so": b"fake library",
             "frontend/dist/index.html": b'<html><script type="module" src="/assets/main.js"></script><link rel="stylesheet" href="/assets/main.css"></html>',
-            "frontend/dist/assets/main.js": b'console.log("Gridloom")',
+            "frontend/dist/assets/main.js": b'console.log("Tayriva")',
             "frontend/dist/assets/main.css": b'body { color: black }',
             "docs/build-info.json": json.dumps(info or build_info()).encode(),
         }
@@ -59,7 +59,7 @@ class PackageTests(unittest.TestCase):
             for name, data in contents.items():
                 member = tarfile.TarInfo("package/" + name)
                 member.size = len(data)
-                member.mode = 0o755 if name in ("gridloom", "gridloom-server", "gridloom-desktop", "gridloom-mcp", "gridloom-mcp-bin") else 0o644
+                member.mode = 0o755 if name in ("tayriva", "tayriva-server", "tayriva-desktop", "tayriva-mcp", "tayriva-mcp-bin") else 0o644
                 bundle.addfile(member, io.BytesIO(data))
             for member, data in extra_members:
                 bundle.addfile(member, io.BytesIO(data) if data is not None else None)
@@ -79,17 +79,17 @@ class PackageTests(unittest.TestCase):
         root, info = self.verify(self.package(), expected_commit=COMMIT, expected_tree=TREE)
         self.assertEqual(info["source_commit"], COMMIT)
         self.assertEqual((root / "lib/libduckdb.so").read_bytes(), b"fake library")
-        self.assertTrue((root / "gridloom").stat().st_mode & 0o111)
+        self.assertTrue((root / "tayriva").stat().st_mode & 0o111)
 
     def test_headless_mcp_package_requires_both_executables(self):
         info = build_info(mcp_stdio=True)
-        files = {"gridloom-mcp": b"launcher", "gridloom-mcp-bin": b"binary"}
+        files = {"tayriva-mcp": b"launcher", "tayriva-mcp-bin": b"binary"}
         for missing in files:
             with self.subTest(missing=missing), self.assertRaisesRegex(smoke.SmokeError, "MCP launcher/binary"):
                 self.verify(self.package(info=info, files=files, omit_files=[missing]))
         root, actual = self.verify(self.package(info=info, files=files))
         self.assertTrue(actual["mcp_stdio"])
-        self.assertEqual((root / "gridloom-mcp-bin").read_bytes(), b"binary")
+        self.assertEqual((root / "tayriva-mcp-bin").read_bytes(), b"binary")
 
     def test_external_checksum_tampering_missing_wrong_filename(self):
         archive = self.package()
@@ -143,7 +143,7 @@ class PackageTests(unittest.TestCase):
             member.linkname = "/tmp/escaped"
             with self.subTest(kind=kind), self.assertRaises(smoke.SmokeError):
                 self.verify(self.package(extra_members=[(member, None)]))
-        for name, mode in (("package/gridloom", 0o644), ("another/file", 0o644), ("package/suid", 0o4755)):
+        for name, mode in (("package/tayriva", 0o644), ("another/file", 0o644), ("package/suid", 0o4755)):
             member = tarfile.TarInfo(name)
             member.mode = mode
             with self.subTest(name=name), self.assertRaises(smoke.SmokeError):
@@ -189,7 +189,7 @@ class PackageTests(unittest.TestCase):
         fake = mock.Mock(pid=999999998, returncode=0)
         fake.poll.return_value = 0
         def start(command, **kwargs):
-            self.assertEqual(command, ["ldd", str(root / "gridloom-server")])
+            self.assertEqual(command, ["ldd", str(root / "tayriva-server")])
             self.assertEqual(kwargs["env"]["LD_LIBRARY_PATH"], str(root / "lib"))
             self.assertEqual(kwargs["env"]["LC_ALL"], "C")
             self.assertNotEqual(kwargs["cwd"], str(root))
@@ -231,8 +231,8 @@ class PackageTests(unittest.TestCase):
         import subprocess
         for failure in ("timeout", "bad-health"):
             with self.subTest(failure=failure):
-                launcher = b"#!/usr/bin/env python3\nimport time\nprint('Gridloom Server running at http://127.0.0.1:12345',flush=True)\ntime.sleep(30)\n"
-                root, info = self.verify(self.package(files={"gridloom": launcher}))
+                launcher = b"#!/usr/bin/env python3\nimport time\nprint('Tayriva Server running at http://127.0.0.1:12345',flush=True)\ntime.sleep(30)\n"
+                root, info = self.verify(self.package(files={"tayriva": launcher}))
                 created = []
                 original = subprocess.Popen
                 def track(*args, **kwargs):
@@ -279,13 +279,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
  def __init__(self,*a,**kw): super().__init__(*a,directory=str(root/"frontend/dist"),**kw)
  def do_GET(self):
   if self.path == "/api/health":
-   data=json.dumps({"status":"ok","app":"Gridloom","version":"0.3.0"}).encode(); self.send_response(200); self.end_headers(); self.wfile.write(data)
+   data=json.dumps({"status":"ok","app":"Tayriva","version":"0.3.0"}).encode(); self.send_response(200); self.end_headers(); self.wfile.write(data)
   else: super().do_GET()
 server=http.server.HTTPServer(("127.0.0.1",0),Handler)
-print("Gridloom Server running at http://127.0.0.1:%d"%server.server_port,flush=True)
+print("Tayriva Server running at http://127.0.0.1:%d"%server.server_port,flush=True)
 server.serve_forever()
 '''
-        root, info = self.verify(self.package(files={"gridloom": launcher}))
+        root, info = self.verify(self.package(files={"tayriva": launcher}))
         with mock.patch.object(smoke, "verify_dependencies"), mock.patch.dict("os.environ", {"DUCKDB_LIB_DIR": "/wrong", "LD_LIBRARY_PATH": "/wrong", "GRIDLOOM_FRONTEND_DIR": "/wrong"}), contextlib.redirect_stdout(io.StringIO()) as output:
             smoke.launch_smoke(root, info, timeout=5)
         self.assertIn("PASS: relocated", output.getvalue())

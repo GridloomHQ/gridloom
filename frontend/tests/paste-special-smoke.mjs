@@ -1,4 +1,4 @@
-// Real UI smoke for the Gridloom-only clipboard. Use an isolated recovery directory.
+// Real UI smoke for the Tayriva-only clipboard. Use an isolated recovery directory.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';

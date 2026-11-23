@@ -6,8 +6,8 @@ fn edit(wb: &mut Workbook, input: &str) {
 #[test]
 fn replacement_roundtrips_without_touching_unrelated_fixed_temp() {
     let dir = tempfile::tempdir().unwrap();
-    let target = dir.path().join("book.gridloom");
-    let fixed_temp = target.with_extension("gridloom.tmp");
+    let target = dir.path().join("book.tay");
+    let fixed_temp = target.with_extension("tay.tmp");
     std::fs::write(&fixed_temp, b"unrelated existing data").unwrap();
     let mut wb = Workbook::new();
     edit(&mut wb, "old");
@@ -26,13 +26,13 @@ fn replacement_roundtrips_without_touching_unrelated_fixed_temp() {
 #[test]
 fn precommit_failures_preserve_original_bytes_and_path_and_clean_owned_temp() {
     let dir = tempfile::tempdir().unwrap();
-    let original = dir.path().join("original.gridloom");
+    let original = dir.path().join("original.tay");
     let mut wb = Workbook::new();
     edit(&mut wb, "original");
     wb.save_to_file(&original).unwrap();
     let bytes = std::fs::read(&original).unwrap();
     edit(&mut wb, "unsaved changes");
-    let directory_target = dir.path().join("blocked.gridloom");
+    let directory_target = dir.path().join("blocked.tay");
     std::fs::create_dir(&directory_target).unwrap();
     std::fs::write(directory_target.join("keep"), b"original directory content").unwrap();
     assert!(wb.save_to_file(&directory_target).is_err());
@@ -48,7 +48,7 @@ fn precommit_failures_preserve_original_bytes_and_path_and_clean_owned_temp() {
         "failed-save temp must be removed"
     );
     assert!(wb
-        .save_to_file(dir.path().join("missing").join("book.gridloom"))
+        .save_to_file(dir.path().join("missing").join("book.tay"))
         .is_err());
     assert_eq!(std::fs::read(&original).unwrap(), bytes);
     assert_eq!(wb.file_path.as_ref(), Some(&original));
@@ -58,14 +58,14 @@ fn precommit_failures_preserve_original_bytes_and_path_and_clean_owned_temp() {
 fn old_fixed_temp_symlink_is_not_followed() {
     use std::os::unix::fs::symlink;
     let dir = tempfile::tempdir().unwrap();
-    let target = dir.path().join("book.gridloom");
+    let target = dir.path().join("book.tay");
     let victim = dir.path().join("unrelated.txt");
     std::fs::write(&victim, b"keep me").unwrap();
-    symlink(&victim, target.with_extension("gridloom.tmp")).unwrap();
+    symlink(&victim, target.with_extension("tay.tmp")).unwrap();
     Workbook::new().save_to_file(&target).unwrap();
     assert_eq!(std::fs::read(&victim).unwrap(), b"keep me");
     assert!(
-        std::fs::symlink_metadata(target.with_extension("gridloom.tmp"))
+        std::fs::symlink_metadata(target.with_extension("tay.tmp"))
             .unwrap()
             .file_type()
             .is_symlink()
@@ -77,7 +77,7 @@ fn old_fixed_temp_symlink_is_not_followed() {
 fn new_workbooks_are_private_and_replacement_preserves_permission_bits() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
-    let target = dir.path().join("private.gridloom");
+    let target = dir.path().join("private.tay");
     let mut wb = Workbook::new();
     wb.save_to_file(&target).unwrap();
     assert_eq!(
@@ -98,9 +98,9 @@ fn new_workbooks_are_private_and_replacement_preserves_permission_bits() {
 #[test]
 fn detached_recovery_and_new_names_cannot_replace_named_workbooks() {
     let dir = tempfile::tempdir().unwrap();
-    let original = dir.path().join("original.gridloom");
-    let recovery = dir.path().join("detached.gridloom");
-    let copy = dir.path().join("copy.gridloom");
+    let original = dir.path().join("original.tay");
+    let recovery = dir.path().join("detached.tay");
+    let copy = dir.path().join("copy.tay");
     let mut owner = Workbook::new();
     edit(&mut owner, "original");
     owner.save_to_file(&original).unwrap();
@@ -135,8 +135,8 @@ fn canonical_directory_aliases_have_the_same_save_baseline() {
     let alias = dir.path().join("alias");
     std::os::unix::fs::symlink(&real, &alias).unwrap();
     let mut owner = Workbook::new();
-    let direct = real.join("test.gridloom");
-    let indirect = alias.join("test.gridloom");
+    let direct = real.join("test.tay");
+    let indirect = alias.join("test.tay");
     owner.save_to_file(&direct).unwrap();
     let mut stale = Workbook::open_from_file(&indirect).unwrap();
     edit(&mut owner, "current");

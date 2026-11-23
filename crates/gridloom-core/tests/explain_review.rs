@@ -1,3 +1,5 @@
+mod common;
+
 use gridloom_core::{
     review::{EvidenceReference, ReviewDecision, ReviewRequest},
     workbook::Sheet,
@@ -93,9 +95,9 @@ fn stale_submission_and_invalid_question_are_rejected_without_writing_history() 
 }
 
 #[test]
-fn save_open_preserves_evidence_history_and_loads_legacy_without_reviews() {
+fn save_open_preserves_evidence_history_and_defaults_missing_reviews() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("model.gridloom");
+    let path = dir.path().join("model.tay");
     let mut wb = model();
     let mut question = request(&wb, "Sheet1", "C1");
     question.decision = ReviewDecision::Question;
@@ -122,13 +124,10 @@ fn save_open_preserves_evidence_history_and_loads_legacy_without_reviews() {
         "board-pack.pdf, page 4"
     );
     assert!(!loaded.review_history()[0].invalidated);
-    let legacy_file = path.with_extension("json");
-    wb.save_recovery_copy(&legacy_file).unwrap();
-    let mut legacy: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&legacy_file).unwrap()).unwrap();
-    legacy.as_object_mut().unwrap().remove("reviews");
-    std::fs::write(&legacy_file, serde_json::to_vec(&legacy).unwrap()).unwrap();
-    assert!(Workbook::open_from_file(legacy_file)
+    common::edit_workbook_metadata(&path, |legacy| {
+        legacy.as_object_mut().unwrap().remove("reviews");
+    });
+    assert!(Workbook::open_from_file(path)
         .unwrap()
         .reviews
         .is_empty());
@@ -268,7 +267,7 @@ fn rejected_cyclic_edit_preserves_review_and_calculation() {
 fn applied_writeback_blocks_stale_source_reviews_until_refresh_even_after_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("data.sqlite");
-    let model_path = dir.path().join("model.gridloom");
+    let model_path = dir.path().join("model.tay");
     let db = rusqlite::Connection::open(&db_path).unwrap();
     db.execute_batch("CREATE TABLE amounts(id INTEGER PRIMARY KEY, amount INTEGER); INSERT INTO amounts VALUES(1,10),(2,20)").unwrap();
     let mut wb = Workbook::new();
@@ -564,7 +563,7 @@ fn cross_sheet_review_captures_correct_inputs_and_stays_bound_after_save() {
         .iter()
         .any(|n| n.id == "cell:Prior Month!A1" && n.sheet_name.as_deref() == Some("Prior Month")));
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("review.gridloom");
+    let path = directory.path().join("review.tay");
     wb.save_to_file(&path).unwrap();
     let mut wb = Workbook::open_from_file(&path).unwrap();
     assert_eq!(wb.reviews[0].attachments[0].bytes, b"checked");

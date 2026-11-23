@@ -6,6 +6,7 @@ use gridloom_core::review::{
 use gridloom_core::{Value, Workbook};
 use serde::Deserialize;
 use serde_json::json;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 pub(super) const TOOLS: &[(&str, bool)] = &[
@@ -81,6 +82,7 @@ struct Details {
 struct Compare {
     review_id: Uuid,
     after_review_id: Option<Uuid>,
+    expected_revision: Option<u64>,
     offset: Option<usize>,
     limit: Option<usize>,
 }
@@ -399,14 +401,29 @@ impl Session {
                 let Compare {
                     review_id,
                     after_review_id,
+                    expected_revision,
                     offset,
                     limit,
                 } = parse(args)?;
                 let (offset, limit) = page(offset, limit, 12, 24)?;
                 let active = self.state()?;
-                let cmp = active
+                if expected_revision.is_some_and(|expected| expected != active.revision) {
+                    return Err("Stale revision: restart compare_review at offset 0.".into());
+                }
+                let mut cmp = active
                     .workbook
                     .compare_review_summary(review_id, after_review_id)?;
+                let mut category_counts = BTreeMap::new();
+                for change in &cmp.summaries {
+                    *category_counts.entry(change.category.clone()).or_insert(0) += 1;
+                }
+                // Stable sort preserves the native order within each tier.
+                cmp.summaries
+                    .sort_by_key(|change| match change.category.as_str() {
+                        "input" | "mapping" | "working_paper_input" | "adjustment" | "formula" => 0,
+                        "calculation" | "calculation_state" => 2,
+                        _ => 1,
+                    });
                 let changes:Vec<_>=cmp.summaries.iter().skip(offset).take(limit).map(|change|json!({
                     "category":change.category,"label":preview_at(&change.label,256),
                     "sheet":change.sheet_name,"cell":change.coord.map(|c|c.to_a1()),
@@ -416,7 +433,7 @@ impl Session {
                     json!({"revision":active.revision,"before_review_id":cmp.before_review_id,
                     "after_review_id":cmp.after_review_id,"before_snapshot":cmp.before_snapshot,
                     "after_snapshot":cmp.after_snapshot,"snapshot_changed":cmp.before_snapshot!=cmp.after_snapshot,
-                    "affected_cells":cmp.affected_cells.len(),"changes":changes,
+                    "affected_cells":cmp.affected_cells.len(),"changes":changes,"category_counts":category_counts,
                     "page":page_result(offset,changes.len(),cmp.summaries.len()),
                     "coverage":"Native categorized changes inside the captured trace; not a workbook-wide impact report."}),
                 )
@@ -510,7 +527,7 @@ pub(super) fn definitions(read_only: bool) -> Vec<Json> {
             "review_cell"=>("Start a self-review here after re-reading the exact typed result. Inspect current native snapshot, eligibility, questions and paged transitive trace; compare with an independently calculated expectation before recording Reviewed.",json!({"sheet":sheet,"cell":cell,"offset":offset,"limit":limit(24)}),vec!["sheet","cell"]),
             "list_reviews"=>("List history or open questions across the workbook, optionally filtered by worksheet and cell. Newest first; page with next_offset.",json!({"sheet":sheet,"cell":cell,"status":{"enum":["reviewed","question","open_questions","stale"]},"offset":offset,"limit":limit(24)}),vec![]),
             "get_review"=>("Inspect recorded notes, captured result, evidence references, retained file metadata and question events. No external paths, URLs or evidence bytes are accessed.",json!({"review_id":id,"offset":offset,"limit":limit(6)}),vec!["review_id"]),
-            "compare_review"=>("Compare a retained review snapshot with current calculation or another review of that cell, with categorized changes and exact typed cell values. Excludes raw attachment bytes.",json!({"review_id":id,"after_review_id":id,"offset":offset,"limit":limit(24)}),vec!["review_id"]),
+            "compare_review"=>("Compare a retained review snapshot with current calculation or another review of that cell, with input/formula changes first. Use page.next_offset and expected_revision from the prior result's revision for later pages. Excludes raw attachment bytes.",json!({"review_id":id,"after_review_id":id,"expected_revision":revision,"offset":offset,"limit":limit(24)}),vec!["review_id"]),
             "record_review"=>("Append a Question or explicitly requested local AI-assisted Reviewed record to the exact inspected snapshot. Reviewed is blocked on errors or unresolved questions. Note the independent check performed or the problem found. Evidence references are literal text. Does not save or signify human approval.",json!({"revision":revision,"sheet":sheet,"cell":cell,
                 "decision":{"enum":["reviewed","question"]},"agent_label":model,"note":note,"expected_snapshot":snapshot,
                 "evidence":{"type":"array","maxItems":20,"items":{"type":"object","required":["label","reference"],"additionalProperties":false,"properties":{"label":string(200),"reference":string(2000)}}}}),

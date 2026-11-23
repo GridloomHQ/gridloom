@@ -26,7 +26,7 @@ impl Recovery {
     }
 
     pub fn path(&self, id: Uuid) -> PathBuf {
-        self.dir.join(format!("{id}.gridloom"))
+        self.dir.join(format!("{id}.tay"))
     }
 
     pub fn checkpoint(&mut self, workbook: &mut Workbook) -> anyhow::Result<()> {
@@ -62,7 +62,7 @@ impl Recovery {
         for entry in entries {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().and_then(|x| x.to_str()) != Some("gridloom")
+            if path.extension().and_then(|x| x.to_str()) != Some("tay")
                 || !entry.file_type()?.is_file()
             {
                 continue;
@@ -89,7 +89,8 @@ impl Recovery {
 }
 
 pub fn default_dir() -> anyhow::Result<PathBuf> {
-    if let Some(dir) = std::env::var_os("GRIDLOOM_RECOVERY_DIR").filter(|d| !d.is_empty()) {
+    if let Some(dir) = std::env::var_os("TAYRIVA_RECOVERY_DIR").filter(|d| !d.is_empty())
+        .or_else(|| std::env::var_os("GRIDLOOM_RECOVERY_DIR").filter(|d| !d.is_empty())) {
         return Ok(PathBuf::from(dir));
     }
     let base = if cfg!(windows) {
@@ -103,8 +104,8 @@ pub fn default_dir() -> anyhow::Result<PathBuf> {
             .or_else(|| std::env::var_os("HOME").map(|d| PathBuf::from(d).join(".local/state")))
     };
     Ok(base
-        .ok_or_else(|| anyhow::anyhow!("Set GRIDLOOM_RECOVERY_DIR to a private local folder"))?
-        .join("gridloom/recovery"))
+        .ok_or_else(|| anyhow::anyhow!("Set TAYRIVA_RECOVERY_DIR to a private local folder"))?
+        .join("tayriva/recovery"))
 }
 
 use crate::state::AppState;
@@ -133,7 +134,7 @@ pub fn start_worker(state: &AppState) {
             };
             let _guard = gate.lock().await;
             if let Err(error) = checkpoint(wb, recovery).await {
-                tracing::warn!(%error, "Gridloom autosave could not write a recovery copy");
+                tracing::warn!(%error, "Tayriva autosave could not write a recovery copy");
             }
         }
     });
@@ -290,7 +291,7 @@ mod tests {
     #[tokio::test]
     async fn checkpoint_and_restore_preserve_explicit_file_and_do_not_apply_database_edits() {
         let dir = tempfile::tempdir().unwrap();
-        let manual = dir.path().join("named.gridloom");
+        let manual = dir.path().join("named.tay");
         let db = dir.path().join("ledger.db");
         let db_conn = rusqlite::Connection::open(&db).unwrap();
         db_conn
@@ -458,7 +459,77 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(copies.as_array().unwrap().len(), 1);
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
-        assert!(fs::read_to_string(active).unwrap().contains("44"));
+        let saved = Workbook::open_from_file(active).unwrap();
+        assert_eq!(saved.sheets["Sheet1"].cells["A1"].raw_input, "44");
+    }
+
+    #[tokio::test]
+    async fn extensionless_save_returns_actual_path_and_old_path_cannot_change_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(Workbook::new());
+        let app = crate::routes::create_router(state.clone());
+        let named = dir.path().join("working");
+        let expected = named.with_extension("tay");
+        let (status, saved) = call(
+            &app,
+            "POST",
+            "/api/workbook/save",
+            json!({"path": named, "create_only": true}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{saved:?}");
+        assert_eq!(saved, json!({"status": "saved", "path": expected}));
+        assert!(!named.exists());
+        assert!(expected.is_file());
+        let (_, summary) = call(&app, "GET", "/api/workbook", Value::Null).await;
+        assert_eq!(summary["file_path"], saved["path"]);
+
+        let legacy = named.with_extension("gridloom");
+        fs::copy(&expected, &legacy).unwrap();
+        let original = fs::read(&expected).unwrap();
+        let edit = call(
+            &app,
+            "POST",
+            "/api/ranges/edit",
+            json!({"sheet_name": "Sheet1", "row": 0, "col": 0, "values": [["unsaved"]]}),
+        )
+        .await;
+        assert_eq!(edit.0, StatusCode::OK, "{edit:?}");
+        for route in ["/api/workbook/save", "/api/workbook/open"] {
+            let (status, error) = call(&app, "POST", route, json!({"path": legacy})).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{error:?}");
+            assert!(error.as_str().unwrap().contains(".tay"));
+        }
+        let workbook = state.workbook.read().await;
+        assert_eq!(workbook.file_path.as_deref(), Some(expected.as_path()));
+        assert_eq!(workbook.sheets["Sheet1"].cells["A1"].raw_input, "unsaved");
+        assert_eq!(fs::read(expected).unwrap(), original);
+        assert_eq!(fs::read(legacy).unwrap(), original);
+    }
+
+    #[tokio::test]
+    async fn recovery_ignores_snapshots_with_the_old_suffix() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = AppState::new(Workbook::new());
+        let recovery = Recovery::new(dir.path().to_owned());
+        let previous = Uuid::new_v4();
+        let legacy = Uuid::new_v4();
+        let mut workbook = Workbook::new();
+        workbook.save_recovery_copy(recovery.path(previous)).unwrap();
+        fs::copy(
+            recovery.path(previous),
+            dir.path().join(format!("{legacy}.gridloom")),
+        )
+        .unwrap();
+        state.recovery = Some(Arc::new(tokio::sync::Mutex::new(recovery)));
+        let app = crate::routes::create_router(state);
+        let (status, copies) = call(&app, "GET", "/api/workbook/recovery", Value::Null).await;
+        assert_eq!(status, StatusCode::OK, "{copies:?}");
+        assert_eq!(copies.as_array().unwrap().len(), 1);
+        assert_eq!(copies[0]["id"], json!(previous));
+        let legacy_restore = format!("/api/workbook/recovery/{legacy}");
+        let (status, _) = call(&app, "POST", &legacy_restore, Value::Null).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
     #[test]

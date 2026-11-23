@@ -32,8 +32,8 @@ MAX_METADATA = 4 * 1024 * 1024
 MAX_LOG = 4 * 1024 * 1024
 HASH = re.compile(r"^[a-fA-F0-9]{64}$")
 IDENTITY = re.compile(r"^[a-fA-F0-9]{40}(?:[a-fA-F0-9]{24})?$")
-ENDPOINT = re.compile(r"(?:Gridloom Server running at|Gridloom Core Engine active at) http://127\.0\.0\.1:([0-9]{1,5})")
-WINDOW_MARKER = "Gridloom desktop window opened."
+ENDPOINT = re.compile(r"(?:Tayriva Server running at|Tayriva Core Engine active at) http://127\.0\.0\.1:([0-9]{1,5})")
+WINDOW_MARKER = "Tayriva desktop window opened."
 
 
 class SmokeError(Exception):
@@ -104,7 +104,7 @@ def validate_build_info(root, expected_commit=None, expected_tree=None):
         info = json.loads(read_small(root / "docs/build-info.json"))
     except (OSError, ValueError) as error:
         raise SmokeError(f"Invalid build-info.json: {error}") from error
-    if not isinstance(info, dict) or info.get("format") != "gridloom-linux-package" or type(info.get("format_version")) is not int or info["format_version"] != 1:
+    if not isinstance(info, dict) or info.get("format") != "tayriva-linux-package" or type(info.get("format_version")) is not int or info["format_version"] != 1:
         raise SmokeError("Unsupported package build-info format")
     if info.get("mode") not in ("server", "desktop") or info.get("build_profile") != "release" or info.get("system") != "Linux":
         raise SmokeError("Expected a Linux release server/desktop package")
@@ -210,15 +210,15 @@ def verify_package(archive, destination, expected_commit=None, expected_tree=Non
     if manifest != expected:
         raise SmokeError("Internal manifest mismatch: missing, extra or changed file")
     info = validate_build_info(root, expected_commit, expected_tree)
-    for required in ("gridloom", f"gridloom-{info['mode']}", "frontend/dist/index.html"):
+    for required in ("tayriva", f"tayriva-{info['mode']}", "frontend/dist/index.html"):
         if required not in files:
             raise SmokeError(f"Required package file missing: {required}")
-    if not os.access(root / "gridloom", os.X_OK) or not os.access(root / f"gridloom-{info['mode']}", os.X_OK):
+    if not os.access(root / "tayriva", os.X_OK) or not os.access(root / f"tayriva-{info['mode']}", os.X_OK):
         raise SmokeError("Package launcher/binary is not executable")
     if "lib/libduckdb.so" not in files:
         raise SmokeError("Bundled DuckDB library missing")
     if info.get("mcp_stdio") is True:
-        for name in ("gridloom-mcp", "gridloom-mcp-bin"):
+        for name in ("tayriva-mcp", "tayriva-mcp-bin"):
             if name not in files or not os.access(root / name, os.X_OK):
                 raise SmokeError(f"Missing executable MCP launcher/binary: {name}")
     return root, info
@@ -267,7 +267,7 @@ def check_http(root, info, port, deadline):
             raise SmokeError("Package smoke timeout")
         return http_bytes(opener, base + path, limit, min(2, remaining))
     health = json.loads(read("/api/health", 65536))
-    if health != {"status": "ok", "app": "Gridloom", "version": info["version"]}:
+    if health != {"status": "ok", "app": "Tayriva", "version": info["version"]}:
         raise SmokeError("Health version/app/status mismatch")
     index_path = root / "frontend/dist/index.html"
     index = index_path.read_bytes()
@@ -335,8 +335,8 @@ def verify_dependencies(root, info, environment):
     env = environment.copy()
     env["LD_LIBRARY_PATH"] = str(root.resolve() / "lib")
     env["LC_ALL"] = "C"
-    with tempfile.TemporaryDirectory(prefix="gridloom-dependencies-cwd-") as cwd, tempfile.TemporaryFile() as log:
-        process = subprocess.Popen(["ldd", str(root.resolve() / f"gridloom-{info['mode']}")],
+    with tempfile.TemporaryDirectory(prefix="tayriva-dependencies-cwd-") as cwd, tempfile.TemporaryFile() as log:
+        process = subprocess.Popen(["ldd", str(root.resolve() / f"tayriva-{info['mode']}")],
                                    cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         deadline = time.monotonic() + 10
         try:
@@ -363,13 +363,13 @@ def launch_smoke(root, info, native_window=False, timeout=45):
         raise SmokeError("--native-window requires a desktop package")
     environment = isolated_environment()
     verify_dependencies(root, info, environment)
-    command = [str(root.resolve() / "gridloom"), "--port", "0"]
+    command = [str(root.resolve() / "tayriva"), "--port", "0"]
     if native_window:
         command = ["dbus-run-session", "--", "xvfb-run", "-a", "env", "GDK_BACKEND=x11", "LIBGL_ALWAYS_SOFTWARE=1", "WEBKIT_DISABLE_COMPOSITING_MODE=1"] + command
     elif info["mode"] == "desktop":
         command.append("--server")
     # Deliberately outside both source checkout and extracted package.
-    with tempfile.TemporaryDirectory(prefix="gridloom-relocated-cwd-") as cwd:
+    with tempfile.TemporaryDirectory(prefix="tayriva-relocated-cwd-") as cwd:
         with tempfile.TemporaryFile() as log:
             process = subprocess.Popen(command, cwd=cwd, env=environment, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
             deadline = time.monotonic() + min(timeout, 45 if native_window else timeout)
@@ -412,18 +412,18 @@ def main(argv=None):
     if not 0 < args.timeout <= 120:
         parser.error("--timeout must be greater than zero and at most 120 seconds")
     try:
-        with tempfile.TemporaryDirectory(prefix="gridloom-verified-package-") as location:
+        with tempfile.TemporaryDirectory(prefix="tayriva-verified-package-") as location:
             root, info = verify_package(args.archive, Path(location), args.expected_commit, args.expected_tree)
             print(f"Verified checksums and build identity: {info['mode']} {info['version']} {info['source_commit']} (checksums are not signatures).", flush=True)
             launch_smoke(root, info, args.native_window, args.timeout)
             if info.get("mcp_stdio") is True:
-                command = [sys.executable, str(Path(__file__).with_name("mcp-smoke.py")), str(root / "gridloom-mcp")]
+                command = [sys.executable, str(Path(__file__).with_name("mcp-smoke.py")), str(root / "tayriva-mcp")]
                 test = subprocess.run(command, env=isolated_environment(), timeout=30)
                 if test.returncode:
                     raise SmokeError("Relocated package MCP smoke failed")
             if info.get("guarded_save") is True:
                 command = [sys.executable, str(Path(__file__).with_name("mixed-save-smoke.py")),
-                    str(root / "gridloom"), str(root / "gridloom-mcp")]
+                    str(root / "tayriva"), str(root / "tayriva-mcp")]
                 if info["mode"] == "desktop":
                     command.append("--desktop")
                 test = subprocess.run(command, env=isolated_environment(), timeout=45)
@@ -431,7 +431,7 @@ def main(argv=None):
                     raise SmokeError("Relocated package mixed-editor save smoke failed")
             if info.get("mcp_review") is True:
                 command = [sys.executable, str(Path(__file__).with_name("review-mcp-smoke.py")),
-                    str(root / "gridloom"), str(root / "gridloom-mcp")]
+                    str(root / "tayriva"), str(root / "tayriva-mcp")]
                 if info["mode"] == "desktop":
                     command.append("--desktop")
                 test = subprocess.run(command, env=isolated_environment(), timeout=45)

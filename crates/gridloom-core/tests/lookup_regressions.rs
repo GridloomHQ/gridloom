@@ -253,7 +253,7 @@ fn reopened_old_lookup_cache_is_recalculated_and_old_review_invalidated() {
     })
     .unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("old.gridloom");
+    let path = dir.path().join("old.tay");
     wb.save_to_file(&path).unwrap();
     let loaded = Workbook::open_from_file(&path).unwrap();
     assert_eq!(

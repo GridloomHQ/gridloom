@@ -9,8 +9,10 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
 
-// SQLite application_id, ASCII GLWB.
-const APP_ID: i64 = 0x474c5742;
+// SQLite application_id, ASCII TAYW.
+const APP_ID: i64 = 0x54415957;
+// Never open legacy workbook containers as writable external sources.
+const PREVIOUS_APP_ID: i64 = 0x474c5742;
 const FORMAT_VERSION: i64 = 2;
 
 fn storage(error: impl std::fmt::Display) -> CellError {
@@ -121,10 +123,12 @@ pub(crate) fn reject_as_linked_source(path: &Path) -> Result<(), CellError> {
     };
     if file.read_exact(&mut header).is_ok()
         && &header[..16] == b"SQLite format 3\0"
-        && header[68..72] == (APP_ID as u32).to_be_bytes()
+        && [APP_ID, PREVIOUS_APP_ID]
+            .iter()
+            .any(|id| header[68..72] == (*id as u32).to_be_bytes())
     {
         return Err(storage(
-            "Open this file as a Gridloom workbook, not as a linked source",
+            "Open this file as a Tayriva workbook, not as a linked source",
         ));
     }
     Ok(())
@@ -159,9 +163,9 @@ pub(crate) fn protect_existing(path: &Path) -> Result<(), CellError> {
         let version: i64 = db
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .map_err(storage)?;
-        if id != APP_ID || !(1..=FORMAT_VERSION).contains(&version) {
+        if id != APP_ID || version != FORMAT_VERSION {
             return Err(storage(
-                "save destination is not a supported Gridloom workbook",
+                "save destination is not a supported Tayriva workbook",
             ));
         }
     }
@@ -177,12 +181,12 @@ pub(crate) fn read(path: &Path) -> Result<SerializedWorkbook, CellError> {
         .pragma_query_value(None, "application_id", |r| r.get(0))
         .map_err(storage)?;
     if app_id != APP_ID {
-        return Err(storage("this SQLite file is not a Gridloom workbook"));
+        return Err(storage("this SQLite file is not a Tayriva workbook"));
     }
     let version: i64 = db
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .map_err(storage)?;
-    if !(1..=FORMAT_VERSION).contains(&version) {
+    if version != FORMAT_VERSION {
         return Err(storage(format!("unsupported format version {version}")));
     }
     let payload: String = db
@@ -192,14 +196,9 @@ pub(crate) fn read(path: &Path) -> Result<SerializedWorkbook, CellError> {
         .map_err(storage)?;
     let mut snapshot: SerializedWorkbook = decode(&payload)?;
     let mut seen = HashSet::with_capacity(snapshot.sheets.len());
-    let mut local_registrations = if version >= 2 {
-        Some(
-            db.prepare_cached("SELECT name, local_id FROM worksheet_table WHERE sheet_id = ?1")
-                .map_err(storage)?,
-        )
-    } else {
-        None
-    };
+    let mut local_registrations = db
+        .prepare_cached("SELECT name, local_id FROM worksheet_table WHERE sheet_id = ?1")
+        .map_err(storage)?;
     let mut registry = db
         .prepare("SELECT id, name FROM worksheet")
         .map_err(storage)?;
@@ -230,9 +229,6 @@ pub(crate) fn read(path: &Path) -> Result<SerializedWorkbook, CellError> {
             &id,
             &mut sheet.tables,
         )?;
-        let Some(local_registrations) = &mut local_registrations else {
-            continue;
-        };
         let mut local_ids = local_registrations.query([&id]).map_err(storage)?;
         while let Some(record) = local_ids.next().map_err(storage)? {
             let name: String = record.get(0).map_err(storage)?;

@@ -193,7 +193,7 @@ where
     }
 
     if !schema.primary_keys.is_empty() && selected_pk_count < schema.primary_keys.len() {
-        // Missing PK in projection - note that in Gridloom, PK can be retrieved as hidden identity metadata if needed
+        // Missing PK in projection - note that in Tayriva, PK can be retrieved as hidden identity metadata if needed
     }
 
     let is_editable = reasons.is_empty() && !schema.primary_keys.is_empty() && !editable_columns.is_empty();

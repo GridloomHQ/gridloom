@@ -17,8 +17,25 @@ use crate::writeback::StagedRepository;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Seek, Write};
 use std::path::{Path, PathBuf};
+
+/// Filename suffix for Tayriva workbook files.
+pub const WORKBOOK_EXTENSION: &str = "tay";
+
+/// Accept case variations so files behave consistently across desktop platforms.
+pub fn is_workbook_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case(WORKBOOK_EXTENSION))
+}
+
+fn require_workbook_extension(path: &Path) -> Result<(), CellError> {
+    if is_workbook_path(path) {
+        Ok(())
+    } else {
+        Err(CellError::Sql("Tayriva workbook filenames must end in .tay.".into()))
+    }
+}
 
 /// Owns only the unique temporary path created by this save attempt.
 struct SaveTemp {
@@ -1387,6 +1404,7 @@ impl Workbook {
         max_bytes: Option<u64>,
     ) -> Result<(), CellError> {
         use crate::workbook_file_guard as guard;
+        require_workbook_extension(path)?;
         let p = if set_path {
             guard::normalized_path(path)?
         } else {
@@ -1425,7 +1443,7 @@ impl Workbook {
         }
         self.invalidate_changed_reviews();
         // Bounded name length also permits destinations near a filesystem's filename limit.
-        let tmp_path = parent.join(format!(".gridloom-save-{}.tmp", uuid::Uuid::new_v4()));
+        let tmp_path = parent.join(format!(".tayriva-save-{}.tmp", uuid::Uuid::new_v4()));
 
         #[derive(Serialize)]
         struct Snapshot<'a> {
@@ -1446,10 +1464,7 @@ impl Workbook {
             close_periods: &self.close_periods,
             stale_sources: &self.stale_sources,
             stale_calculation_sheets: &self.stale_calculation_sheets,
-            sheets: SnapshotSheets {
-                sheets: &self.sheets,
-                metadata_only: set_path,
-            },
+            sheets: SnapshotSheets { sheets: &self.sheets },
             active_sheet: &self.active_sheet,
             connection_configs: &self.connection_configs,
             named_sources: &self.named_sources,
@@ -1482,35 +1497,18 @@ impl Workbook {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(CellError::Sql(format!("Failed to inspect workbook permissions: {error}"))),
         };
-        if set_path {
-            // Close and sync SQLite before the existing atomic replacement.
-            crate::workbook_store::write(&tmp_path, &serialized, &self.sheets)?;
-            #[cfg(unix)]
-            if let Some(permissions) = permissions {
-                file.set_permissions(permissions).map_err(|e| {
-                    CellError::Sql(format!("Failed to preserve workbook permissions: {e}"))
-                })?;
-            }
-            file.sync_all().map_err(|e| {
-                CellError::Sql(format!("Failed to sync workbook database: {e}"))
-            })?;
-            drop(file);
-        } else {
-            // Recovery stays independent of the saved database.
-            let mut writer = BufWriter::new(file);
-            serde_json::to_writer_pretty(&mut writer, &serialized)
-                .map_err(|e| CellError::Sql(format!("Failed to serialize workbook: {e}")))?;
-            writer.flush().map_err(|e| CellError::Sql(format!("Failed to flush workbook: {e}")))?;
-            #[cfg(unix)]
-            if let Some(permissions) = permissions {
-                writer.get_ref().set_permissions(permissions).map_err(|e| {
-                    CellError::Sql(format!("Failed to preserve recovery permissions: {e}"))
-                })?;
-            }
-            writer.get_ref().sync_all().map_err(|e| {
-                CellError::Sql(format!("Failed to sync recovery snapshot: {e}"))
+        // Explicit saves and private recovery copies use the same container.
+        crate::workbook_store::write(&tmp_path, &serialized, &self.sheets)?;
+        #[cfg(unix)]
+        if let Some(permissions) = permissions {
+            file.set_permissions(permissions).map_err(|e| {
+                CellError::Sql(format!("Failed to preserve workbook permissions: {e}"))
             })?;
         }
+        file.sync_all().map_err(|e| {
+            CellError::Sql(format!("Failed to sync workbook database: {e}"))
+        })?;
+        drop(file);
         // Same-directory rename is the commit point. Failures before this preserve the target.
         let committed_baseline = if set_path {
             let digest = guard::fingerprint(&tmp_path, max_bytes)?.ok_or_else(||
@@ -1567,19 +1565,10 @@ impl Workbook {
 
     fn open_file<P: AsRef<Path>>(path: P, standalone: bool, max_bytes: Option<u64>) -> Result<Self, CellError> {
         use crate::workbook_file_guard as guard;
+        require_workbook_extension(path.as_ref())?;
         let p = guard::normalized_path(path.as_ref())?;
         let digest = guard::fingerprint(&p, max_bytes)?.ok_or_else(|| guard::detail("Workbook not found."))?;
-        let mut file = File::open(&p)
-            .map_err(|e| CellError::Sql(format!("Failed to open workbook file: {e}")))?;
-        let mut header = [0; 16];
-        let sqlite = file.read_exact(&mut header).is_ok() && &header == b"SQLite format 3\0";
-        let serialized: SerializedWorkbook = if sqlite {
-            crate::workbook_store::read(&p)?
-        } else {
-            file.rewind().map_err(|e| CellError::Sql(format!("Failed to read workbook: {e}")))?;
-            serde_json::from_reader(BufReader::new(file))
-                .map_err(|e| CellError::Sql(format!("Corrupt workbook format: {e}")))?
-        };
+        let serialized = crate::workbook_store::read(&p)?;
 
         if guard::fingerprint(&p, max_bytes)? != Some(digest) {
             return Err(CellError::SaveConflict("Workbook changed while opening. Try opening it again.".into()));
@@ -1645,15 +1634,11 @@ impl Workbook {
 
 struct SnapshotSheets<'a> {
     sheets: &'a HashMap<String, Sheet>,
-    metadata_only: bool,
 }
 
 impl Serialize for SnapshotSheets<'_> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
-        if !self.metadata_only {
-            return self.sheets.serialize(serializer);
-        }
         #[derive(Serialize)]
         struct Layout<'a> {
             storage_id: uuid::Uuid,

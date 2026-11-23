@@ -125,7 +125,7 @@ pub fn create_router(state: AppState) -> Router {
 async fn health_handler() -> impl IntoResponse {
     Json(serde_json::json!({
         "status": "ok",
-        "app": "Gridloom",
+        "app": "Tayriva",
         "version": env!("CARGO_PKG_VERSION")
     }))
 }
@@ -216,11 +216,18 @@ async fn save_workbook(
     State(state): State<AppState>,
     Json(payload): Json<SavePathPayload>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let mut path = std::path::PathBuf::from(&payload.path);
+    if path.extension().is_none() && path.file_name().and_then(|s| s.to_str()).is_some_and(|s| !s.starts_with('.') && !s.trim().is_empty()) {
+        path.set_extension(gridloom_core::workbook::WORKBOOK_EXTENSION);
+    }
+    if !gridloom_core::workbook::is_workbook_path(&path) {
+        return Err((StatusCode::BAD_REQUEST, "Use a .tay workbook filename".into()));
+    }
     let mut wb = state.workbook.write().await;
     let saved = if payload.create_only {
-        wb.save_new_file(&payload.path)
+        wb.save_new_file(&path)
     } else {
-        wb.save_to_file(&payload.path)
+        wb.save_to_file(&path)
     };
     saved.map_err(|e| {
         let status = if matches!(e, gridloom_core::CellError::SaveConflict(_)) {
@@ -231,7 +238,7 @@ async fn save_workbook(
         (status, e.message().to_owned())
     })?;
     Ok(Json(
-        serde_json::json!({ "status": "saved", "path": payload.path }),
+        serde_json::json!({ "status": "saved", "path": path }),
     ))
 }
 

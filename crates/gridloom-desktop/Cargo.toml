@@ -1,8 +1,8 @@
 [package]
 name = "gridloom-desktop"
-version = "0.13.1"
+version = "0.14.0"
 edition = "2021"
-description = "Desktop application shell for Gridloom"
+description = "Desktop application shell for Tayriva"
 license = "MIT OR Apache-2.0"
 
 [dependencies]

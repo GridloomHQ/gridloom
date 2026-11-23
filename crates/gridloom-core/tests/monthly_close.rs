@@ -57,7 +57,7 @@ fn import_map_reconcile_rollforward_and_pack() {
         .unwrap();
     assert_eq!(copy.version, 2);
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("close.gridloom");
+    let path = dir.path().join("close.tay");
     wb.save_to_file(&path).unwrap();
     let reopened = Workbook::open_from_file(&path).unwrap();
     assert_eq!(reopened.close_periods.len(), 3);

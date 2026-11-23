@@ -39,8 +39,8 @@ try{
   await page.goto(base);
   const response=await page.request.post(`${base}/api/ranges/edit`,{data:{sheet_name:'Sheet1',row:0,col:0,values:[['recover me']]}});
   assert(response.ok(),await response.text());
-  for(let attempt=0;attempt<100&&!readdirSync(recovery).some(name=>name.endsWith('.gridloom'));attempt++)await new Promise(resolve=>setTimeout(resolve,50));
-  assert.equal(readdirSync(recovery).filter(name=>name.endsWith('.gridloom')).length,1);
+  for(let attempt=0;attempt<100&&!readdirSync(recovery).some(name=>name.endsWith('.tay'));attempt++)await new Promise(resolve=>setTimeout(resolve,50));
+  assert.equal(readdirSync(recovery).filter(name=>name.endsWith('.tay')).length,1);
   await stop('SIGKILL');
   base=await start();
   await page.goto(base);

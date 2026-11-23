@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the actual Gridloom HTTP save handler against an independent headless MCP editor."""
+"""Run the actual Tayriva HTTP save handler against an independent headless MCP editor."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -41,7 +41,7 @@ def backend(binary, folder, desktop):
                     break
                 time.sleep(.025)
             else:
-                raise AssertionError(f"Gridloom backend failed to start: {log_path.read_text(errors='replace')}")
+                raise AssertionError(f"Tayriva backend failed to start: {log_path.read_text(errors='replace')}")
             def post(route, **data):
                 request = Request(base + "/api/" + route, json.dumps(data).encode(), {"Content-Type": "application/json"})
                 try:
@@ -82,7 +82,7 @@ def mcp_save_loss(client, rev):
 
 def scenario(raw_backend, executable, folder, order, desktop):
     folder.mkdir()
-    name = "synthetic.gridloom"
+    name = "synthetic.tay"
     workbook = folder / name
     with mcp.Client(executable, folder) as seed:
         rev = seed.call("create_workbook", file=name)["revision"]
@@ -129,7 +129,7 @@ def scenario(raw_backend, executable, folder, order, desktop):
         assert inspect(executable, folder, name) == (["42", "0"] if seq[0] else ["41", "99"])
 
         # The losing editor still has its own unsaved state. A copy must not touch the original.
-        copy = folder / "separate.gridloom"
+        copy = folder / "separate.tay"
         if seq[0]:
             assert post("workbook/save", path=str(workbook), create_only=True)[0] == 409
             cells = post("cells/viewport", sheet_name="Sheet1", start_row=0, start_col=0, end_row=0, end_col=1, overscan=0)
@@ -141,14 +141,14 @@ def scenario(raw_backend, executable, folder, order, desktop):
             agent.call("save_workbook", revision=rev, save_as=copy.name)
         assert workbook.read_bytes() == winner
         assert inspect(executable, folder, copy.name) == (["41", "99"] if seq[0] else ["42", "0"])
-        assert not list(folder.glob(".gridloom-save*")), "temporary save leaked"
+        assert not list(folder.glob(".tayriva-save*")), "temporary save leaked"
 
 
 def run(backend_path, mcp_path, desktop):
     with tempfile.TemporaryDirectory(prefix="gridloom-mixed-writers-") as root:
         for order in ("mcp-first", "desktop-first", "simultaneous"):
             scenario(backend_path, mcp_path, Path(root) / order, order, desktop)
-    print("PASS: mixed Gridloom/MCP writer orders, concurrent lock, native HTTP 409, unchanged winner, and separate recovery copy.")
+    print("PASS: mixed Tayriva/MCP writer orders, concurrent lock, native HTTP 409, unchanged winner, and separate recovery copy.")
 
 
 if __name__ == "__main__":

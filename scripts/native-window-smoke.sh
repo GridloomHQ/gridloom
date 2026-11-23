@@ -18,5 +18,5 @@ status=$?
 set -e
 cat "$log"
 [[ "$status" = 124 ]] || { echo "Native process exited unexpectedly ($status)." >&2; exit 1; }
-grep -q 'Gridloom desktop window opened.' "$log" || { echo 'No native window-open event observed.' >&2; exit 1; }
+grep -q 'Tayriva desktop window opened.' "$log" || { echo 'No native window-open event observed.' >&2; exit 1; }
 echo 'PASS: native process served frontend and emitted a window-open event; interactive native UI not exercised.'

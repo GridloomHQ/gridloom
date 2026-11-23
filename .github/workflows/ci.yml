@@ -198,7 +198,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gridloom-smoke-evidence
+          name: tayriva-smoke-evidence
           path: |
             target/browser-smoke/*.png
             target/browser-smoke/*.log
@@ -318,7 +318,7 @@ jobs:
       - name: Upload verified portable Linux packages
         uses: actions/upload-artifact@v4
         with:
-          name: gridloom-linux-x86_64-${{ github.sha }}
+          name: tayriva-linux-x86_64-${{ github.sha }}
           if-no-files-found: error
           retention-days: 14
           path: |
@@ -330,6 +330,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: gridloom-package-diagnostics-${{ github.sha }}
+          name: tayriva-package-diagnostics-${{ github.sha }}
           retention-days: 7
           path: ${{ env.GRIDLOOM_PACKAGE_DIR }}/*.smoke.log

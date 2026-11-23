@@ -1,8 +1,8 @@
 [package]
 name = "gridloom-mcp"
-version = "0.13.1"
+version = "0.14.0"
 edition = "2021"
-description = "Headless local MCP server for Gridloom workbooks"
+description = "Headless local MCP server for Tayriva workbooks"
 license = "MIT OR Apache-2.0"
 
 [dependencies]

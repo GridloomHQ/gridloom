@@ -1,3 +1,5 @@
+mod common;
+
 use gridloom_core::review::{ReviewDecision, ReviewRequest};
 use gridloom_core::{CellCoord, Value, Workbook};
 
@@ -26,26 +28,23 @@ fn column_widths_are_sparse_bounded_and_per_sheet() {
 }
 
 #[test]
-fn saved_widths_roundtrip_and_legacy_files_use_defaults() {
+fn saved_widths_roundtrip_and_missing_field_uses_defaults() {
     let mut wb = Workbook::new();
     wb.set_column_width("Sheet1", 4, Some(321)).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("widths.gridloom");
+    let file = dir.path().join("widths.tay");
     wb.save_to_file(&file).unwrap();
     assert_eq!(
         Workbook::open_from_file(&file).unwrap().sheets["Sheet1"].column_widths[&4],
         321
     );
-    let legacy_file = file.with_extension("json");
-    wb.save_recovery_copy(&legacy_file).unwrap();
-    let mut json: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&legacy_file).unwrap()).unwrap();
-    json["sheets"]["Sheet1"]
-        .as_object_mut()
-        .unwrap()
-        .remove("column_widths");
-    std::fs::write(&legacy_file, serde_json::to_vec(&json).unwrap()).unwrap();
-    assert!(Workbook::open_from_file(&legacy_file).unwrap().sheets["Sheet1"]
+    common::edit_workbook_metadata(&file, |json| {
+        json["sheets"]["Sheet1"]
+            .as_object_mut()
+            .unwrap()
+            .remove("column_widths");
+    });
+    assert!(Workbook::open_from_file(&file).unwrap().sheets["Sheet1"]
         .column_widths
         .is_empty());
 }
@@ -89,7 +88,7 @@ fn presentation_changes_leave_calculations_reviews_staging_and_history_alone() {
     assert!(wb.undo_sheet_edit().is_err());
     assert!(wb.redo_sheet_edit().is_err());
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("review.gridloom");
+    let file = dir.path().join("review.tay");
     wb.save_to_file(&file).unwrap();
     let loaded = Workbook::open_from_file(&file).unwrap();
     assert_eq!(

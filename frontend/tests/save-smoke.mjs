@@ -24,12 +24,12 @@ try {
  const save=page.getByRole('button',{name:'Save',exact:true}),saveAs=page.getByRole('button',{name:'Save As',exact:true});const replacement=page.getByRole('dialog',{name:'Replace current workbook?',exact:true});
  const edit=async(name,value)=>{await cell(name).dblclick();const input=page.getByRole('textbox',{name:`Edit ${name}`,exact:true});await input.fill(value);await input.press('Enter');await idle();};
  await grid().waitFor();await edit('A1','11');
- const first=path.join(artifacts,'first.gridloom'),second=path.join(artifacts,'second.gridloom');
+ const first=path.join(artifacts,'first.tay'),second=path.join(artifacts,'second.tay');
  const writes=[];page.on('request',request=>{if(request.url().endsWith('/api/workbook/save'))writes.push(request.postDataJSON().path);});
- page.once('dialog',d=>d.accept(first));await save.click();await page.getByText(`Saved workbook to ${first}`,{exact:true}).waitFor();assert.deepEqual(writes,[first]);
- await edit('A1','12');await save.click();await idle();assert.deepEqual(writes,[first,first]);
+ page.once('dialog',d=>{assert.equal(d.defaultValue(),'my_workbook.tay');return d.accept(first.slice(0,-4));});await save.click();await page.getByText(`Saved workbook to ${first}`,{exact:true}).waitFor();assert.deepEqual(writes,[first.slice(0,-4)]);
+ await edit('A1','12');await save.click();await idle();assert.deepEqual(writes,[first.slice(0,-4),first]);
  page.once('dialog',d=>d.accept(second));await saveAs.click();await page.getByText(`Saved workbook to ${second}`,{exact:true}).waitFor();await idle();
- await grid().focus();await grid().press('Control+s');await idle();assert.deepEqual(writes,[first,first,second,second]);
+ await grid().focus();await grid().press('Control+s');await idle();assert.deepEqual(writes,[first.slice(0,-4),first,second,second]);
  // Unsubmitted FormulaBar content is not silently saved or cleared on failure.
  const formula=page.getByRole('textbox',{name:'Formula input',exact:true});await formula.fill('unsaved formula draft');const beforeDraft=writes.length;await save.click();await page.getByText(/Finish or cancel the cell edit/).waitFor();assert.equal(writes.length,beforeDraft);assert.equal(await formula.inputValue(),'unsaved formula draft');
  const rejectCell=route=>route.fulfill({status:409,contentType:'text/plain',body:'Synthetic formula failure'});await page.route('**/api/cells/set',rejectCell);await formula.press('Enter');await idle();assert.equal(await formula.inputValue(),'unsaved formula draft');await save.click();assert.equal(writes.length,beforeDraft);await page.unroute('**/api/cells/set',rejectCell);await formula.press('Escape');
@@ -38,7 +38,7 @@ try {
  await page.getByRole('tab',{name:'File',exact:true}).click();await page.getByRole('button',{name:'New',exact:true}).click();await replacement.waitFor();await replacement.getByRole('button',{name:'Cancel',exact:true}).focus();await page.keyboard.press('Tab');assert.equal(await replacement.getByRole('button',{name:'Save and continue',exact:true}).evaluate(el=>el===document.activeElement),true);await replacement.getByRole('button',{name:'Cancel',exact:true}).click();assert.equal(await cell('A1').innerText(),'12');
  // A failed Save As keeps the previous path; failed Save-and-continue keeps workbook.
  const rejectSave=route=>route.fulfill({status:500,contentType:'text/plain',body:'Synthetic disk failure'});await page.route('**/api/workbook/save',rejectSave);
- page.once('dialog',d=>d.accept(path.join(artifacts,'failed.gridloom')));await saveAs.click();await page.getByText(/Failed to save: Synthetic disk failure/).waitFor();
+ page.once('dialog',d=>d.accept(path.join(artifacts,'failed.tay')));await saveAs.click();await page.getByText(/Failed to save: Synthetic disk failure/).waitFor();
  await page.getByRole('tab',{name:'File',exact:true}).click();await page.getByRole('button',{name:'New',exact:true}).click();await replacement.getByRole('button',{name:'Save and continue',exact:true}).click();await page.getByText(/Failed to save: Synthetic disk failure/).waitFor();await idle();assert.equal(await replacement.count(),1);assert.equal(await cell('A1').innerText(),'12');await replacement.getByRole('button',{name:'Cancel',exact:true}).click();await page.unroute('**/api/workbook/save',rejectSave);
  await save.click();await idle();assert.equal(writes.at(-1),second);
  // While save is pending, shortcuts and repeated clicks cannot queue a second save.
@@ -70,7 +70,7 @@ try {
  const conflict=page.getByRole('alert').filter({hasText:'Workbook changed on disk'});
  await conflict.waitFor();assert.equal(await cell('A1').innerText(),'13');
  assert.deepEqual(readFileSync(second),winning);
- const copy=path.join(artifacts,'conflict-copy.gridloom');
+ const copy=path.join(artifacts,'conflict-copy.tay');
  page.once('dialog',d=>d.accept(copy));await page.getByRole('button',{name:'Save a copy…'}).click();
  await page.getByText(`Saved workbook to ${copy}`,{exact:true}).waitFor();
  assert.equal(await conflict.count(),0);

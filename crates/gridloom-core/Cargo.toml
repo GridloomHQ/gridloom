@@ -1,8 +1,8 @@
 [package]
 name = "gridloom-core"
-version = "0.13.1"
+version = "0.14.0"
 edition = "2021"
-description = "Core calculation, database connection, lineage, writeback, and formula engine for Gridloom"
+description = "Core calculation, database connection, lineage, writeback, and formula engine for Tayriva"
 license = "MIT OR Apache-2.0"
 
 [dependencies]

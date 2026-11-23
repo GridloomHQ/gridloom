@@ -1,8 +1,8 @@
 [package]
 name = "gridloom-server"
-version = "0.13.1"
+version = "0.14.0"
 edition = "2021"
-description = "Embedded HTTP/JSON local server for Gridloom desktop engine"
+description = "Embedded HTTP/JSON local server for Tayriva desktop engine"
 license = "MIT OR Apache-2.0"
 
 [dependencies]

@@ -12,7 +12,7 @@ const binary=process.env.GRIDLOOM_SERVER??path.join(root,'target/debug/gridloom-
 const args=['--port','0'];
 const options={cwd:temp,env:{...process.env,GRIDLOOM_RECOVERY_DIR:path.join(temp,'recovery'),GRIDLOOM_FRONTEND_DIR:path.join(root,'frontend/dist')},stdio:['ignore','pipe','pipe']};
 const dbPath=path.join(temp,'invoices.sqlite');
-const workbookPath=path.join(temp,'saved.gridloom');
+const workbookPath=path.join(temp,'saved.tay');
 function fixture(action){
   const started=performance.now();
   const result=spawnSync('python3',[path.join(root,'frontend/tests/fixtures/invoices.py'),action,dbPath],{encoding:'utf8',timeout:180_000});

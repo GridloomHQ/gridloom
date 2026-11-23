@@ -86,7 +86,7 @@ async fn call_trace(
 async fn trace_saves_account_period_to_cell_and_uses_exact_amounts_after_reopen() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("accounting.sqlite");
-    let target_file = tmp.path().join("review.gridloom");
+    let target_file = tmp.path().join("review.tay");
     let writer = rusqlite::Connection::open(&path).unwrap();
     writer
         .execute_batch(

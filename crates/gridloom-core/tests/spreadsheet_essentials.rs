@@ -147,7 +147,7 @@ fn sheet_rename_updates_references_but_not_quoted_text() {
     assert_eq!(value(&w, "Sheet1", "A2"), "Inputs!A1");
 }
 #[test]
-fn styles_and_cross_sheet_formulas_persist_with_old_file_compatibility() {
+fn styles_roundtrip_and_missing_style_defaults_on_open() {
     let mut w = Workbook::new();
     w.add_sheet("Inputs").unwrap();
     set(&mut w, "Inputs", "A1", "0.25");
@@ -161,21 +161,19 @@ fn styles_and_cross_sheet_formulas_persist_with_old_file_compatibility() {
     w.format_range("Sheet1", range("A1"), style.clone())
         .unwrap();
     let directory = tempfile::tempdir().unwrap();
-    let file = directory.path().join("styles.gridloom");
+    let file = directory.path().join("styles.tay");
     w.save_to_file(&file).unwrap();
     let loaded = Workbook::open_from_file(&file).unwrap();
     assert_eq!(value(&loaded, "Sheet1", "A1"), "0.25");
     assert_eq!(loaded.sheets["Sheet1"].cells["A1"].style, style);
-    let recovery = directory.path().join("recovery.json");
-    w.save_recovery_copy(&recovery).unwrap();
-    let mut json: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&recovery).unwrap()).unwrap();
-    json["sheets"]["Sheet1"]["cells"]["A1"]
-        .as_object_mut()
+    rusqlite::Connection::open(&file)
         .unwrap()
-        .remove("style");
-    std::fs::write(&recovery, serde_json::to_vec(&json).unwrap()).unwrap();
-    assert!(Workbook::open_from_file(&recovery).is_ok());
+        .execute(
+            "UPDATE worksheet_cell SET json = json_remove(json, '$.style') WHERE coordinate = 'A1'",
+            [],
+        )
+        .unwrap();
+    assert!(Workbook::open_from_file(&file).is_ok());
 }
 #[test]
 fn plain_edit_undo_redo_and_redo_branch() {

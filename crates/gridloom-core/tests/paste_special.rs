@@ -51,7 +51,7 @@ fn values_only_preserves_exact_and_literal_types_destination_format_and_no_formu
         Value::Text("001".into())
     );
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("paste.gridloom");
+    let path = dir.path().join("paste.tay");
     wb.save_to_file(&path).unwrap();
     let wb = Workbook::open_from_file(&path).unwrap();
     let b = wb.sheets[SHEET].get_cell(&point("B2")).unwrap();

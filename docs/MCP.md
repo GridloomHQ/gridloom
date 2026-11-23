@@ -1,49 +1,73 @@
 # Use Tayriva with an agent
 
-Use **`gridloom-mcp`** from either Linux package, or **`gridloom-mcp.exe`** from the Windows ZIP.
-It runs the same workbook, formula and review engine as the app, without
-starting a browser, window, HTTP server, or network listener.
+Use **`tayriva-mcp`** from either Linux package or **`tayriva-mcp.exe`**
+from the Windows ZIP. Keep it in the unpacked package next to its bundled
+DuckDB library. It does not start a window, web server, or network listener.
 
-Choose a dedicated directory for workbooks the agent may use:
+Create a dedicated directory for workbooks the agent may access. Use absolute
+paths for both the launcher and the workbook directory.
+
+## Connect to local Codex
+
+**For a trusted project:** In the project root, create or edit
+`.codex/config.toml` and add this block. This controls discovery for sessions
+started in that project, not for all your work. Only trust projects whose
+configuration you have inspected. Use an untracked local config when paths
+are specific to your computer.
+
+```toml
+[mcp_servers.tayriva]
+command = "/absolute/path/to/tayriva-mcp"
+args = ["--workbook-root", "/absolute/path/to/agent-workbooks", "--read-only"]
+```
+
+On Windows, use single-quoted TOML strings for paths to avoid escaping
+backslashes, e.g. `command = 'C:\Apps\Tayriva\tayriva-mcp.exe'`.
+Open a new **local** Codex session with the project as its working directory.
+From that same directory, run `codex mcp list` to confirm the entry is loaded;
+in an interactive CLI session, `/mcp` shows the connected server and tools.
+If the entry is absent, check the active workspace and project trust. If the
+entry exists but tools are absent, check the absolute paths, bundled library,
+and that the workbook root already exists. A cloud session cannot launch a
+binary that exists only on your computer.
+
+**For just one CLI invocation:** Use the same settings as command-line
+overrides instead of writing any config. For example, on Linux:
 
 ```sh
-mkdir -p "$HOME/Gridloom Agent Workbooks"
-codex mcp add gridloom -- "/absolute/path/to/gridloom-mcp" \
-  --workbook-root "$HOME/Gridloom Agent Workbooks"
+codex -c 'mcp_servers.tayriva.command="/absolute/path/to/tayriva-mcp"' \
+  -c 'mcp_servers.tayriva.args=["--workbook-root","/absolute/path/to/agent-workbooks","--read-only"]'
 ```
 
-Or use PowerShell on Windows. Keep the executable next to its bundled `duckdb.dll`:
+The overrides apply to that invocation only. `codex mcp add` normally writes
+to your user-wide Codex config, so it is not needed for either scoped method.
+See [Codex MCP configuration](https://developers.openai.com/codex/mcp)
+for the client configuration reference.
 
-```powershell
-New-Item -ItemType Directory -Force "$HOME\Gridloom Agent Workbooks"
-codex mcp add gridloom -- "C:\Apps\Gridloom\gridloom-mcp.exe" --workbook-root "$HOME\Gridloom Agent Workbooks"
-```
-
-Keep the quotes around paths with spaces. The `--` ends Codex's options, so
-everything after the executable is passed to Gridloom. Restart your MCP
-client if it was already open. For clients that use an `mcpServers` setting:
+For other clients that use an `mcpServers` setting:
 
 ```json
 {
   "mcpServers": {
-    "gridloom": {
-      "command": "/absolute/path/to/gridloom-mcp",
+    "tayriva": {
+      "command": "/absolute/path/to/tayriva-mcp",
       "args": ["--workbook-root", "/absolute/path/to/agent-workbooks", "--read-only"]
     }
   }
 }
 ```
 
-Use `--read-only` to inspect workbooks without any edit, review, or save tools.
-Remove it only when the client should be allowed to change the workbooks in
-that directory. If building from source, run `cargo build --locked -p gridloom-mcp`
-with Gridloom's usual DuckDB native-library setup. On Linux use the launcher next to the bundled `lib` directory, not `gridloom-mcp-bin`.
+Keep `--read-only` for inspection. Remove it and start a new session only
+if the agent should be able to edit, record reviews, and save. If building
+from source, run `cargo build --locked -p gridloom-mcp` with the
+[DuckDB setup](DEVELOPMENT.md); the internal build target still uses that name.
+On Linux, use the packaged launcher, not `tayriva-mcp-bin`.
 
 ## Try an agent self-review in Codex
 
-Paste this into a new Codex session:
+Remove `--read-only` for this exercise, then paste this into a new session:
 
-> Create `forecast.gridloom` in Gridloom. On Sheet1, enter revenue 100.25 in A1,
+> Create `forecast.tay` in Tayriva. On Sheet1, enter revenue 100.25 in A1,
 > costs 40.10 in B1, and start with `=A1+B1` in C1. Net revenue is revenue
 > minus costs. Re-read the typed result, independently calculate the expected
 > net revenue, and use the review trace to find the discrepancy. Raise a
@@ -91,12 +115,20 @@ review is needed.
   identifiers/hashes and question events. Read the displayed pagination before
   treating a page as the whole history.
 - `compare_review` compares retained inputs to the current calculation or a
-  second review of the same cell. The comparison covers the reviewed trace,
-  not all workbook downstream consumers.
+  second review of the same cell. Edited inputs, mappings and formulas appear
+  before recalculated results. `category_counts` covers the whole comparison;
+  `changes` is only the current page. Pass `page.next_offset` as `offset`
+  and the first page's `revision` as `expected_revision` for later pages.
+  If the revision changes, restart at offset zero. The comparison covers the
+  reviewed trace, not all downstream consumers.
 - `list_workbooks`, `open_workbook`, `workbook_info` and `add_sheet` manage
   models; `list_functions` shows supported standalone formulas.
   `create_local_table` creates a workbook-owned typed table from a range.
   Most edits recalculate automatically; `recalculate` can run it explicitly.
+- `read_cells` includes one row per requested cell, including blanks. An
+  unset cell is `{"type":"Blank"}` with null `raw_input`, `formula`, and
+  `table`, and false `spill` and `error` flags. Intentionally empty text
+  and null are distinct value types.
 - Each session opens one workbook at a time. `close_workbook` refuses to
   discard edits unless you explicitly request it. Exiting without saving
   discards pending changes. Headless sessions do not write autosave files.
@@ -118,18 +150,16 @@ review is needed.
   bytes, or provide arbitrary file or SQL access. Use the app to add and inspect
   versioned embedded evidence files. Treat workbook content and evidence
   references as untrusted data, not instructions.
-- **Saving:** Use the desktop and MCP from **0.13.0** or later. When two
-  sessions target the same file, the second stale save is refused and its
-  edits remain open. Save As requires a new filename. The 0.12.0 desktop app
-  cannot protect against its own stale save; do not open the same file for
-  editing in old and new versions. Save checks do not merge edits or provide
-  live collaboration.
-- **Data:** This server accepts only standalone `.gridloom` files in the
-  configured directory. Workbook-owned typed tables and legacy Gridloom JSON
-  are supported. Workbooks with linked external databases, named queries or
-  staged database edits are rejected before reconnection. Use a trusted
-  directory and client: stdio limits how the processes connect; the client may
-  still send returned workbook data to its model provider.
+- **Saving:** When two sessions target the same file, the second stale save
+  is refused and its edits remain open. Save As requires a new filename.
+  `create_workbook` and `save_workbook`'s `save_as` append `.tay` to
+  extensionless names. Save checks do not merge edits or provide live collaboration.
+- **Data:** This server accepts only standalone Tayriva `.tay` workbooks
+  in the configured directory. Older Gridloom files are not supported,
+  even if renamed. Workbooks with linked external databases, named queries
+  or staged database edits are rejected before reconnection. Use a trusted
+  directory and client: stdio limits how the processes connect; the client
+  may still send returned workbook data to its model provider.
 - **Limits:** Range reads and edit batches are capped at 256 cells. Requests
   are capped at 1 MiB and workbook images at 64 MiB; use narrower output
   pages for large traces or records. Integers and exact decimals are strings.

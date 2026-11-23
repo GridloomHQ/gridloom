@@ -28,7 +28,7 @@ yarn-error.log*
 *.sqlite-wal
 *.sqlite-shm
 *.duckdb.tmp
-*.gridloom.tmp
+*.tay.tmp
 /fixtures/*.tmp
 
 # Old version-generated SQLite/DuckDB files

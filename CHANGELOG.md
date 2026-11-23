@@ -1,3 +1,9 @@
+# 0.14.0
+
+- Tayriva-branded Windows and Linux packages and launchers.
+- New native `.tay` workbooks and autosaves; old Gridloom files are intentionally unsupported.
+- MCP improvements for cell reads, review comparisons and local Codex setup.
+
 # 0.13.1
 
 - Add a portable Windows x64 desktop ZIP with the bundled headless MCP and the same workbook and Review tools as Linux.

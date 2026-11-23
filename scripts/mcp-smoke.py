@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise real Gridloom MCP processes with no GUI, HTTP, or model API."""
+"""Exercise real Tayriva MCP processes with no GUI, HTTP, or model API."""
 from contextlib import closing
 import json
 import os
@@ -32,9 +32,10 @@ class Client:
             assert bad["error"]["code"] == -32002, bad
             init = self.rpc("initialize", {
                 "protocolVersion": version, "capabilities": {},
-                "clientInfo": {"name": "gridloom-mcp-smoke", "version": "1"},
+                "clientInfo": {"name": "tayriva-mcp-smoke", "version": "1"},
             })
             assert init["result"]["protocolVersion"] == version, init
+            assert init["result"]["serverInfo"]["name"] == "tayriva", init
             assert init["result"]["capabilities"]["tools"] == {"listChanged": False}, init
             self.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
             assert self.rpc("ping")["result"] == {}
@@ -105,11 +106,11 @@ def database_metadata(path, change):
 
 
 def run(executable):
-    with tempfile.TemporaryDirectory(prefix="gridloom-mcp-exact-") as directory:
+    with tempfile.TemporaryDirectory(prefix="tayriva-mcp-exact-") as directory:
         area = Path(directory)
         root = area / "workbooks"
         root.mkdir()
-        book = root / "forecast.gridloom"
+        book = root / "forecast.tay"
         with Client(executable, root) as c:
             available = {t["name"]: t for t in c.rpc("tools/list")["result"]["tools"]}
             assert set(available) == {
@@ -123,12 +124,15 @@ def run(executable):
             assert "SQLVALUE" not in c.call("list_functions")["names"]
             assert not available["read_cells"]["annotations"]["openWorldHint"]
             assert available["edit_cells"]["inputSchema"]["additionalProperties"] is False
-            c.call("open_workbook", error="plain", file="../outside.gridloom")
-            c.call("open_workbook", error="plain", file=str(area / "outside.gridloom"))
+            c.call("open_workbook", error="plain", file="../outside.tay")
+            c.call("open_workbook", error="plain", file=str(area / "outside.tay"))
             c.call("create_workbook", error="plain", file="bad.sqlite")
+            c.call("create_workbook", error=".tay", file="legacy.gridloom")
+            c.call("open_workbook", error=".tay", file="legacy.gridloom")
             assert c.call("list_workbooks") == {"files": [], "truncated": False}
 
-            s = c.call("create_workbook", file=book.name)
+            s = c.call("create_workbook", file=book.stem)
+            assert s["file"] == book.name
             assert s["active_sheet"] == "Sheet1" and s["dirty"] and not book.exists()
             r = s["revision"]
             # Notification cannot run a tool even with a valid action and revision.
@@ -145,7 +149,10 @@ def run(executable):
                    edits=[cell("A1", "integer", "7"), cell("B1", "formula", "=(")], error="formula")
             c.call("edit_cells", sheet="Sheet1", revision=r,
                    edits=[cell("A1", "formula", "=B1"), cell("B1", "formula", "=A1")], error="circular")
-            assert c.call("read_cells", sheet="Sheet1", range="A1")["cells"][0]["value"]["type"] == "Blank"
+            assert c.call("read_cells", sheet="Sheet1", range="A1")["cells"][0] == {
+                "cell": "A1", "value": {"type": "Blank"}, "raw_input": None,
+                "formula": None, "spill": False, "error": False, "table": None,
+            }
             c.call("read_cells", sheet="Sheet1", range="A1:A257", error="256")
             s = c.call("edit_cells", sheet="Sheet1", revision=r, edits=[
                 cell("A1", "decimal", "100.25"), cell("B1", "decimal", "40.10"),
@@ -214,11 +221,12 @@ def run(executable):
             before_conflict = book.read_bytes()
             two.call("save_workbook", revision=r2, error="changed on disk")
             assert book.read_bytes() == before_conflict
-            save = two.call("save_workbook", revision=r2, save_as="copy.gridloom")
-            assert save["file"] == "copy.gridloom" and not save["dirty"]
+            two.call("save_workbook", revision=r2, save_as="old.gridloom", error=".tay")
+            save = two.call("save_workbook", revision=r2, save_as="copy")
+            assert save["file"] == "copy.tay" and not save["dirty"]
             assert book.read_bytes() == before_conflict
-            r = one.call("create_workbook", file="appeared.gridloom")["revision"]
-            appeared = root / "appeared.gridloom"
+            r = one.call("create_workbook", file="appeared.tay")["revision"]
+            appeared = root / "appeared.tay"
             appeared.write_text("existing file")
             one.call("save_workbook", revision=r, error="already exists")
             assert appeared.read_text() == "existing file"
@@ -228,30 +236,32 @@ def run(executable):
         with closing(sqlite3.connect(outside_sql)) as db, db:
             db.execute("CREATE TABLE fixture (hidden TEXT)")
             db.execute("INSERT INTO fixture VALUES ('private must not load')")
-        linked = root / "linked.gridloom"
+        linked = root / "linked.tay"
         shutil.copyfile(book, linked)
         database_metadata(linked, lambda doc: doc["connection_configs"].update({
             "external": {"kind": "Sqlite", "name": "external", "path": str(outside_sql)},
         }))
-        outside_book = area / "outside.gridloom"
+        with (root / "old.gridloom").open("wb") as file:
+            file.write(book.read_bytes())  # even a valid new file with the old extension is ignored
+        outside_book = area / "outside.tay"
         shutil.copyfile(book, outside_book)
-        symlink = root / "symlink.gridloom"
+        symlink = root / "symlink.tay"
         try:
             symlink.symlink_to(outside_book)
         except OSError as error:
             if os.name != "nt" or error.winerror != 1314:
                 raise
             print("Windows runner lacks SeCreateSymbolicLinkPrivilege; hard-link containment still tested.")
-        os.link(outside_book, root / "hardlink.gridloom")
+        os.link(outside_book, root / "hardlink.tay")
         with Client(executable, root) as c:
             assert c.call("list_workbooks")["files"] == [
-                "appeared.gridloom", "copy.gridloom", "forecast.gridloom", "linked.gridloom",
+                "appeared.tay", "copy.tay", "forecast.tay", "linked.tay",
             ]
             if symlink.is_symlink():
-                c.call("open_workbook", file="symlink.gridloom", error="not a link")
-            c.call("open_workbook", file="hardlink.gridloom", error="hard-linked")
-            c.call("open_workbook", file="linked.gridloom", error="linked database workbooks")
-            c.call("open_workbook", file="appeared.gridloom", error="corrupt workbook")
+                c.call("open_workbook", file="symlink.tay", error="not a link")
+            c.call("open_workbook", file="hardlink.tay", error="hard-linked")
+            c.call("open_workbook", file="linked.tay", error="linked database workbooks")
+            c.call("open_workbook", file="appeared.tay", error="workbook")
 
     print("PASS: stdio MCP 2025-11-25 / 2025-06-18 handshake, exact workbook calculations, safeguards, and reopen.")
 

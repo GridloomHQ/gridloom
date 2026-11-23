@@ -39,7 +39,7 @@ def visible_window(pid):
         if owner.value == pid and user32.IsWindowVisible(window):
             title = ctypes.create_unicode_buffer(120)
             user32.GetWindowTextW(window, title, len(title))
-            if title.value.startswith("Gridloom"):
+            if title.value.startswith("Tayriva"):
                 visible.append(window)
         return True
 
@@ -63,8 +63,8 @@ def native_smoke(executable, cwd):
             while time.monotonic() < deadline and process.poll() is None:
                 data = log.read_bytes()
                 found = re.search(rb"Core Engine active at (http://127\.0\.0\.1:\d+)", data)
-                if (found and b"Gridloom native webview initialized" in data
-                        and b"Gridloom desktop window opened." in data
+                if (found and b"Tayriva native webview initialized" in data
+                        and b"Tayriva desktop window opened." in data
                         and (window := visible_window(process.pid))):
                     base = found[1].decode()
                     with urlopen(base, timeout=8) as request:
@@ -102,7 +102,7 @@ def main():
     assert args.archive.with_suffix(".zip.sha256").read_text(encoding="ascii").split() == [
         package.digest(args.archive), args.archive.name,
     ]
-    with tempfile.TemporaryDirectory(prefix="Gridloom Windows smoke ") as directory:
+    with tempfile.TemporaryDirectory(prefix="Tayriva Windows smoke ") as directory:
         area = Path(directory)
         stage = area / "Relocated release"
         work = area / "Unrelated launch directory"

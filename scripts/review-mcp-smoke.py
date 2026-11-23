@@ -35,11 +35,11 @@ def edit(client, revision, *edits):
 
 
 def run(backend, executable, desktop=False):
-    with tempfile.TemporaryDirectory(prefix="gridloom-review-mcp-exact-") as temp:
+    with tempfile.TemporaryDirectory(prefix="tayriva-review-mcp-exact-") as temp:
         root = Path(temp)
-        name = "forecast.gridloom"
+        name = "forecast.tay"
         # Independent control arithmetic in decimal, not an assertion that the
-        # Gridloom worksheet (or the real-world source data) is correct.
+        # Tayriva worksheet (or the real-world source data) is correct.
         expected = Decimal("100.25") - Decimal("40.10")
         evidence_reference = str(root / "reference-only-not-a-file.txt")
         with mcp.Client(executable, root) as agent:
@@ -127,6 +127,24 @@ def run(backend, executable, desktop=False):
             diff = compare(agent, revived["record"]["review_id"])["changes"]
             assert any(x["category"] == "formula" and x["cell"] == "C1" for x in diff)
             assert agent.call("list_reviews", status="stale", limit=1)["page"]["next_offset"] == 1
+            # Inputs sort first even when their native lexical keys follow the
+            # changed calculations. Walk all pages and reject an old revision.
+            rev = edit(agent, rev, mcp.cell("Z1", "integer", "1"),
+                       mcp.cell("A2", "formula", "=Z1+1"),
+                       mcp.cell("B2", "formula", "=A2+1"))["revision"]
+            chain = record(agent, status(agent, "B2"))
+            chain_id = chain["record"]["review_id"]
+            rev = edit(agent, chain["revision"], mcp.cell("Z1", "integer", "2"))["revision"]
+            first = compare(agent, chain_id, limit=1)
+            assert first["changes"][0]["cell"] == "Z1", first
+            assert first["category_counts"] == {"input": 1, "calculation": 2}, first
+            assert first["page"] == {"offset": 0, "count": 1, "total": 3, "next_offset": 1}
+            rest = compare(agent, chain_id, limit=2, offset=first["page"]["next_offset"],
+                           expected_revision=first["revision"])
+            assert {c["cell"] for c in rest["changes"]} == {"A2", "B2"}
+            assert rest["page"]["next_offset"] is None
+            rev = edit(agent, rev, mcp.cell("Z1", "integer", "3"))["revision"]
+            compare(agent, chain_id, offset=1, expected_revision=first["revision"], error="Stale revision")
             # Known invalid calculations cannot generate a reviewed record.
             rev = edit(agent, rev, mcp.cell("K1", "formula", "=1/0"))["revision"]
             blocked = status(agent, "K1")

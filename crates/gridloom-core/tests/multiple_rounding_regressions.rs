@@ -193,7 +193,7 @@ fn old_tiny_rounding_cache_recalculates_and_invalidates_reviews() {
     })
     .unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("old.gridloom");
+    let path = dir.path().join("old.tay");
     w.save_to_file(&path).unwrap();
     let loaded = Workbook::open_from_file(&path).unwrap();
     assert_eq!(

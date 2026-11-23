@@ -77,7 +77,7 @@ async fn monthly_workflow_attached_review_compare_pack_and_reopen() {
     );
     assert_eq!(pack["status"]["balanced"], false);
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("monthly.gridloom");
+    let path = dir.path().join("monthly.tay");
     assert_eq!(
         call(&app, "POST", "/api/workbook/save", json!({"path":path}))
             .await

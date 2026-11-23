@@ -103,7 +103,7 @@ fn lifecycle_is_explicit_concurrency_checked_and_persisted() {
         .contains("already"));
     assert_eq!(wb.reviews[0].question_events.len(), 2);
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("questions.gridloom");
+    let path = dir.path().join("questions.tay");
     wb.save_to_file(&path).unwrap();
     let loaded = Workbook::open_from_file(&path).unwrap();
     assert_eq!(loaded.open_questions().len(), 1);

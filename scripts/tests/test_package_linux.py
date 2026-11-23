@@ -65,7 +65,7 @@ elif name=="ldd":
     assert 1<=len(args)<=2,args
     for arg in args:
         path=pathlib.Path(arg)
-        assert path.read_bytes()==(root/("mcp-template" if path.name=="gridloom-mcp-bin" else "fresh-template")).read_bytes(), "ldd received stale artifact"
+        assert path.read_bytes()==(root/("mcp-template" if path.name=="tayriva-mcp-bin" else "fresh-template")).read_bytes(), "ldd received stale artifact"
     library=root/"native"/"libduckdb.so"
     if os.environ.get("LD_LIBRARY_PATH"):
         candidate=pathlib.Path(os.environ["LD_LIBRARY_PATH"].split(":")[0])/"libduckdb.so"
@@ -134,11 +134,11 @@ class PackageShellTests(unittest.TestCase):
         result = self.run_package()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         archive, contents = self.read_archive()
-        stem = f"gridloom-0.3.0-linux-{platform.machine()}-server"
+        stem = f"tayriva-0.3.0-linux-{platform.machine()}-server"
         self.assertEqual(archive.name, stem + ".tar.gz")
-        self.assertEqual(contents[stem + "/gridloom-server"], self.fresh)
-        self.assertEqual(contents[stem + "/gridloom-mcp-bin"], self.mcp)
-        self.assertIn(b'exec "$base/gridloom-mcp-bin" "$@"', contents[stem + "/gridloom-mcp"])
+        self.assertEqual(contents[stem + "/tayriva-server"], self.fresh)
+        self.assertEqual(contents[stem + "/tayriva-mcp-bin"], self.mcp)
+        self.assertIn(b'exec "$base/tayriva-mcp-bin" "$@"', contents[stem + "/tayriva-mcp"])
         self.assertIn(stem + "/docs/MCP.md", contents)
         self.assertEqual(contents[stem + "/frontend/dist/index.html"], b"fresh frontend")
         info = json.loads(contents[stem + "/docs/build-info.json"])

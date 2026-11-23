@@ -11,7 +11,7 @@ export function PasteSpecialDialog({onClose, onPaste, busy, copySource}: {
     <div role="group" aria-label="Paste Special options">
       <p className="mb-2">{copySource
         ? `Last worksheet copy: ${copySource}.`
-        : 'Copy cells in Gridloom first. System clipboard text uses ordinary Paste.'}</p>
+        : 'Copy cells in Tayriva first. System clipboard text uses ordinary Paste.'}</p>
       <div className="flex gap-2">
         <button type="button" className={worksheetCommandClass} disabled={busy || !copySource}
           onClick={() => { onClose(); onPaste('values'); }}>Values only</button>

@@ -115,7 +115,7 @@ fn imported_plus_supported_adjustments_equals_reported_and_invalidates_review() 
         "Accrued supported revenue"
     );
     let path = tempfile::tempdir().unwrap();
-    let file = path.path().join("supported.gridloom");
+    let file = path.path().join("supported.tay");
     wb.save_to_file(&file).unwrap();
     let reopened = Workbook::open_from_file(file).unwrap();
     assert_eq!(

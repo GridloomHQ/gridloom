@@ -1,8 +1,10 @@
+mod common;
+
 use gridloom_core::review::{ReviewDecision, ReviewRequest};
 use gridloom_core::{CellCoord, Value, Workbook};
 
 #[test]
-fn show_formulas_are_independent_per_sheet_and_legacy_defaults_roundtrip() {
+fn show_formulas_are_independent_per_sheet_and_missing_fields_default_on_open() {
     let mut wb = Workbook::new();
     wb.add_sheet("Other").unwrap();
     wb.set_show_formulas("Sheet1", true).unwrap();
@@ -13,19 +15,16 @@ fn show_formulas_are_independent_per_sheet_and_legacy_defaults_roundtrip() {
     assert!(wb.set_show_formulas("missing", true).is_err());
     assert_eq!(serde_json::to_value(&wb.sheets).unwrap(), before);
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("freeze.gridloom");
+    let file = dir.path().join("freeze.tay");
     wb.save_to_file(&file).unwrap();
     let loaded = Workbook::open_from_file(&file).unwrap();
     assert_eq!(serde_json::to_value(&loaded.sheets).unwrap(), before);
-    let legacy_file = file.with_extension("json");
-    wb.save_recovery_copy(&legacy_file).unwrap();
-    let mut json: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&legacy_file).unwrap()).unwrap();
-    for sheet in json["sheets"].as_object_mut().unwrap().values_mut() {
-        sheet.as_object_mut().unwrap().remove("show_formulas");
-    }
-    std::fs::write(&legacy_file, serde_json::to_vec(&json).unwrap()).unwrap();
-    let legacy = Workbook::open_from_file(&legacy_file).unwrap();
+    common::edit_workbook_metadata(&file, |json| {
+        for sheet in json["sheets"].as_object_mut().unwrap().values_mut() {
+            sheet.as_object_mut().unwrap().remove("show_formulas");
+        }
+    });
+    let legacy = Workbook::open_from_file(&file).unwrap();
     assert!(legacy.sheets.values().all(|s| !s.show_formulas));
     wb.set_show_formulas("Sheet1", false).unwrap();
     assert!(!wb.sheets["Sheet1"].show_formulas);
@@ -68,7 +67,7 @@ fn showing_formulas_keeps_calculations_reviews_staging_and_edit_history_unchange
     assert!(wb.undo_sheet_edit().is_err());
     assert!(wb.redo_sheet_edit().is_err());
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("review.gridloom");
+    let file = dir.path().join("review.tay");
     wb.save_to_file(&file).unwrap();
     let loaded = Workbook::open_from_file(&file).unwrap();
     assert_eq!(

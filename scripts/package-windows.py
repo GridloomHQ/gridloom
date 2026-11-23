@@ -13,7 +13,7 @@ import tomllib
 from zipfile import ZipFile, ZIP_DEFLATED
 
 ROOT = Path(__file__).resolve().parent.parent
-FILES = ("gridloom.exe", "gridloom-mcp.exe", "duckdb.dll")
+FILES = ("tayriva.exe", "tayriva-mcp.exe", "duckdb.dll")
 TARGET = "x86_64-pc-windows-msvc"
 
 
@@ -61,7 +61,7 @@ def main():
     output = Path(os.environ.get("GRIDLOOM_PACKAGE_DIR", ROOT / "target/package"))
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".build-gridloom-", dir=output) as work:
-        build = Path(work) / f"gridloom-{version}-windows-x86_64-desktop"
+        build = Path(work) / f"tayriva-{version}-windows-x86_64-desktop"
         build.mkdir()
         # Cargo JSON locates the executables even with a custom target directory.
         for crate, filename in zip(("gridloom-desktop", "gridloom-mcp"), FILES):
@@ -87,7 +87,7 @@ def main():
         if identity() != (commit, tree) or command("git", "status", "--porcelain"):
             raise SystemExit("Source changed during packaging.")
         (docs / "build-info.json").write_text(json.dumps({
-            "format": "gridloom-windows-package", "format_version": 1,
+            "format": "tayriva-windows-package", "format_version": 1,
             "version": version, "mode": "desktop", "architecture": "x86_64",
             "source_commit": commit, "source_tree": tree, "source_dirty": False,
             "duckdb_version": duckdb_version, "target": TARGET, "mcp_stdio": True,
