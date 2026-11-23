@@ -1,12 +1,12 @@
-# Build and test Gridloom
+# Build and test Tayriva
 
 ## Build from source on Linux
 
 Use a current stable Rust toolchain, an up-to-date Node.js 22 or newer, npm, Python 3.11+, a C/C++ build toolchain, `curl` and `unzip`. Linux packages are built and verified on Ubuntu 24.04 x86-64.
 
 ```bash
-git clone https://github.com/lhemerly/gridloom.git
-cd gridloom
+git clone https://github.com/GridloomHQ/tayriva.git
+cd tayriva
 
 # Build tools on Ubuntu/Debian.
 sudo apt-get update

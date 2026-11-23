@@ -1,4 +1,4 @@
-# Use Gridloom with an agent
+# Use Tayriva with an agent
 
 Use **`gridloom-mcp`** from either Linux package, or **`gridloom-mcp.exe`** from the Windows ZIP.
 It runs the same workbook, formula and review engine as the app, without
