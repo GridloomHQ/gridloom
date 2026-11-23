@@ -6,7 +6,7 @@
 
 Tayriva (formerly Gridloom) is a local-first spreadsheet for financial models and accounting work. Browse a live database table without importing every row. Then audit a calculation in the same workbook, from the result back to its inputs.
 
-[**Download Tayriva for Windows or Linux**](https://github.com/GridloomHQ/tayriva/releases/latest) · [Quick start](https://github.com/GridloomHQ/tayriva/blob/main/docs/INSTALL.md)
+[**Download Tayriva for Windows or Linux**](https://github.com/TayrivaHQ/tayriva/releases/latest) · [Quick start](https://github.com/TayrivaHQ/tayriva/blob/main/docs/INSTALL.md)
 
 Existing `.gridloom` workbooks, download filenames, and CLI commands keep their names.
 
@@ -14,7 +14,7 @@ Existing `.gridloom` workbooks, download filenames, and CLI commands keep their 
 
 Tayriva's live SQLite tables don't stop at [Excel's 1,048,576-row worksheet limit](https://support.microsoft.com/en-us/excel/excel-specifications-and-limits). Tayriva fetches the rows around your view instead of loading the full table. Filter and sort in SQL, then jump to the rows you need.
 
-**First invoice to invoice 10,000,000 in 141 ms**, including rendering, in one local test on a synthetic SQLite dataset. [See how it was measured.](https://github.com/GridloomHQ/tayriva/blob/main/docs/WORKBOOKS.md#live-table-performance-and-limits)
+**First invoice to invoice 10,000,000 in 141 ms**, including rendering, in one local test on a synthetic SQLite dataset. [See how it was measured.](https://github.com/TayrivaHQ/tayriva/blob/main/docs/WORKBOOKS.md#live-table-performance-and-limits)
 
 ![Tayriva showing a live SQLite invoice register with invoice 10,000,000 selected and the column headings frozen at the top.](docs/images/live-sql-10m.webp)
 
@@ -26,16 +26,16 @@ Pick a result and open **Review → Explain & Review**. Follow its inputs or see
 
 ## Give your agent a way to check its own work
 
-The bundled headless MCP server lets an agent write a formula, compare the exact result with an independent calculation, trace and fix a mismatch, and record an AI-assisted review you can open in Tayriva. [Try the agent self-review walkthrough.](https://github.com/GridloomHQ/tayriva/blob/main/docs/MCP.md)
+The bundled headless MCP server lets an agent write a formula, compare the exact result with an independent calculation, trace and fix a mismatch, and record an AI-assisted review you can open in Tayriva. [Try the agent self-review walkthrough.](https://github.com/TayrivaHQ/tayriva/blob/main/docs/MCP.md)
 
 ## Try it with a real workbook
 
-Start with [**The Total Still Ties**](https://github.com/GridloomHQ/tayriva-demos/blob/main/workbooks/the-total-still-ties.gridloom). The control total is **$100.25**, but rent and software are swapped. Trace the amounts with **Explain & Review**, fix the two mappings, then record a review on the total. Move $1 from rent to software in the ledger: the total still ties, but the review goes stale because its inputs changed.
+Start with [**The Total Still Ties**](https://github.com/TayrivaHQ/tayriva-demos/blob/main/workbooks/the-total-still-ties.gridloom). The control total is **$100.25**, but rent and software are swapped. Trace the amounts with **Explain & Review**, fix the two mappings, then record a review on the total. Move $1 from rent to software in the ledger: the total still ties, but the review goes stale because its inputs changed.
 
-- [**Alphabet DCF**](https://github.com/GridloomHQ/tayriva-demos/blob/main/workbooks/alphabet-fcff.gridloom): Trace an illustrative per-share value back through cash flows, the cost of capital, and SEC-filed figures.
-- [**U.S. Treasury curve**](https://github.com/GridloomHQ/tayriva-demos/blob/main/derivatives/treasury-snapshot.gridloom): Turn a dated set of public Treasury yields into modeled forward rates and a trade value.
-- [**OIS swap**](https://github.com/GridloomHQ/tayriva-demos/blob/main/derivatives/ois-swap.gridloom): Trace synthetic swap quotes through the discount curve to the price and its sensitivity to a rate change.
+- [**Alphabet DCF**](https://github.com/TayrivaHQ/tayriva-demos/blob/main/workbooks/alphabet-fcff.gridloom): Trace an illustrative per-share value back through cash flows, the cost of capital, and SEC-filed figures.
+- [**U.S. Treasury curve**](https://github.com/TayrivaHQ/tayriva-demos/blob/main/derivatives/treasury-snapshot.gridloom): Turn a dated set of public Treasury yields into modeled forward rates and a trade value.
+- [**OIS swap**](https://github.com/TayrivaHQ/tayriva-demos/blob/main/derivatives/ois-swap.gridloom): Trace synthetic swap quotes through the discount curve to the price and its sensitivity to a rate change.
 
-[Download the workbooks and follow the walkthroughs](https://github.com/GridloomHQ/tayriva-demos). Open any of them in Tayriva using **File → Open**.
+[Download the workbooks and follow the walkthroughs](https://github.com/TayrivaHQ/tayriva-demos). Open any of them in Tayriva using **File → Open**.
 
-[Workbook guide](https://github.com/GridloomHQ/tayriva/blob/main/docs/WORKBOOKS.md) · [Build from source](https://github.com/GridloomHQ/tayriva/blob/main/docs/DEVELOPMENT.md) · [License](LICENSE)
+[Workbook guide](https://github.com/TayrivaHQ/tayriva/blob/main/docs/WORKBOOKS.md) · [Build from source](https://github.com/TayrivaHQ/tayriva/blob/main/docs/DEVELOPMENT.md) · [License](LICENSE)

@@ -1,6 +1,6 @@
 # Install Tayriva
 
-Choose a Windows or Linux x86-64 package and download the accompanying `SHA256SUMS` from the [latest release](https://github.com/GridloomHQ/tayriva/releases/latest).
+Choose a Windows or Linux x86-64 package and download the accompanying `SHA256SUMS` from the [latest release](https://github.com/TayrivaHQ/tayriva/releases/latest).
 
 ## Windows
 
