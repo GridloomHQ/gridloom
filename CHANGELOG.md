@@ -1,3 +1,9 @@
+# 0.15.0
+
+- Calculate linked SQLite rows using a worksheet template with **Data → Run formula batch**. Input rows are not modified; the destination result snapshot is replaced in one transaction.
+- Use exact-decimal arithmetic, comparisons, IF and exact VLOOKUP against worksheet rule tables. An invalid row or rule aborts the batch and preserves prior results.
+- See [worksheet formula batches](docs/worksheet-formula-batches.md) for setup, supported formulas and write-back behavior.
+
 # 0.14.0
 
 - Tayriva-branded Windows and Linux packages and launchers.

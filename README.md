@@ -6,7 +6,7 @@ Tayriva (formerly Gridloom) is a local-first spreadsheet for financial models an
 
 [Website](https://tayriva.lhemerly.chatgpt.site/) · [**Download Tayriva for Windows or Linux**](https://github.com/TayrivaHQ/tayriva/releases/latest) · [Quick start](https://github.com/TayrivaHQ/tayriva/blob/main/docs/INSTALL.md)
 
-Tayriva 0.14 uses **`.tay`** workbooks. Earlier Gridloom files are not supported, even if renamed.
+Tayriva uses **`.tay`** workbooks. Earlier Gridloom files are not supported, even if renamed.
 
 ## 10 million rows. No million-row wall.
 
@@ -19,6 +19,10 @@ Tayriva's live SQLite tables don't stop at [Excel's 1,048,576-row worksheet limi
 ## 648× faster than Receita Federal’s own calculator
 
 In a matched benchmark, Tayriva’s worksheet engine calculated and saved **10 million invoices in 34.30 seconds**. Brazil’s official Java reference took **6 hours, 10 minutes, 28 seconds**. All 10 million results matched to the cent. The test used a development build, one CPU core, and four synthetic CBS/IBS scenarios. [See the benchmark and method](https://github.com/TayrivaHQ/tayriva-demos/blob/main/receita/benchmark/matched-10m.md).
+
+## Run one worksheet calculation across a SQLite table
+
+Set up a worksheet template, then use **Data → Run formula batch** to calculate each input row and write back an auditable result snapshot. The batch never edits the source table. [Set up a formula batch](docs/worksheet-formula-batches.md).
 
 ## Audit the number, not just the formula
 
