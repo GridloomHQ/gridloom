@@ -22,7 +22,7 @@ In a matched benchmark, Tayriva’s worksheet engine calculated and saved **10 m
 
 ## Run one worksheet calculation across a SQLite table
 
-Set up a worksheet template, then use **Data → Run formula batch** to calculate each input row and write back an auditable result snapshot. The batch never edits the source table. [Set up a formula batch](docs/worksheet-formula-batches.md).
+Set up a worksheet template, then use **Data → Run formula batch** to calculate each input row and write back an auditable result snapshot. The batch never edits the source table. [Set up a formula batch](https://github.com/TayrivaHQ/tayriva/blob/v0.15.0/docs/worksheet-formula-batches.md).
 
 ## Audit the number, not just the formula
 
