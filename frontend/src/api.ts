@@ -65,7 +65,17 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   } finally {if(changing){pendingMutations--;mutationListeners.forEach(listener=>listener());}}
 }
 
+export interface FormulaBatchPlan {
+  connection:string; source:string; destination:string; key:string;
+  inputs:string[]; outputs:string[]; revision:string;
+}
+export interface FormulaBatchReport {
+  rows:number; elapsed_seconds:number; read_seconds:number; calculate_seconds:number; write_seconds:number;
+}
+
 export const api = {
+  inspectFormulaBatch: (sheet_name:string) => fetchJson<FormulaBatchPlan>(`/api/formula-batch?${new URLSearchParams({sheet_name})}`),
+  runFormulaBatch: (sheet_name:string,expected_revision:string) => fetchJson<FormulaBatchReport>('/api/formula-batch',{method:'POST',body:JSON.stringify({sheet_name,expected_revision})}),
   jumpCell: (sheet_name:string, row:number, col:number, direction:JumpDirection, signal:AbortSignal) =>
     fetchJson<CellCoord>(`/api/cells/jump?${new URLSearchParams({sheet_name,row:String(row),col:String(col),direction})}`, {signal,cache:'no-store'}),
   setShowFormulas:(sheet_name:string,show_formulas:boolean)=>fetchJson('/api/sheets/show-formulas',{method:'POST',body:JSON.stringify({sheet_name,show_formulas})}),

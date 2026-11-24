@@ -8,7 +8,7 @@ export type CellValue =
 
 export interface WorkbookSummary {
   active_sheet: string;
-  sheets: { name: string; tables: WorksheetTable[]; column_widths?: Record<number,number>; freeze_top_row?:boolean; freeze_first_column?:boolean; frozen_rows?:number; frozen_columns?:number; show_formulas?:boolean }[];
+  sheets: { name: string; tables: WorksheetTable[]; column_widths?: Record<number,number>; freeze_top_row?:boolean; freeze_first_column?:boolean; frozen_rows?:number; frozen_columns?:number; show_formulas?:boolean; formula_batch?:boolean }[];
   connections: string[];
   sources: string[];
   staged_patches_count: number;

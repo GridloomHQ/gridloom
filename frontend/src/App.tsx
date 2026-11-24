@@ -86,6 +86,7 @@ export const App: React.FC = () => {
   const [storedViewport, setViewport] = useState<ViewportResponse | null>(null);
   const viewport = storedViewport?.sheet_name === sheetName ? storedViewport : null;
   const [stagedCount, setStagedCount] = useState(0);
+  const [formulaBatchSheets,setFormulaBatchSheets]=useState<string[]>([]);
   const [sheetWidths,setSheetWidths]=useState<Record<string,Record<number,number>>>({});
   const [sheetShowFormulas,setSheetShowFormulas]=useState<Record<string,boolean>>({});
   const showFormulas=sheetShowFormulas[sheetName]??false;
@@ -149,6 +150,7 @@ export const App: React.FC = () => {
         setFilePath(wb.file_path);
         setSheetName(wb.active_sheet);
         setSheets(wb.sheets.map(s => s.name));
+        setFormulaBatchSheets(wb.sheets.filter(s=>s.formula_batch).map(s=>s.name));
         setSheetShowFormulas(Object.fromEntries(wb.sheets.map(s=>[s.name,s.show_formulas??false])));
         setSheetFreeze(Object.fromEntries(wb.sheets.map(s=>[s.name,{rows:s.frozen_rows??Number(!!s.freeze_top_row),columns:s.frozen_columns??Number(!!s.freeze_first_column)}])));
         setSheetWidths(Object.fromEntries(wb.sheets.map(s=>[s.name,s.column_widths??{}])));
@@ -384,6 +386,22 @@ export const App: React.FC = () => {
       await fetchViewportData();
       setStatusMsg(label);
     } catch(error:any){setStatusMsg(`Error: ${error.message}`);}
+    finally{mutationLock.current=false;setBusy(false);}
+  };
+  const runFormulaBatch = async () => {
+    if(mutationLock.current||gridDraft||formulaDraft||getPendingMutations()>0)return;
+    mutationLock.current=true;setBusy(true);
+    try {
+      const plan=await api.inspectFormulaBatch(sheetName);
+      if(!window.confirm(`Calculate every row in "${plan.source}" using this worksheet's formulas? This will replace every row in "${plan.destination}" in connection "${plan.connection}". The input table is not changed. Database writes cannot be undone from the worksheet.`))return;
+      setStatusMsg('Running worksheet formula batch…');
+      const report=await api.runFormulaBatch(sheetName,plan.revision);
+      const n=(x:number)=>x.toFixed(2);
+      setStatusMsg(`${report.rows.toLocaleString()} rows committed in ${n(report.elapsed_seconds)} s (calculate ${n(report.calculate_seconds)} s, read ${n(report.read_seconds)} s, write ${n(report.write_seconds)} s)`);
+      invalidateViewport();
+      await refreshMetadata();
+      await fetchViewportData();
+    } catch(error:any){setStatusMsg(`Formula batch: ${error.message}`);}
     finally{mutationLock.current=false;setBusy(false);}
   };
   const insertSelectedRows = () => {
@@ -670,6 +688,8 @@ export const App: React.FC = () => {
 <button disabled={busy||apiPending>0||gridDraft||formulaDraft||!selectedCellLoaded} onClick={insertSelectedRows} className={worksheetCommandClass} title="Insert one blank row per selected row. Clears Undo/Redo.">Insert rows above</button>
         </>}
         dataExtras={<>
+        {formulaBatchSheets.includes(sheetName)&&<button type="button" className={worksheetCommandClass} disabled={busy||apiPending>0||gridDraft||formulaDraft}
+          onClick={()=>void runFormulaBatch()}>Run formula batch</button>}
 <button disabled={busy||apiPending>0||gridDraft||formulaDraft} onMouseDown={e=>{if(gridDraft||formulaDraft)e.preventDefault();}} onClick={()=>setSortFilterRange(selection)} className={worksheetCommandClass}>Sort &amp; filter</button>
         <button disabled={busy} onClick={()=>{setLedgerTarget(undefined);setIsLedgerOpen(true);}} className={worksheetCommandClass}>SQLite ledger</button>
         <button disabled={busy||!selectedCellLoaded||gridDraft||formulaDraft} onClick={()=>{setLedgerTarget({sheet_name:sheetName,row:selectedRow,col:selectedCol});setIsLedgerOpen(true);}} className={worksheetCommandClass}>Trace balance</button>

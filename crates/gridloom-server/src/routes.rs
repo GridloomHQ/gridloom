@@ -106,6 +106,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/writeback/review", get(review_writeback))
         .route("/api/writeback/apply", post(apply_writeback))
         .route("/api/audit", get(list_audit_log))
+        .route("/api/formula-batch", get(crate::formula_batch::inspect).post(crate::formula_batch::run))
         // Pivots & Charts
         .route("/api/pivots", get(list_pivots).post(save_pivot))
         .route("/api/pivots/{name}/data", get(get_pivot_data))
@@ -140,6 +141,7 @@ struct SheetSummary {
     frozen_rows: u32,
     frozen_columns: u32,
     tables: Vec<gridloom_core::table::WorksheetTable>,
+    formula_batch: bool,
 }
 
 #[derive(Serialize)]
@@ -168,6 +170,7 @@ async fn get_workbook_summary(State(state): State<AppState>) -> impl IntoRespons
                 frozen_rows: s.frozen_row_count(),
                 frozen_columns: s.frozen_column_count(),
                 tables: s.tables.values().cloned().collect(),
+                formula_batch: gridloom_core::formula_batch::marked(s),
             })
             .collect(),
         connections: wb.connections.keys().cloned().collect(),

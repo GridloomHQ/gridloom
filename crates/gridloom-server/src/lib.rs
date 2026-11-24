@@ -1,4 +1,5 @@
 pub mod benchmark;
+mod formula_batch;
 mod ledger;
 mod range_view;
 mod recovery;
