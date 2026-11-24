@@ -46,7 +46,9 @@ try {
  await page.getByRole('tab',{name:'File',exact:true}).click();await page.getByRole('button',{name:'New',exact:true}).click();await replacement.getByRole('button',{name:'Save and continue',exact:true}).click();await page.getByText('Created new workbook',{exact:true}).waitFor();await idle();assert.equal(await cell('A1').innerText(),'');
  // No known path in new workbook: canceling Save aborts replacement.
  await page.getByRole('tab',{name:'File',exact:true}).click();await page.getByRole('button',{name:'Open',exact:true}).click();page.once('dialog',d=>d.dismiss());await replacement.getByRole('button',{name:'Save and continue',exact:true}).click();assert.equal(await replacement.count(),1);
- page.once('dialog',d=>d.accept(second));await replacement.getByRole('button',{name:'Discard and continue',exact:true}).click();await page.getByText(`Opened workbook from ${second}`,{exact:true}).waitFor();await idle();assert.equal(await cell('A1').innerText(),'12');
+ page.once('dialog',d=>d.accept(second));await replacement.getByRole('button',{name:'Discard and continue',exact:true}).click();await page.getByText(`Opened workbook from ${second}`,{exact:true}).waitFor();
+ // The success status can render before the replacement viewport arrives.
+ await cell('A1').filter({hasText:/^12$/}).waitFor();await idle();assert.equal(await cell('A1').innerText(),'12');
 
  // A real second backend saves another cell to the same file. The main UI
  // must keep its in-memory edit and offer a safe copy, not replay the write.
