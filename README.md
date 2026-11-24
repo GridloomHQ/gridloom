@@ -16,6 +16,10 @@ Tayriva's live SQLite tables don't stop at [Excel's 1,048,576-row worksheet limi
 
 ![Tayriva showing a live SQLite invoice register with invoice 10,000,000 selected and the column headings frozen at the top.](docs/images/live-sql-10m.webp)
 
+## 648× faster than Receita Federal’s own calculator
+
+In a matched benchmark, Tayriva’s worksheet engine calculated and saved **10 million invoices in 34.30 seconds**. Brazil’s official Java reference took **6 hours, 10 minutes, 28 seconds**. All 10 million results matched to the cent. The test used a development build, one CPU core, and four synthetic CBS/IBS scenarios. [See the benchmark and method](https://github.com/TayrivaHQ/tayriva-demos/blob/main/receita/benchmark/matched-10m.md).
+
 ## Audit the number, not just the formula
 
 Pick a result and open **Review → Explain & Review**. Follow its inputs or see which formulas use it. Record what you checked, attach supporting evidence, or raise a question without losing the calculation it came from. If the calculation or a traced input changes, Tayriva marks the review stale, even if the displayed total stays the same.
