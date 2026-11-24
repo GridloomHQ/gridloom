@@ -157,3 +157,98 @@ async fn same_live_formula_moves_review_and_committed_results_and_rejects_partia
     let (invalid, _) = call(&app, "GET", PLAN, Value::Null).await;
     assert_eq!(invalid, StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn literal_rule_edits_invalidate_batch_preview_and_unknown_keys_roll_back() {
+    let temp = tempfile::tempdir().unwrap();
+    let file = temp.path().join("rules.sqlite");
+    let sql = Connection::open(&file).unwrap();
+    sql.execute_batch(
+        "CREATE TABLE source(id INTEGER PRIMARY KEY, units INTEGER, rule INTEGER) STRICT;
+        INSERT INTO source VALUES(1,10,7),(2,30,9);
+        CREATE TABLE output(id INTEGER PRIMARY KEY, total INTEGER) STRICT;",
+    )
+    .unwrap();
+    let mut wb = Workbook::new();
+    wb.sheets.insert(
+        "Rules".into(),
+        gridloom_core::workbook::Sheet::new("Rules".into()),
+    );
+    wb.add_sqlite_connection("data", &file).unwrap();
+    for (sheet, r, c, raw) in [
+        ("Sheet1", 0, 0, "TAYRIVA FORMULA BATCH 1"),
+        ("Sheet1", 1, 0, "data"),
+        ("Sheet1", 1, 1, "source"),
+        ("Sheet1", 1, 2, "output"),
+        ("Sheet1", 1, 3, "id"),
+        ("Sheet1", 4, 0, "in:units"),
+        ("Sheet1", 4, 1, "in:rule"),
+        ("Sheet1", 4, 2, "calc:reduction"),
+        ("Sheet1", 4, 3, "out:total"),
+        ("Sheet1", 5, 0, "10"),
+        ("Sheet1", 5, 1, "7"),
+        ("Sheet1", 5, 2, "=VLOOKUP(B6,Rules!A1:B2,2,FALSE)"),
+        ("Sheet1", 5, 3, "=IF(C6=100,0,ROUND(A6*(100-C6)/100,0))"),
+        ("Rules", 0, 0, "7"),
+        ("Rules", 0, 1, "50"),
+        ("Rules", 1, 0, "9"),
+        ("Rules", 1, 1, "100"),
+    ] {
+        wb.set_cell(sheet, CellCoord::new(r, c), raw.into())
+            .unwrap();
+    }
+    let app = create_router(AppState::new(wb));
+    let result = || {
+        sql.prepare("SELECT total FROM output ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get::<_, i64>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    };
+    let revision = inspect(&app).await;
+    run(&app, &revision, StatusCode::OK).await;
+    assert_eq!(result(), [5, 0]);
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/api/cells/set",
+        json!({"sheet_name":"Rules","row":0,"col":1,"raw_input":"10"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = call(
+        &app,
+        "POST",
+        "/api/cells/explain",
+        json!({"sheet_name":"Sheet1","row":5,"col":3}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("VLOOKUP") && body.contains("Rules"), "{body}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&body).unwrap()["value"]["value"],
+        "9"
+    );
+    run(&app, &revision, StatusCode::CONFLICT).await;
+    let revised = inspect(&app).await;
+    run(&app, &revised, StatusCode::OK).await;
+    assert_eq!(result(), [9, 0]);
+    sql.execute("UPDATE source SET rule=10 WHERE id=2", [])
+        .unwrap();
+    assert!(run(&app, &revised, StatusCode::BAD_REQUEST)
+        .await
+        .contains("Row key 2"));
+    assert_eq!(result(), [9, 0]);
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/api/cells/set",
+        json!({"sheet_name":"Rules","row":1,"col":0,"raw_input":"7"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = call(&app, "GET", PLAN, Value::Null).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body.contains("Duplicate batch rule key"), "{body}");
+}

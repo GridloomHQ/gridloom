@@ -6,6 +6,7 @@ use crate::db::EngineKind;
 use crate::evaluator::evaluate_expr;
 use crate::functions::EvaluationContext;
 use crate::parser::parse_formula;
+use crate::workbook::WorkbookEvalContext;
 use crate::{CellCoord, CellError, CellRange, Value, Workbook};
 use rusqlite::{params_from_iter, Connection, OpenFlags, TransactionBehavior};
 use serde::Serialize;
@@ -144,8 +145,14 @@ impl FormulaBatch {
                             "Expected a worksheet formula (at most 512 bytes) for {name}."
                         )));
                     }
-                    let expr = parse_formula(raw)?;
-                    validate(&expr, col, 0)?;
+                    let mut expr = parse_formula(raw)?;
+                    BatchCompiler {
+                        workbook,
+                        template_sheet: sheet_name,
+                        column: col,
+                        revision: &mut hasher,
+                    }
+                    .compile_expr(&mut expr, 0)?;
                     operations.push((idx, expr));
                     if tag == "out" {
                         outputs.push(name.to_owned());
@@ -294,9 +301,20 @@ impl FormulaBatch {
                 read += tick.elapsed();
                 let tick = Instant::now();
                 for (idx, expr) in &self.operations {
-                    context.0[*idx] = evaluate_expr(expr, &context).map_err(|e| {
-                        err(format!("Row key {id}, template column {}: {e}", idx + 1))
-                    })?;
+                    let value = evaluate_expr(expr, &context)
+                        .and_then(|value| match value {
+                            Value::Error(error) => Err(error),
+                            _ => Ok(value),
+                        })
+                        .map_err(|e| {
+                            err(format!(
+                                "Row key {id}, template column {}: {} ({})",
+                                idx + 1,
+                                e,
+                                e.message()
+                            ))
+                        })?;
+                    context.0[*idx] = value;
                 }
                 for (i, slot) in self.output_slots.iter().enumerate() {
                     let v = &context.0[*slot];
@@ -336,21 +354,103 @@ impl FormulaBatch {
     }
 }
 
-fn validate(expr: &Expr, column: u32, depth: u32) -> Result<(), CellError> {
-    if depth > 64 {
-        return Err(err("Batch formula is too deeply nested."));
+struct BatchCompiler<'a> {
+    workbook: &'a Workbook,
+    template_sheet: &'a str,
+    column: u32,
+    revision: &'a mut DefaultHasher,
+}
+
+impl BatchCompiler<'_> {
+    fn compile_expr(&mut self, expr: &mut Expr, depth: u32) -> Result<(), CellError> {
+        if depth > 64 {
+            return Err(err("Batch formula is too deeply nested."));
+        }
+        match expr {
+            Expr::Literal(Value::Integer(_) | Value::Decimal(_) | Value::Boolean(_)) => Ok(()),
+            Expr::CellRef(c) if c.row == TEMPLATE && c.col < self.column => Ok(()),
+            Expr::Unary { expr, .. } => self.compile_expr(expr,depth+1),
+            Expr::Binary {op: BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div |
+                BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq,left,right} => {
+                self.compile_expr(left,depth+1)?; self.compile_expr(right,depth+1)
+            }
+            Expr::FunctionCall {name,args} if name.eq_ignore_ascii_case("ROUND") && args.len()==2 ||
+                name.eq_ignore_ascii_case("IF") && args.len()==3 => {
+                for a in args { self.compile_expr(a,depth+1)?; } Ok(())
+            }
+            Expr::FunctionCall { name, args } if name.eq_ignore_ascii_case("VLOOKUP") && args.len()==4 => {
+                if !matches!(args[3], Expr::Literal(Value::Boolean(false))) {
+                    return Err(err("Batch VLOOKUP requires an explicit FALSE exact match."));
+                }
+                self.compile_expr(&mut args[0],depth+1)?;
+                self.compile_rule_range(&mut args[1])?;
+                self.compile_expr(&mut args[2],depth+1)
+            }
+            _ => Err(err("Batch formulas support exact arithmetic, comparisons, ROUND, IF, exact VLOOKUP, and earlier template cells.")),
+        }
     }
-    match expr {
-        Expr::Literal(Value::Integer(_) | Value::Decimal(_)) => Ok(()),
-        Expr::CellRef(c) if c.row == TEMPLATE && c.col < column => Ok(()),
-        Expr::Unary { expr, .. } => validate(expr,column,depth+1),
-        Expr::Binary {op: BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div,left,right} => {
-            validate(left,column,depth+1)?; validate(right,column,depth+1)
+
+    fn compile_rule_range(&mut self, expr: &mut Expr) -> Result<(), CellError> {
+        let Expr::SheetRef {
+            sheet,
+            expr: range_expr,
+        } = expr
+        else {
+            return Err(err(
+                "Use an explicit range on a separate rule sheet for batch VLOOKUP.",
+            ));
+        };
+        let Expr::RangeRef(range) = **range_expr else {
+            return Err(err(
+                "Batch rule tables must be rectangular worksheet ranges.",
+            ));
+        };
+        if sheet == self.template_sheet
+            || range.end_row - range.start_row >= 32
+            || range.end_col - range.start_col >= 8
+        {
+            return Err(err("Batch rule ranges must be on a separate worksheet and at most 32 rows × 8 columns."));
         }
-        Expr::FunctionCall {name,args} if name.eq_ignore_ascii_case("ROUND") && args.len()==2 => {
-            for a in args { validate(a,column,depth+1)?; } Ok(())
+        let src = self.workbook.sheets.get(sheet).ok_or(CellError::Ref)?;
+        let ctx = WorkbookEvalContext {
+            workbook: self.workbook,
+            sheet_name: sheet,
+            current_coord: CellCoord::new(range.start_row, range.start_col),
+        };
+        let mut matrix = Vec::new();
+        let mut keys = HashSet::new();
+        (&sheet, range).hash(self.revision);
+        for r in range.start_row..=range.end_row {
+            let mut row = Vec::new();
+            for c in range.start_col..=range.end_col {
+                let coord = CellCoord::new(r, c);
+                let cell = src.get_cell(&coord).ok_or(CellError::Ref)?;
+                let val = ctx.get_cell_value(coord)?;
+                if cell.formula.is_some()
+                    || !matches!(val, Value::Integer(_) | Value::Decimal(_))
+                    || val != cell.evaluated_value
+                    || src.tables.values().any(|t| t.range.contains(coord))
+                    || src.spills.get_spill_at(&coord).is_some()
+                {
+                    return Err(err(format!(
+                        "Batch rule {sheet}!{} must be a literal numeric cell.",
+                        coord.to_a1()
+                    )));
+                }
+                if c == range.start_col {
+                    // Exact lookups must not silently pick the first of duplicate rules.
+                    let key = val.to_decimal()?.normalize();
+                    if !keys.insert(key) {
+                        return Err(err(format!("Duplicate batch rule key {key} in {sheet}.")));
+                    }
+                }
+                cell.raw_input.hash(self.revision);
+                row.push(val);
+            }
+            matrix.push(row);
         }
-        _ => Err(err("Batch formulas support exact arithmetic, ROUND, and earlier cells in the template row.")),
+        *expr = Expr::Literal(Value::Array(matrix));
+        Ok(())
     }
 }
 
