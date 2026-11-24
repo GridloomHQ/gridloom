@@ -1336,6 +1336,13 @@ impl Workbook {
             .get(connection_name)
             .ok_or_else(|| CellError::Sql(format!("Connection '{}' not found", connection_name)))?;
         let record = self.staged.apply_writeback(conn, connection_name)?;
+        self.invalidate_after_external_database_write(connection_name);
+        Ok(record)
+    }
+
+    /// Invalidate workbook state after a successful externally persisted write.
+    pub fn invalidate_after_external_database_write(&mut self, connection_name: &str) {
+        self.edit_history = Default::default();
         self.stale_sources.extend(
             self.named_sources
                 .values()
@@ -1359,7 +1366,6 @@ impl Workbook {
         for sheet in sheets {
             let _ = self.recalculate(&sheet);
         }
-        Ok(record)
     }
 
     /// Atomically save the opened workbook if its disk revision still matches,
