@@ -4,6 +4,12 @@ Choose a Windows or Linux x86-64 package and download the accompanying `SHA256SU
 
 ## Windows
 
+Download [Tayriva Setup for Windows x64](https://github.com/TayrivaHQ/tayriva/releases/latest/download/tayriva-windows-x86_64-setup.exe), open it, and then launch **Tayriva** from the Start menu. Setup installs for your Windows account without administrator permissions. Use **Settings → Apps → Installed apps** to uninstall. Setup and uninstall leave existing workbooks and recovery files alone.
+
+Setup is unsigned, so Windows may show a publisher warning. To check the download, compare the result of PowerShell's `Get-FileHash .\tayriva-windows-x86_64-setup.exe -Algorithm SHA256` with the [installer checksum](https://github.com/TayrivaHQ/tayriva/releases/latest/download/tayriva-windows-x86_64-setup.exe.sha256).
+
+### Portable ZIP
+
 To verify the Windows desktop ZIP, run `Get-FileHash <zip-file> -Algorithm SHA256` in PowerShell (replace `<zip-file>` with the actual name) and compare it with the ZIP entry in `SHA256SUMS`. Extract the entire
 ZIP into a writable folder, then open **tayriva.exe**. Keep the executables,
 `duckdb.dll` and `frontend` directory together.
@@ -12,7 +18,7 @@ The desktop uses the [Microsoft Edge WebView2 Evergreen Runtime](https://develop
 included with Windows 11. If your system is missing it, install it separately
 from Microsoft. If Windows reports missing MSVC runtime DLLs, install the
 [official Visual C++ x64 Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist).
-The ZIP is portable and unsigned; it does not install or update either Microsoft runtime.
+Neither Setup nor the portable ZIP installs or updates either Microsoft runtime. The ZIP is also unsigned.
 The bundled headless `tayriva-mcp.exe` does not need WebView2.
 Windows ARM64 is not included. Use an NTFS-backed workbook folder for guarded saves.
 
