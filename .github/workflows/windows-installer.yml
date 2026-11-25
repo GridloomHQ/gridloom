@@ -1,0 +1,75 @@
+name: Windows installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published Tayriva version (for example, 0.15.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAYRIVA_VERSION: ${{ inputs.version }}
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify the released Windows payload and acquire the pinned compiler
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:TAYRIVA_VERSION -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') { throw 'Expected a numeric major.minor.patch' }
+          $Tag = "v$env:TAYRIVA_VERSION"
+          $Name = "tayriva-$env:TAYRIVA_VERSION-windows-x86_64-desktop"
+          $Work = Join-Path $env:RUNNER_TEMP "tayriva installer"
+          $Artifacts = Join-Path $Work artifacts
+          New-Item -Type Directory -Force $Artifacts | Out-Null
+          $Release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$Tag" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $Release.draft) { throw 'Expected a published release' }
+          $Asset = @($Release.assets | Where-Object { $_.name -ceq "$Name.zip" -and $_.state -eq 'uploaded' })
+          if ($Asset.Count -ne 1 -or $Asset[0].digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'No unique checksummed Windows release payload' }
+          $Zip = Join-Path $Work "$Name.zip"
+          curl.exe --fail --location --retry 3 $Asset[0].browser_download_url --output $Zip
+          if ($LASTEXITCODE -ne 0 -or (Get-FileHash $Zip -Algorithm SHA256).Hash -ine $Asset[0].digest.Substring(7)) { throw 'Published Windows payload SHA-256 did not match' }
+          $Payload = Join-Path $Work payload
+          Expand-Archive -LiteralPath $Zip -DestinationPath $Payload
+          $PayloadRoot = Join-Path $Payload $Name
+          $Meta = Get-Content (Join-Path $PayloadRoot "docs/build-info.json") -Raw | ConvertFrom-Json
+          $Commit = gh api "repos/$env:GITHUB_REPOSITORY/commits/$Tag" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $Meta.version -cne $env:TAYRIVA_VERSION -or $Meta.architecture -cne 'x86_64' -or $Meta.source_dirty -ne $false -or $Meta.source_commit -cne $Commit.sha -or $Meta.source_tree -cne $Commit.commit.tree.sha) { throw 'Payload source identity does not match the release tag' }
+          $Inno = Join-Path $Work innosetup-6.7.4.exe
+          curl.exe --fail --location --retry 3 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe' --output $Inno
+          if ($LASTEXITCODE -ne 0 -or (Get-FileHash $Inno -Algorithm SHA256).Hash -ine 'a549929319f9120716677c685535ca4671e4b937b5fdc87e2585f32d8eb30e8c') { throw 'Inno Setup download did not match the pinned SHA-256' }
+          $Compiler = Join-Path $Work compiler
+          $Process = Start-Process -FilePath $Inno -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER', "/DIR=`"$Compiler`"") -Wait -PassThru
+          if ($Process.ExitCode -ne 0 -or !(Test-Path (Join-Path $Compiler ISCC.exe) -PathType Leaf)) { throw "Unable to install Inno Setup: $($Process.ExitCode)" }
+          @("INSTALLER_ARTIFACT_DIR=$Artifacts", "INSTALLER_PAYLOAD=$PayloadRoot", "INSTALLER_COMPILER=$Compiler", "INSTALLER_PAYLOAD_SHA=$($Meta.source_commit)") | Add-Content -Path $env:GITHUB_ENV
+      - name: Build unsigned Windows x64 Setup and verify install, launch and uninstall
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & (Join-Path $env:INSTALLER_COMPILER ISCC.exe) "/O$env:INSTALLER_ARTIFACT_DIR" "/DTayrivaVersion=$env:TAYRIVA_VERSION" "/DPayload=$env:INSTALLER_PAYLOAD" 'scripts/tayriva-windows.iss'
+          if ($LASTEXITCODE -ne 0) { throw 'Setup compilation failed' }
+          $Setup = Join-Path $env:INSTALLER_ARTIFACT_DIR tayriva-windows-x86_64-setup.exe
+          python -u scripts/windows-installer-smoke.py $Setup $env:INSTALLER_PAYLOAD (Join-Path $env:INSTALLER_ARTIFACT_DIR logs) 2>&1 | Tee-Object (Join-Path $env:INSTALLER_ARTIFACT_DIR smoke.log)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $Hash = (Get-FileHash $Setup -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$Hash  tayriva-windows-x86_64-setup.exe" | Set-Content -Encoding ascii "$Setup.sha256"
+          @{version=$env:TAYRIVA_VERSION; package_commit=$env:INSTALLER_PAYLOAD_SHA; workflow_commit=$env:GITHUB_SHA; sha256=$Hash} | ConvertTo-Json | Set-Content (Join-Path $env:INSTALLER_ARTIFACT_DIR installer-build.json)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tayriva-windows-installer-${{ inputs.version }}
+          if-no-files-found: error
+          path: ${{ env.INSTALLER_ARTIFACT_DIR }}/
